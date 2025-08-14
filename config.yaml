@@ -1,0 +1,81 @@
+# f1pred configuration
+# Linted and valid YAML.
+
+app:
+  model_version: "v1.1"
+  random_seed: 42
+  timezone: "UTC"
+  live_refresh_seconds: 600
+  open_browser_for_html: true
+
+paths:
+  cache_dir: ".cache/f1pred"
+  output_dir: "output"
+  reports_dir: "output/reports"
+  predictions_csv: "output/predictions.csv"
+  backtest_metrics_csv: "output/backtest_metrics.csv"
+  backtest_report: "output/reports/backtest_summary.html"
+  fastf1_cache: ".cache/fastf1"
+
+data_sources:
+  jolpica:
+    base_url: "https://api.jolpi.ca/ergast/f1"
+    timeout_seconds: 30
+    rate_limit_sleep: 0.5
+    enabled: true
+  openf1:
+    base_url: "https://api.openf1.org/v1"
+    timeout_seconds: 30
+    enabled: true  # historical only
+  fastf1:
+    enabled: true
+  open_meteo:
+    forecast_url: "https://api.open-meteo.com/v1/forecast"
+    historical_weather_url: "https://archive-api.open-meteo.com/v1/era5"
+    historical_forecast_url: "https://historical-forecast-api.open-meteo.com/v1/forecast"
+    elevation_url: "https://api.open-meteo.com/v1/elevation"
+    geocoding_url: "https://geocoding-api.open-meteo.com/v1/search"
+    enabled: true
+    # Unit choices for Open-Meteo (see docs for acceptable values)
+    temperature_unit: "celsius"        # celsius | fahrenheit
+    windspeed_unit: "kmh"              # kmh | ms | mph | kn
+    precipitation_unit: "mm"           # mm | inch
+
+caching:
+  requests_cache:
+    backend: "sqlite"
+    expire_after:
+      forecast_hours: 6
+      historical_days: 30
+    allowable_codes: [200, 203, 206, 300, 301, 308]
+    stale_if_error: true
+
+modelling:
+  recency_half_life_days:
+    base: 365
+    weather: 180
+    team: 270
+  monte_carlo:
+    draws: 5000
+  features:
+    include_openf1_tyres: true
+    include_openf1_laps: true
+    include_fastf1_fill: true
+    include_circuit_elevation: true
+    include_weather_ensemble: true
+  targets:
+    session_types: ["qualifying", "race", "sprint_qualifying", "sprint"]
+
+backtesting:
+  enabled: true
+  seasons: "auto"
+  metrics: ["spearman", "kendall", "accuracy_top3", "brier_pairwise", "crps"]
+
+output:
+  html_theme: "light"
+  show_feature_contributions: true
+  show_uncertainty: true
+  live_change_symbols: true
+  color_up: "#0a7f2e"
+  color_down: "#c1121f"
+  color_neutral: "#6c757d"

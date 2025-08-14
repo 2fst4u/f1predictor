@@ -1,0 +1,57 @@
+# --- Python bytecode/cache ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Project caches and generated data (do not commit) ---
+.cache/
+.cache/f1pred/
+.cache/fastf1/
+output/
+output/reports/
+output/predictions.csv
+output/backtest_metrics.csv
+logs/
+tmp/
+*.log
+
+# --- Test/coverage tooling ---
+.pytest_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
+
+# --- Packaging / build artifacts ---
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# --- Editor/OS files ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Environment/secrets (if present) ---
+.env
+.env.*
+*.pem
+*.key
+*.crt
