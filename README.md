@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-# f1predictor
-A tool for predicting the outcome of F1 sessions
-=======
 F1 Prediction Application
 
 Overview
@@ -173,4 +169,3 @@ Extending
 
 Support
 If you run into issues with endpoints or data availability, verify the base URLs in config.yaml and re-run with a clean cache (delete the .cache directory).
->>>>>>> af0ba6c (Initial commit)
