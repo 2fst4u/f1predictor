@@ -11,7 +11,7 @@ from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.openf1 import OpenF1Client
 from .data.fastf1_backend import get_event, get_session_times
-from .roster import derive_roster  # single source of truth for roster
+from .roster import derive_roster  # single source of truth
 
 logger = get_logger(__name__)
 
@@ -21,17 +21,14 @@ def exponential_weights(dates: List[datetime], ref_date: datetime, half_life_day
     return np.power(0.5, ages / max(1, half_life_days))
 
 
-def build_roster(jc: JolpicaClient, season: str, rnd: str) -> pd.DataFrame:
+def build_roster(jc: JolpicaClient, season: str, rnd: str, event_dt: Optional[datetime]) -> pd.DataFrame:
     """
-    Thin wrapper around derive_roster to keep Jolpica client as data-access only.
-    All derivation logic lives in f1pred/roster.py.
+    Single entry point for roster construction; calls derive_roster in roster.py.
     """
-    entries = derive_roster(jc, season, rnd, prefer_same_round_qualifying=True)
+    entries = derive_roster(jc, season, rnd, event_dt=event_dt, now_dt=datetime.now(timezone.utc))
     df = pd.DataFrame(entries)
     if not df.empty:
-        # human-readable name
-        def _mk(n, f): return f"{n or ''} {f or ''}".strip()
-        df["name"] = df.apply(lambda x: _mk(x.get("givenName"), x.get("familyName")), axis=1)
+        df["name"] = df.apply(lambda x: f"{(x.get('givenName') or '')} {(x.get('familyName') or '')}".strip(), axis=1)
     return df
 
 
@@ -51,7 +48,6 @@ def collect_historical_results(jc: JolpicaClient, season: int, end_before: datet
             circuit_loc = r.get("Circuit", {}).get("Location", {})
             lat = circuit_loc.get("lat")
             lon = circuit_loc.get("long")
-            # Race results
             results = jc.get_race_results(season_s, rnd)
             for res in results:
                 drv = res.get("Driver", {})
@@ -73,7 +69,6 @@ def collect_historical_results(jc: JolpicaClient, season: int, end_before: datet
                     "points": float(res.get("points", 0.0) or 0.0),
                     "fastestLap": (res.get("FastestLap") or {}).get("rank"),
                 })
-            # Qualifying (positions + times where available)
             qres = jc.get_qualifying_results(season_s, rnd)
             for res in qres:
                 drv = res.get("Driver", {})
@@ -95,7 +90,6 @@ def collect_historical_results(jc: JolpicaClient, season: int, end_before: datet
                     "q2": (res.get("Q2") or None),
                     "q3": (res.get("Q3") or None),
                 })
-            # Sprint if present
             sres = jc.get_sprint_results(season_s, rnd)
             for res in sres:
                 drv = res.get("Driver", {})
@@ -207,8 +201,8 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
         wdf = om.get_forecast(lat, lon, ref_date - timedelta(days=1), ref_date + timedelta(days=1))
     wagg = om.aggregate_for_session(wdf, start_dt, end_dt)
 
-    # Roster (single source of truth via derive_roster)
-    roster = build_roster(jc, str(season), str(rnd))
+    # Roster derived centrally (pass event start time for "near-event" logic)
+    roster = build_roster(jc, str(season), str(rnd), event_dt=start_dt)
 
     # Historical results up to ref_date
     hist = collect_historical_results(jc, season=season, end_before=ref_date + timedelta(seconds=1), lookback_years=75)
@@ -226,15 +220,11 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
     else:
         team_idx = pd.DataFrame(columns=["constructorId", "team_form_index"])
 
-    # Weather sensitivity placeholder features (neutral if insufficient data)
-    weather_idx = []
-    for d in roster.get("driverId", roster.get("driverId", pd.Series([]))).tolist() if isinstance(roster, pd.DataFrame) else roster:
-        if isinstance(roster, pd.DataFrame):
-            drv_id = d
-        else:
-            drv_id = d.get("driverId")
-        weather_idx.append({"driverId": drv_id, "wet_skill": 0.0, "cold_skill": 0.0, "wind_skill": 0.0, "pressure_skill": 0.0})
-    weather_df = pd.DataFrame(weather_idx)
+    # Weather sensitivity placeholder features
+    weather_df = pd.DataFrame({
+        "driverId": roster["driverId"] if not roster.empty else [],
+        "wet_skill": 0.0, "cold_skill": 0.0, "wind_skill": 0.0, "pressure_skill": 0.0
+    })
 
     # Merge features
     X = roster.merge(form, on="driverId", how="left").merge(team_idx, on="constructorId", how="left").merge(weather_df, on="driverId", how="left")

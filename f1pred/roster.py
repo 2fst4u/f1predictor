@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import List, Dict, Optional, Tuple
+from datetime import datetime, timezone
 
 from .util import get_logger
 from .data.jolpica import JolpicaClient
@@ -75,28 +76,37 @@ def derive_roster(
     jc: JolpicaClient,
     season: str,
     rnd: str,
-    prefer_same_round_qualifying: bool = True
+    event_dt: Optional[datetime] = None,
+    now_dt: Optional[datetime] = None
 ) -> List[Dict]:
     """
-    Derive event roster using one consistent logic:
-      1) If same-round qualifying exists, use it (best for same-weekend Saturday).
-      2) Else previous completed round in same season (race results first; else qualifying).
+    Derive event roster using one consistent, event-aware strategy:
+      1) If event is near (<= 3 days to go), prefer same-round qualifying results (best for Saturday).
+      2) Else previous completed round in same season (race > qualifying).
       3) Else season drivers mapped via standings (constructor inferred from standings).
-      4) Else latest completed round globally (prior seasons; race > qualifying).
+      4) Else latest completed round from prior seasons (race > qualifying).
 
     Returns a list of dicts with:
       driverId, code, givenName, familyName, permanentNumber, constructorId, constructorName
     """
-    # 1) Same-round qualifying (best when schedule is imminent)
-    if prefer_same_round_qualifying:
-        try:
-            q_cur = jc.get_qualifying_results(season, rnd)
-            if q_cur:
-                return _entries_from_results(q_cur)
-        except Exception:
-            pass
+    # Normalise times
+    if now_dt is None:
+        now_dt = datetime.now(timezone.utc)
+    if event_dt is not None and event_dt.tzinfo is None:
+        event_dt = event_dt.replace(tzinfo=timezone.utc)
 
-    # 2) Prior completed round in same season
+    # 1) If event is near (<= 3 days), try same-round qualifying results
+    if event_dt is not None:
+        days_to_event = (event_dt.date() - now_dt.date()).days
+        if days_to_event <= 3:
+            try:
+                q_cur = jc.get_qualifying_results(season, rnd)
+                if q_cur:
+                    return _entries_from_results(q_cur)
+            except Exception:
+                pass
+
+    # 2) Previous completed round within same season
     prev_rnd = _previous_completed_round_in_season(jc, season, rnd)
     if prev_rnd:
         try:
@@ -107,6 +117,18 @@ def derive_roster(
                 return _entries_from_results(res)
         except Exception as e:
             logger.info(f"derive_roster: failed prior round {season} R{prev_rnd}: {e}")
+    else:
+        # If no "previous" (e.g., season opener), try the latest completed round in this season
+        latest_in_season = _latest_completed_round_in_season(jc, season)
+        if latest_in_season:
+            try:
+                res = jc.get_race_results(season, latest_in_season)
+                if not res:
+                    res = jc.get_qualifying_results(season, latest_in_season)
+                if res:
+                    return _entries_from_results(res)
+            except Exception as e:
+                logger.info(f"derive_roster: failed latest round in season {season} R{latest_in_season}: {e}")
 
     # 3) Season drivers + standings-based constructor mapping
     try:
@@ -154,5 +176,4 @@ def derive_roster(
     except Exception as e:
         logger.info(f"derive_roster: global fallback failed from season {season}: {e}")
 
-    # If everything fails, return empty list; caller should handle gracefully
     return []
