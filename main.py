@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 F1 predictive app CLI.
 
 Quick start:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 import numpy as np
@@ -184,7 +184,22 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
 
     season_i, round_i, race_info = resolve_event(jc, season, rnd)
     event_title = f"{race_info.get('raceName')} {season_i} (Round {round_i})"
-    event_date = datetime.fromisoformat(race_info.get("date") + "T" + race_info.get("time", "00:00:00").replace("Z", "+00:00"))
+    # Build a timezone-aware (UTC) event_date robustly
+    date_str = race_info.get("date") or ""
+    time_str = race_info.get("time")
+    if time_str:
+        if time_str.endswith("Z"):
+            timespec = time_str.replace("Z", "+00:00")
+        else:
+            timespec = f"{time_str}+00:00"
+    else:
+        timespec = "00:00:00+00:00"
+    try:
+        event_date = datetime.fromisoformat(f"{date_str}T{timespec}")
+        if event_date.tzinfo is None:
+            event_date = event_date.replace(tzinfo=timezone.utc)
+    except Exception:
+        event_date = datetime.now(timezone.utc)
 
     sessions_out = []
     all_preds = []

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 import numpy as np
@@ -191,7 +191,11 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
     except Exception:
         pass
 
-    now = datetime.utcnow()
+    # Weather aggregation
+    # Choose archive vs forecast based on ref_date vs now (use timezone-aware UTC)
+    if ref_date.tzinfo is None:
+        ref_date = ref_date.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     if ref_date < now:
         wdf = om.get_historical_weather(lat, lon, ref_date - timedelta(days=1), ref_date + timedelta(days=1))
         if wdf.empty:
