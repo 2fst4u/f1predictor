@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Dict, Any, List, Optional, Tuple
 import time
 import random
+from email.utils import parsedate_to_datetime
 
 import requests
 from requests import HTTPError
@@ -15,9 +16,8 @@ class JolpicaClient:
     """
     Thin client for Jolpica's Ergast-compatible API (pure data access).
 
-    Changes:
-    - Adds season-bulk endpoints to reduce per-round calls.
-    - Adds exponential backoff for HTTP 429 responses on all requests.
+    - Season-bulk endpoints reduce per-round calls.
+    - Exponential backoff with Retry-After support for HTTP 429.
     """
 
     def __init__(self, base_url: str, timeout: int = 30, rate_limit_sleep: float = 0.0):
@@ -26,39 +26,74 @@ class JolpicaClient:
         self.rate_limit_sleep = rate_limit_sleep
         self.session = session_with_retries()
 
+    def _retry_after_seconds(self, headers: Dict[str, str], attempt: int, base: float, cap: float) -> float:
+        """
+        Choose backoff duration:
+          - If Retry-After is a number (seconds), use it.
+          - If Retry-After is an HTTP-date, compute seconds until then (min 0).
+          - Else use exponential backoff: base * 2^attempt, capped at cap, with jitter.
+        """
+        ra = headers.get("Retry-After")
+        if ra:
+            # Numeric seconds
+            try:
+                secs = float(ra)
+                return max(0.0, secs)
+            except Exception:
+                pass
+            # HTTP-date
+            try:
+                dt = parsedate_to_datetime(ra)
+                if dt:
+                    now = parsedate_to_datetime(parsedate_to_datetime(time.ctime()).ctime()) if False else None
+                # simpler: compute relative to time.time()
+                epoch_target = dt.timestamp()
+                now_epoch = time.time()
+                return max(0.0, epoch_target - now_epoch)
+            except Exception:
+                pass
+        # Fallback: exponential with jitter
+        backoff = min(cap, base * (2 ** attempt))
+        jitter = backoff * (0.8 + 0.4 * random.random())
+        return jitter
+
     def _get(
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
         max_429_retries: int = 6,
         backoff_base: float = 0.5,
-        backoff_max: float = 8.0,
+        backoff_max: float = 30.0,
     ) -> Dict[str, Any]:
         """
-        GET with exponential backoff on 429, and small inter-call sleep (if configured).
-        backoff schedule ~ base * 2^attempt, capped at backoff_max, with jitter.
+        GET with Retry-After-aware backoff on 429. Logs chosen backoff and outcome.
         """
         url = f"{self.base_url}/{path.lstrip('/')}"
         attempt = 0
+        slept_total = 0.0
+
         while True:
             try:
                 data = http_get_json(self.session, url, params=params or {}, timeout=self.timeout)
                 if self.rate_limit_sleep and self.rate_limit_sleep > 0:
                     time.sleep(self.rate_limit_sleep)
+                if attempt > 0:
+                    logger.info(f"429 retries succeeded for {url} after {attempt} attempt(s), slept {slept_total:.2f}s total")
                 return data
-            except Exception as e:
-                status_code = None
-                if isinstance(e, HTTPError) and getattr(e, "response", None) is not None:
-                    status_code = getattr(e.response, "status_code", None)
-                if status_code is None:
-                    status_code = getattr(e, "status_code", None) or getattr(e, "status", None)
+            except HTTPError as e:
+                status_code = getattr(e.response, "status_code", None) if e.response is not None else None
                 if status_code == 429 and attempt < max_429_retries:
-                    sleep_s = min(backoff_max, backoff_base * (2 ** attempt))
-                    jitter = sleep_s * (0.8 + 0.4 * random.random())
-                    logger.info(f"429 from {url}; backing off {jitter:.2f}s (attempt {attempt + 1}/{max_429_retries})")
-                    time.sleep(jitter)
+                    headers = e.response.headers if e.response is not None else {}
+                    sleep_s = self._retry_after_seconds(headers, attempt, backoff_base, backoff_max)
+                    logger.info(f"429 from {url}; backing off {sleep_s:.2f}s (attempt {attempt + 1}/{max_429_retries})")
+                    time.sleep(sleep_s)
+                    slept_total += sleep_s
                     attempt += 1
                     continue
+                # Log and re-raise other HTTP errors
+                raise
+            except Exception:
+                # Non-HTTP error; re-raise
                 raise
 
     @staticmethod
@@ -135,7 +170,7 @@ class JolpicaClient:
         mr = self._extract_mrdata(js)
         return mr.get("StandingsTable", {}) or {}
 
-    # Bulk season endpoints (to avoid per-round 429s and reduce calls)
+    # Bulk season endpoints (reduce calls and 429s)
 
     def get_season_race_results(self, season: str) -> List[Dict[str, Any]]:
         """All race results for a season across all rounds."""
