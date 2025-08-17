@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
+import time
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,7 @@ from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.openf1 import OpenF1Client
 from .data.fastf1_backend import get_event, get_session_times
-from .roster import derive_roster  # single source of truth
+from .roster import derive_roster
 
 logger = get_logger(__name__)
 
@@ -21,14 +22,22 @@ def exponential_weights(dates: List[datetime], ref_date: datetime, half_life_day
     return np.power(0.5, ages / max(1, half_life_days))
 
 
+def _empty_feature_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=[
+        "driverId", "constructorId", "form_index", "team_form_index",
+        "wet_skill", "cold_skill", "wind_skill", "pressure_skill",
+        "session_type", "is_race", "is_qualifying", "is_sprint"
+    ])
+
+
 def build_roster(jc: JolpicaClient, season: str, rnd: str, event_dt: Optional[datetime]) -> pd.DataFrame:
-    """
-    Single entry point for roster construction; calls derive_roster in roster.py.
-    """
+    logger.info(f"[features] Deriving roster for {season} R{rnd}")
+    t0 = time.time()
     entries = derive_roster(jc, season, rnd, event_dt=event_dt, now_dt=datetime.now(timezone.utc))
     df = pd.DataFrame(entries)
     if not df.empty:
         df["name"] = df.apply(lambda x: f"{(x.get('givenName') or '')} {(x.get('familyName') or '')}".strip(), axis=1)
+    logger.info(f"[features] Roster derived: {len(df)} drivers in {time.time() - t0:.2f}s")
     return df
 
 
@@ -108,8 +117,7 @@ def collect_historical_results(jc: JolpicaClient, season: int, end_before: datet
                     "constructorId": cons.get("constructorId"),
                     "position": int(pos) if pos else None,
                 })
-    df = pd.DataFrame(rows)
-    return df
+    return pd.DataFrame(rows)
 
 
 def teammate_head_to_head(df: pd.DataFrame) -> pd.DataFrame:
@@ -133,8 +141,7 @@ def teammate_head_to_head(df: pd.DataFrame) -> pd.DataFrame:
             for j in range(i + 1, len(drivers)):
                 rows.append({"date": date, "driverA": drivers[i], "driverB": drivers[j],
                              "a_better": 1 if positions[i] < positions[j] else 0})
-    hh = pd.DataFrame(rows)
-    return hh
+    return pd.DataFrame(rows)
 
 
 def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: int) -> pd.DataFrame:
@@ -157,61 +164,88 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
                            season: int, rnd: int, session_type: str,
                            ref_date: datetime,
                            cfg) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
-    """
-    Build features for a specific event session.
-    Returns (X, meta, roster_df)
-    """
-    schedule = jc.get_season_schedule(str(season))
-    sched_row = [r for r in schedule if int(r.get("round")) == int(rnd)]
-    if not sched_row:
-        raise ValueError(f"No schedule for season={season} round={rnd}")
-    race_info = sched_row[0]
-    cir = race_info.get("Circuit", {})
-    loc = cir.get("Location", {})
-    lat, lon = float(loc.get("lat", 0.0)), float(loc.get("long", 0.0))
-    circuit_name = cir.get("circuitName")
+    logger.info(f"[features] Fetching schedule for {season} R{rnd}")
+    t_all = time.time()
 
-    # Session timing: try FastF1; else ref_date ± 2h
+    # Schedule; if missing, return empty features (never raise)
+    try:
+        schedule = jc.get_season_schedule(str(season))
+        sched_row = [r for r in schedule if int(r.get("round")) == int(rnd)]
+        if not sched_row:
+            logger.info(f"[features] No schedule row for {season} R{rnd}; returning empty features")
+            meta = {
+                "season": season, "round": rnd, "circuit": None,
+                "lat": None, "lon": None, "session_start": ref_date, "session_end": ref_date + timedelta(hours=2),
+                "weather": {}
+            }
+            return _empty_feature_frame(), meta, pd.DataFrame(columns=["driverId", "constructorId", "name"])
+        race_info = sched_row[0]
+        cir = race_info.get("Circuit", {})
+        loc = cir.get("Location", {})
+        lat, lon = float(loc.get("lat", 0.0)), float(loc.get("long", 0.0))
+        circuit_name = cir.get("circuitName")
+    except Exception as e:
+        logger.info(f"[features] Schedule fetch failed: {e}; returning empty features")
+        meta = {
+            "season": season, "round": rnd, "circuit": None,
+            "lat": None, "lon": None, "session_start": ref_date, "session_end": ref_date + timedelta(hours=2),
+            "weather": {}
+        }
+        return _empty_feature_frame(), meta, pd.DataFrame(columns=["driverId", "constructorId", "name"])
+
+    # Session timing (FastF1 attempt, then default)
     start_dt = ref_date
     end_dt = ref_date + timedelta(hours=2)
     try:
+        logger.info("[features] Attempting FastF1 session timing")
         ev = get_event(season, rnd)
-        if ev is not None:
-            mapping = {
-                "race": "Race",
-                "qualifying": "Qualifying",
-                "sprint": "Sprint",
-                "sprint_qualifying": "Sprint Shootout"
-            }
-            st = get_session_times(ev, mapping.get(session_type, "Race"))
-            if st:
-                start_dt, end_dt = st
+        st = get_session_times(ev, {"race": "Race", "qualifying": "Qualifying", "sprint": "Sprint",
+                                    "sprint_qualifying": "Sprint Shootout"}.get(session_type, "Race")) if ev else None
+        if st:
+            start_dt, end_dt = st
+            logger.info("[features] FastF1 timing resolved")
+        else:
+            logger.info("[features] FastF1 timing unavailable; using default window")
     except Exception:
-        pass
+        logger.info("[features] FastF1 timing failed; using default window")
 
-    # Weather aggregation
+    # Weather aggregation (errors swallowed; empty weather allowed)
     if ref_date.tzinfo is None:
         ref_date = ref_date.replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
-    if ref_date < now:
-        wdf = om.get_historical_weather(lat, lon, ref_date - timedelta(days=1), ref_date + timedelta(days=1))
-        if wdf.empty:
-            wdf = om.get_historical_forecast(lat, lon, ref_date - timedelta(days=1), ref_date + timedelta(days=1))
-    else:
-        wdf = om.get_forecast(lat, lon, ref_date - timedelta(days=1), ref_date + timedelta(days=1))
-    wagg = om.aggregate_for_session(wdf, start_dt, end_dt)
+    try:
+        logger.info(f"[features] Fetching weather ({'historical' if ref_date < now else 'forecast'})")
+        if ref_date < now:
+            wdf = om.get_historical_weather(lat, lon, ref_date - timedelta(days=1), ref_date + timedelta(days=1))
+            if wdf.empty:
+                wdf = om.get_historical_forecast(lat, lon, ref_date - timedelta(days=1), ref_date + timedelta(days=1))
+        else:
+            wdf = om.get_forecast(lat, lon, ref_date - timedelta(days=1), ref_date + timedelta(days=1))
+        wagg = om.aggregate_for_session(wdf, start_dt, end_dt)
+    except Exception as e:
+        logger.info(f"[features] Weather fetch/aggregate failed: {e}")
+        wagg = {}
 
-    # Roster derived centrally (pass event start time for "near-event" logic)
-    roster = build_roster(jc, str(season), str(rnd), event_dt=start_dt)
+    # Roster (single source of truth) — errors swallowed
+    try:
+        roster = build_roster(jc, str(season), str(rnd), event_dt=start_dt)
+    except Exception as e:
+        logger.info(f"[features] Roster derivation failed: {e}")
+        roster = pd.DataFrame(columns=["driverId", "constructorId", "name"])
 
-    # Historical results up to ref_date
-    hist = collect_historical_results(jc, season=season, end_before=ref_date + timedelta(seconds=1), lookback_years=75)
+    # Historical results (errors swallowed)
+    try:
+        logger.info("[features] Collecting historical results")
+        hist = collect_historical_results(jc, season=season, end_before=ref_date + timedelta(seconds=1), lookback_years=75)
+    except Exception as e:
+        logger.info(f"[features] Historical results fetch failed: {e}")
+        hist = pd.DataFrame(columns=["driverId", "position", "date", "session", "constructorId", "points"])
 
     # Form indices
     form = compute_form_indices(hist, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.base)
 
     # Team form indices
-    team_form = hist[hist["session"] == "race"].dropna(subset=["constructorId", "date", "points"])
+    team_form = hist[hist["session"] == "race"].dropna(subset=["constructorId", "date", "points"]) if not hist.empty else pd.DataFrame()
     if not team_form.empty:
         team_form["w"] = exponential_weights(list(team_form["date"]), ref_date, cfg.modelling.recency_half_life_days.team)
         team_idx = team_form.groupby("constructorId").apply(lambda g: pd.Series({
@@ -226,12 +260,21 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
         "wet_skill": 0.0, "cold_skill": 0.0, "wind_skill": 0.0, "pressure_skill": 0.0
     })
 
-    # Merge features
-    X = roster.merge(form, on="driverId", how="left").merge(team_idx, on="constructorId", how="left").merge(weather_df, on="driverId", how="left")
-    X["form_index"] = X["form_index"].fillna(0.0)
-    X["team_form_index"] = X["team_form_index"].fillna(0.0)
-    for col in ["wet_skill", "cold_skill", "wind_skill", "pressure_skill"]:
-        X[col] = X[col].fillna(0.0)
+    # Merge features (handle empty frames gracefully)
+    X = _empty_feature_frame()
+    if not roster.empty:
+        X = roster.copy()
+        if "driverId" not in X.columns:
+            X["driverId"] = None
+        if "constructorId" not in X.columns:
+            X["constructorId"] = None
+        X = X.merge(form, on="driverId", how="left")
+        X = X.merge(team_idx, on="constructorId", how="left")
+        X = X.merge(weather_df, on="driverId", how="left")
+        X["form_index"] = X["form_index"].fillna(0.0)
+        X["team_form_index"] = X["team_form_index"].fillna(0.0)
+        for col in ["wet_skill", "cold_skill", "wind_skill", "pressure_skill"]:
+            X[col] = X[col].fillna(0.0)
 
     # Session type encoding
     X["session_type"] = session_type
@@ -243,18 +286,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
     for k, v in (wagg or {}).items():
         X[f"weather_{k}"] = v
 
-    # Teammate head-to-head rating
-    hh = teammate_head_to_head(hist)
-    hh_rating = defaultdict(float)
-    for _, row in hh.iterrows():
-        a = row["driverA"]; b = row["driverB"]
-        if row["a_better"] == 1:
-            hh_rating[a] += 1.0
-            hh_rating[b] -= 1.0
-        else:
-            hh_rating[a] -= 1.0
-            hh_rating[b] += 1.0
-    X["hh_index"] = X["driverId"].map(lambda d: hh_rating.get(d, 0.0))
+    logger.info(f"[features] Feature build complete in {time.time() - t_all:.2f}s")
 
     meta = {
         "season": season,

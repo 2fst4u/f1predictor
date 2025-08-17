@@ -1,24 +1,19 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Any
 from datetime import datetime, timezone
+import logging
 
 try:
     import fastf1  # type: ignore
 except Exception:  # pragma: no cover
     fastf1 = None  # type: ignore
 
-import logging
-
 logger = logging.getLogger(__name__)
-
 _CACHE_INITED = False
 
 
 def init_fastf1(cache_dir: str) -> bool:
-    """
-    Enable FastF1 on-disk cache. Returns True if cache initialised or already active.
-    No-op (False) if FastF1 is not installed.
-    """
+    """Enable cache and silence FastF1 noisy logs; never raise."""
     global _CACHE_INITED
     if fastf1 is None:
         logger.warning("FastF1 is not installed; fastf1_backend is disabled.")
@@ -27,6 +22,18 @@ def init_fastf1(cache_dir: str) -> bool:
         return True
     try:
         fastf1.Cache.enable_cache(cache_dir)
+        # Silence FastF1 INFO/DEBUG from third-party
+        try:
+            from fastf1.logger import set_log_level as ff1_set_log_level  # type: ignore
+            ff1_set_log_level("ERROR")
+        except Exception:
+            pass
+        # Also clamp specific loggers (best-effort)
+        for name in ("fastf1", "fastf1.api", "fastf1.core", "fastf1.fastf1.core"):
+            try:
+                logging.getLogger(name).setLevel(logging.ERROR)
+            except Exception:
+                pass
         _CACHE_INITED = True
         return True
     except Exception as e:
@@ -35,10 +42,6 @@ def init_fastf1(cache_dir: str) -> bool:
 
 
 def _to_py_datetime(dt_obj: Any) -> Optional[datetime]:
-    """
-    Coerce FastF1 time-like object (pandas.Timestamp or datetime) to a Python datetime in UTC.
-    Returns None if conversion fails.
-    """
     try:
         if hasattr(dt_obj, "to_pydatetime"):
             py = dt_obj.to_pydatetime()
@@ -59,25 +62,15 @@ def _to_py_datetime(dt_obj: Any) -> Optional[datetime]:
 
 
 def get_event(season: int, round_no: int):
-    """
-    Return a FastF1 Event object, or None if unavailable.
-    """
     if fastf1 is None:
-        logger.info("FastF1 unavailable; get_event returning None.")
         return None
     try:
-        ev = fastf1.get_event(season, round_no)
-        return ev
-    except Exception as e:
-        logger.info(f"FastF1 get_event failed for {season} R{round_no}: {e}")
+        return fastf1.get_event(season, round_no)
+    except Exception:
         return None
 
 
 def get_session_times(ev, session_name: str) -> Optional[Tuple[datetime, datetime]]:
-    """
-    Load a session and return (start, end) datetimes in UTC (tz-aware).
-    Returns None if unavailable.
-    """
     if fastf1 is None or ev is None:
         return None
     try:
@@ -94,17 +87,11 @@ def get_session_times(ev, session_name: str) -> Optional[Tuple[datetime, datetim
             if s and e:
                 return s, e
         return None
-    except Exception as e:
-        ev_name = getattr(ev, 'EventName', None) or getattr(ev, 'OfficialEventName', 'Unknown')
-        logger.info(f"FastF1 get_session_times failed for {ev_name} {session_name}: {e}")
+    except Exception:
         return None
 
 
 def get_session_classification(season: int, round_no: int, session_name: str):
-    """
-    Return a classification DataFrame for a session if available, else None.
-    Columns typically include: Position, DriverNumber, Abbreviation, etc.
-    """
     if fastf1 is None:
         return None
     try:
@@ -117,8 +104,7 @@ def get_session_classification(season: int, round_no: int, session_name: str):
         if results is not None and hasattr(results, "empty") and not results.empty:
             return results
         try:
-            cls = sess.get_classification()
-            return cls
+            return sess.get_classification()
         except Exception:
             return None
     except Exception:

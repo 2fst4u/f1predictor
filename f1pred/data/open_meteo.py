@@ -54,9 +54,7 @@ class OpenMeteoClient:
 
     @staticmethod
     def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Convert list/tuple values into comma-separated strings for Open-Meteo (e.g. hourly=var1,var2,...).
-        """
+        """Convert list/tuple values to CSV strings for Open‑Meteo (e.g. hourly=a,b,c)."""
         norm = {}
         for k, v in params.items():
             if isinstance(v, (list, tuple)):
@@ -66,41 +64,31 @@ class OpenMeteoClient:
         return norm
 
     def _fetch_hourly_df(self, base_url: str, params: Dict[str, Any]) -> pd.DataFrame:
-        js = http_get_json(self.session, base_url, params=self._normalize_params(params), timeout=self.timeout)
-        if not isinstance(js, dict):
-            logger.info(f"OpenMeteoClient: unexpected response type for {base_url}")
+        """Fetch hourly data; return empty DataFrame on any HTTP/shape error (never raise)."""
+        try:
+            js = http_get_json(self.session, base_url, params=self._normalize_params(params), timeout=self.timeout)
+            if not isinstance(js, dict):
+                logger.info(f"OpenMeteoClient: unexpected response type for {base_url}")
+                return pd.DataFrame(columns=["time"])
+            hourly = js.get("hourly", {})
+            if not isinstance(hourly, dict):
+                return pd.DataFrame(columns=["time"])
+            time_index = hourly.get("time", [])
+            df = pd.DataFrame({"time": pd.to_datetime(time_index)}) if time_index else pd.DataFrame(columns=["time"])
+            for k, v in hourly.items():
+                if k == "time":
+                    continue
+                df[k] = v
+            return df
+        except Exception as e:
+            logger.info(f"OpenMeteoClient: hourly fetch failed for {base_url}: {e}")
             return pd.DataFrame(columns=["time"])
-        hourly = js.get("hourly", {})
-        if not isinstance(hourly, dict):
-            return pd.DataFrame(columns=["time"])
-        time_index = hourly.get("time", [])
-        df = pd.DataFrame({"time": pd.to_datetime(time_index)}) if time_index else pd.DataFrame(columns=["time"])
-        for k, v in hourly.items():
-            if k == "time":
-                continue
-            df[k] = v
-        return df
-
-    def _compute_past_forecast_days(self, start: datetime, end: datetime) -> tuple[int, int]:
-        # Ensure tz-aware UTC
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
-        if end.tzinfo is None:
-            end = end.replace(tzinfo=timezone.utc)
-        now_utc = datetime.now(timezone.utc)
-        # Whole days back from now to cover start; clamp to <= 7 (per Forecast API)
-        past_days = max(0, (now_utc.date() - start.date()).days)
-        past_days = min(past_days, 7)
-        # Whole days forward from now to cover end; clamp to <= 16 (per Forecast API)
-        forecast_days = max(1, (end.date() - now_utc.date()).days + 1)
-        forecast_days = min(forecast_days, 16)
-        return past_days, forecast_days
 
     def get_forecast(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "UTC") -> pd.DataFrame:
         if not _valid_lat_lon(lat, lon):
             logger.info(f"OpenMeteoClient.get_forecast: invalid coordinates lat={lat}, lon={lon}")
             return pd.DataFrame()
-        # Forecast API: select window via past_days/forecast_days; exclude surface_pressure.
+        # Forecast API: exclude surface_pressure; use relative window to stay within horizon
         past_days, forecast_days = self._compute_past_forecast_days(start, end)
         params = {
             "latitude": lat,
@@ -121,11 +109,23 @@ class OpenMeteoClient:
         }
         return self._fetch_hourly_df(self.forecast_url, params)
 
+    def _compute_past_forecast_days(self, start: datetime, end: datetime) -> tuple[int, int]:
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        now_utc = datetime.now(timezone.utc)
+        past_days = max(0, (now_utc.date() - start.date()).days)
+        past_days = min(past_days, 7)
+        forecast_days = max(1, (end.date() - now_utc.date()).days + 1)
+        forecast_days = min(forecast_days, 16)
+        return past_days, forecast_days
+
     def get_historical_weather(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "auto") -> pd.DataFrame:
         if not _valid_lat_lon(lat, lon):
             logger.info(f"OpenMeteoClient.get_historical_weather: invalid coordinates lat={lat}, lon={lon}")
             return pd.DataFrame()
-        # ERA5 (archive API) supports surface_pressure and uses explicit dates
+        # ERA5 supports surface_pressure and explicit dates
         params = {
             "latitude": lat,
             "longitude": lon,
@@ -148,7 +148,7 @@ class OpenMeteoClient:
         if not _valid_lat_lon(lat, lon):
             logger.info(f"OpenMeteoClient.get_historical_forecast: invalid coordinates lat={lat}, lon={lon}")
             return pd.DataFrame()
-        # Historical Forecast mirrors Forecast variables (exclude surface_pressure) and supports explicit dates
+        # Historical Forecast mirrors Forecast variables; no surface_pressure
         params = {
             "latitude": lat,
             "longitude": lon,
@@ -173,13 +173,9 @@ class OpenMeteoClient:
             return {}
         if "time" not in weather_df.columns:
             return {}
-        # Ensure consistent timezone handling between session times and dataframe
-        s_start = session_start
-        s_end = session_end
-        if getattr(s_start, "tzinfo", None) is not None:
-            s_start = s_start.replace(tzinfo=None)
-        if getattr(s_end, "tzinfo", None) is not None:
-            s_end = s_end.replace(tzinfo=None)
+        # Compare with naive times to avoid tz mismatch
+        s_start = session_start.replace(tzinfo=None) if getattr(session_start, "tzinfo", None) else session_start
+        s_end = session_end.replace(tzinfo=None) if getattr(session_end, "tzinfo", None) else session_end
         mask = (weather_df["time"] >= s_start) & (weather_df["time"] <= s_end)
         subset = weather_df.loc[mask]
         if subset.empty:
@@ -205,7 +201,7 @@ class OpenMeteoClient:
         if pressure_mean != pressure_mean:
             pressure_mean = _mean("pressure_msl")
 
-        agg = {
+        return {
             "temp_mean": _mean("temperature_2m"),
             "temp_min": _min("temperature_2m"),
             "temp_max": _max("temperature_2m"),
@@ -217,6 +213,3 @@ class OpenMeteoClient:
             "cloud_mean": _mean("cloud_cover"),
             "humidity_mean": _mean("relative_humidity_2m"),
         }
-        wet_amount = (agg["rain_sum"] if agg["rain_sum"] == agg["rain_sum"] else 0.0) + (agg["precip_sum"] if agg["precip_sum"] == agg["precip_sum"] else 0.0)
-        agg["is_wet_prob"] = 1.0 if wet_amount > 0.5 else 0.0
-        return agg
