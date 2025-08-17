@@ -12,9 +12,13 @@ from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.openf1 import OpenF1Client
 from .data.fastf1_backend import get_event, get_session_times
-from .roster import derive_roster
+from .roster import derive_roster  # single source of truth
 
 logger = get_logger(__name__)
+
+# Simple in-process cache to avoid re-building history in the same run
+# Keyed by (season, cutoff-date string, sorted roster driver ids)
+_HIST_CACHE: Dict[Tuple[int, str, Tuple[str, ...]], pd.DataFrame] = {}
 
 
 def exponential_weights(dates: List[datetime], ref_date: datetime, half_life_days: int) -> np.ndarray:
@@ -25,6 +29,7 @@ def exponential_weights(dates: List[datetime], ref_date: datetime, half_life_day
 def _empty_feature_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=[
         "driverId", "constructorId", "form_index", "team_form_index",
+        "driver_team_form_index", "team_tenure_events",
         "wet_skill", "cold_skill", "wind_skill", "pressure_skill",
         "session_type", "is_race", "is_qualifying", "is_sprint"
     ])
@@ -41,29 +46,30 @@ def build_roster(jc: JolpicaClient, season: str, rnd: str, event_dt: Optional[da
     return df
 
 
-def collect_historical_results(jc: JolpicaClient, season: int, end_before: datetime, lookback_years: int = 50) -> pd.DataFrame:
+def _parse_races_block(races: List[Dict[str, Any]], session_label: str, cutoff: datetime) -> List[Dict[str, Any]]:
     rows = []
-    for yr in range(max(1950, season - lookback_years), season + 1):
-        races = jc.get_season_schedule(str(yr))
-        for r in races:
-            date_str = r.get("date")
-            time_str = r.get("time", "00:00:00Z")
+    for r in races or []:
+        date_str = r.get("date")
+        time_str = r.get("time", "00:00:00Z")
+        try:
             dt = datetime.fromisoformat((date_str or "1970-01-01") + "T" + time_str.replace("Z", "+00:00"))
-            if dt >= end_before:
-                continue
-            season_s = r.get("season")
-            rnd = r.get("round")
-            circuit = r.get("Circuit", {}).get("circuitName")
-            circuit_loc = r.get("Circuit", {}).get("Location", {})
-            lat = circuit_loc.get("lat")
-            lon = circuit_loc.get("long")
-            results = jc.get_race_results(season_s, rnd)
+        except Exception:
+            dt = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        if dt >= cutoff:
+            continue
+        circuit = r.get("Circuit", {}).get("circuitName")
+        loc = r.get("Circuit", {}).get("Location", {})
+        lat = loc.get("lat")
+        lon = loc.get("long")
+
+        if session_label == "race":
+            results = r.get("Results", []) or []
             for res in results:
-                drv = res.get("Driver", {})
-                cons = res.get("Constructor", {})
+                drv = res.get("Driver", {}) or {}
+                cons = res.get("Constructor", {}) or {}
                 rows.append({
-                    "season": int(season_s),
-                    "round": int(rnd),
+                    "season": int(r.get("season")),
+                    "round": int(r.get("round")),
                     "session": "race",
                     "date": dt,
                     "circuit": circuit,
@@ -78,14 +84,15 @@ def collect_historical_results(jc: JolpicaClient, season: int, end_before: datet
                     "points": float(res.get("points", 0.0) or 0.0),
                     "fastestLap": (res.get("FastestLap") or {}).get("rank"),
                 })
-            qres = jc.get_qualifying_results(season_s, rnd)
+        elif session_label == "qualifying":
+            qres = r.get("QualifyingResults", []) or []
             for res in qres:
-                drv = res.get("Driver", {})
-                cons = res.get("Constructor", {})
+                drv = res.get("Driver", {}) or {}
+                cons = res.get("Constructor", {}) or {}
                 pos = res.get("position")
                 rows.append({
-                    "season": int(season_s),
-                    "round": int(rnd),
+                    "season": int(r.get("season")),
+                    "round": int(r.get("round")),
                     "session": "qualifying",
                     "date": dt,
                     "circuit": circuit,
@@ -99,14 +106,15 @@ def collect_historical_results(jc: JolpicaClient, season: int, end_before: datet
                     "q2": (res.get("Q2") or None),
                     "q3": (res.get("Q3") or None),
                 })
-            sres = jc.get_sprint_results(season_s, rnd)
+        elif session_label == "sprint":
+            sres = r.get("SprintResults", []) or []
             for res in sres:
-                drv = res.get("Driver", {})
-                cons = res.get("Constructor", {})
+                drv = res.get("Driver", {}) or {}
+                cons = res.get("Constructor", {}) or {}
                 pos = res.get("position")
                 rows.append({
-                    "season": int(season_s),
-                    "round": int(rnd),
+                    "season": int(r.get("season")),
+                    "round": int(r.get("round")),
                     "session": "sprint",
                     "date": dt,
                     "circuit": circuit,
@@ -117,7 +125,83 @@ def collect_historical_results(jc: JolpicaClient, season: int, end_before: datet
                     "constructorId": cons.get("constructorId"),
                     "position": int(pos) if pos else None,
                 })
-    return pd.DataFrame(rows)
+    return rows
+
+
+def collect_historical_results(
+    jc: JolpicaClient,
+    season: int,
+    end_before: datetime,
+    lookback_years: int = 50,
+    roster_driver_ids: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """
+    Optimized, roster-aware, season-bulk history builder.
+    - Uses bulk season endpoints (1–3 calls per season) to avoid 429s and reduce API pressure.
+    - Iterates seasons backwards from 'season' down to max(1950, season - lookback_years).
+    - Early stop: stop at the first season where none of the current roster drivers appear at all.
+    - Always respects time-cut end_before.
+    - In-process cached by (season, cutoff_date_str, roster_ids) to avoid duplicate work within the same run.
+    """
+    cutoff_key = end_before.date().isoformat()
+    roster_key = tuple(sorted(roster_driver_ids)) if roster_driver_ids else tuple()
+    cache_key = (season, cutoff_key, roster_key)
+    if cache_key in _HIST_CACHE:
+        return _HIST_CACHE[cache_key].copy()
+
+    rows: List[Dict[str, Any]] = []
+    start_year = max(1950, season - lookback_years)
+    logger.info(f"[features] [history] Scanning years {start_year}-{season}, cutoff < {end_before.isoformat()}")
+
+    roster_set = set(roster_driver_ids or [])
+    total_rows = 0
+
+    for yr in range(season, start_year - 1, -1):
+        try:
+            races_blk = jc.get_season_race_results(str(yr))
+            qual_blk = jc.get_season_qualifying_results(str(yr))
+            sprint_blk = jc.get_season_sprint_results(str(yr))
+        except Exception as e:
+            logger.info(f"[features] [history] {yr}: bulk fetch failed: {e}; skipping year")
+            continue
+
+        r_rows = _parse_races_block(races_blk, "race", end_before)
+        q_rows = _parse_races_block(qual_blk, "qualifying", end_before)
+        s_rows = _parse_races_block(sprint_blk, "sprint", end_before)
+
+        # Check roster coverage for this season (before appending)
+        matched = 0
+        if roster_set:
+            for block in (r_rows, q_rows, s_rows):
+                for rr in block:
+                    if rr.get("driverId") in roster_set:
+                        matched = 1
+                        break
+                if matched:
+                    break
+
+        # Append parsed rows
+        rows.extend(r_rows); total_rows += len(r_rows)
+        rows.extend(q_rows); total_rows += len(q_rows)
+        rows.extend(s_rows); total_rows += len(s_rows)
+
+        logger.info(
+            f"[features] [history] {yr}: race={len(r_rows)} qual={len(q_rows)} sprint={len(s_rows)} rows_total={total_rows}"
+        )
+
+        # Early stop: if no roster drivers appear at all in this season, stop walking further back
+        if roster_set and matched == 0:
+            logger.info(f"[features] [history] Stopping at {yr}: no results for current roster in this season")
+            break
+
+    df = pd.DataFrame(rows)
+    _HIST_CACHE[cache_key] = df.copy()
+    # Also store an alias under the general key (season, cutoff, empty roster) so a second call
+    # without roster ids (e.g., from DNF step) hits the cache and avoids re-fetching.
+    alias_key = (season, cutoff_key, tuple())
+    if alias_key not in _HIST_CACHE:
+        _HIST_CACHE[alias_key] = df.copy()
+    return df
 
 
 def teammate_head_to_head(df: pd.DataFrame) -> pd.DataFrame:
@@ -141,7 +225,8 @@ def teammate_head_to_head(df: pd.DataFrame) -> pd.DataFrame:
             for j in range(i + 1, len(drivers)):
                 rows.append({"date": date, "driverA": drivers[i], "driverB": drivers[j],
                              "a_better": 1 if positions[i] < positions[j] else 0})
-    return pd.DataFrame(rows)
+    hh = pd.DataFrame(rows)
+    return hh
 
 
 def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: int) -> pd.DataFrame:
@@ -154,9 +239,53 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
     dfg["pts_score"] = dfg["points"].astype(float)
     w = exponential_weights(list(dfg["date"]), ref_date, half_life_days)
     dfg["w"] = w
-    agg = dfg.groupby("driverId").apply(lambda g: pd.Series({
-        "form_index": float((g["pos_score"] * g["w"]).sum() + (g["pts_score"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
-    })).reset_index()
+    agg = dfg.groupby("driverId").apply(
+        lambda g: pd.Series({
+            "form_index": float((g["pos_score"] * g["w"]).sum() + (g["pts_score"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
+        }),
+        include_groups=False
+    ).reset_index()
+    return agg
+
+
+def compute_driver_team_form(
+    df: pd.DataFrame,
+    roster: pd.DataFrame,
+    ref_date: datetime,
+    half_life_days: int,
+    window_days: int = 730,
+) -> pd.DataFrame:
+    """
+    Driver-team specific form (recency-weighted, last 'window_days') using only events
+    where the driver's event constructor equals their current roster constructor.
+
+    Returns DataFrame: [driverId, driver_team_form_index, team_tenure_events]
+    """
+    if df.empty or roster.empty:
+        return pd.DataFrame(columns=["driverId", "driver_team_form_index", "team_tenure_events"])
+
+    min_dt = ref_date - timedelta(days=window_days)
+    races = df[(df["session"] == "race") & (df["date"] >= min_dt)].copy()
+    races = races.dropna(subset=["driverId", "constructorId", "date"])
+
+    cur_map = roster.set_index("driverId")["constructorId"].to_dict()
+    races["cur_constructor"] = races["driverId"].map(cur_map)
+    races = races[races["constructorId"] == races["cur_constructor"]].copy()
+    if races.empty:
+        return pd.DataFrame(columns=["driverId", "driver_team_form_index", "team_tenure_events"])
+
+    races["pos_score"] = -races["position"].astype(float).fillna(0.0)
+    races["pts_score"] = races["points"].astype(float).fillna(0.0)
+    w = exponential_weights(list(races["date"]), ref_date, half_life_days)
+    races["w"] = w
+
+    agg = races.groupby("driverId").apply(
+        lambda g: pd.Series({
+            "driver_team_form_index": float((g["pos_score"] * g["w"]).sum() + (g["pts_score"] * g["w"]).sum()) / max(1e-6, g["w"].sum()),
+            "team_tenure_events": int(g.shape[0])
+        }),
+        include_groups=False
+    ).reset_index()
     return agg
 
 
@@ -221,38 +350,50 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
                 wdf = om.get_historical_forecast(lat, lon, ref_date - timedelta(days=1), ref_date + timedelta(days=1))
         else:
             wdf = om.get_forecast(lat, lon, ref_date - timedelta(days=1), ref_date + timedelta(days=1))
+        logger.info(f"[features] Weather fetched in {0 if wdf is None else len(wdf)} rows")
         wagg = om.aggregate_for_session(wdf, start_dt, end_dt)
     except Exception as e:
         logger.info(f"[features] Weather fetch/aggregate failed: {e}")
         wagg = {}
 
-    # Roster (single source of truth) — errors swallowed
+    # Roster
     try:
         roster = build_roster(jc, str(season), str(rnd), event_dt=start_dt)
     except Exception as e:
         logger.info(f"[features] Roster derivation failed: {e}")
         roster = pd.DataFrame(columns=["driverId", "constructorId", "name"])
 
-    # Historical results (errors swallowed)
+    # Historical results (optimized, cached, roster-aware)
+    logger.info("[features] Collecting historical results")
+    t3 = time.time()
     try:
-        logger.info("[features] Collecting historical results")
-        hist = collect_historical_results(jc, season=season, end_before=ref_date + timedelta(seconds=1), lookback_years=75)
+        roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
+        hist = collect_historical_results(jc, season=season, end_before=ref_date + timedelta(seconds=1),
+                                          lookback_years=75, roster_driver_ids=roster_ids)
+        logger.info(f"[features] [history] Collection finished in {time.time() - t3:.2f}s (rows={len(hist)})")
     except Exception as e:
         logger.info(f"[features] Historical results fetch failed: {e}")
         hist = pd.DataFrame(columns=["driverId", "position", "date", "session", "constructorId", "points"])
 
-    # Form indices
+    # Generic driver form and team form indices
     form = compute_form_indices(hist, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.base)
 
-    # Team form indices
-    team_form = hist[hist["session"] == "race"].dropna(subset=["constructorId", "date", "points"]) if not hist.empty else pd.DataFrame()
+    team_form = hist[hist["session"] == "race"].dropna(subset=["constructorId", "date", "points"])
     if not team_form.empty:
         team_form["w"] = exponential_weights(list(team_form["date"]), ref_date, cfg.modelling.recency_half_life_days.team)
-        team_idx = team_form.groupby("constructorId").apply(lambda g: pd.Series({
-            "team_form_index": float((g["points"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
-        })).reset_index()
+        team_idx = team_form.groupby("constructorId").apply(
+            lambda g: pd.Series({
+                "team_form_index": float((g["points"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
+            }),
+            include_groups=False
+        ).reset_index()
     else:
         team_idx = pd.DataFrame(columns=["constructorId", "team_form_index"])
+
+    # Driver-team specific form (current constructor only)
+    drv_team_form = compute_driver_team_form(
+        hist, roster, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.team, window_days=730
+    )
 
     # Weather sensitivity placeholder features
     weather_df = pd.DataFrame({
@@ -270,11 +411,12 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
             X["constructorId"] = None
         X = X.merge(form, on="driverId", how="left")
         X = X.merge(team_idx, on="constructorId", how="left")
+        X = X.merge(drv_team_form, on="driverId", how="left")
         X = X.merge(weather_df, on="driverId", how="left")
-        X["form_index"] = X["form_index"].fillna(0.0)
-        X["team_form_index"] = X["team_form_index"].fillna(0.0)
-        for col in ["wet_skill", "cold_skill", "wind_skill", "pressure_skill"]:
-            X[col] = X[col].fillna(0.0)
+        for col in ["form_index", "team_form_index", "driver_team_form_index", "team_tenure_events",
+                    "wet_skill", "cold_skill", "wind_skill", "pressure_skill"]:
+            if col in X.columns:
+                X[col] = X[col].fillna(0.0)
 
     # Session type encoding
     X["session_type"] = session_type
