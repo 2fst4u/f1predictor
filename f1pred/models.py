@@ -190,7 +190,6 @@ def train_dnf_hazard_model(X: pd.DataFrame, hist: pd.DataFrame) -> Any:
 
     if len(Xjoin) == 0:
         return None
-
     # Proxy label from relative risk (heuristic)
     threshold = float(Xjoin["drv_dnf_rate"].mean())
     y_proxy = (Xjoin["drv_dnf_rate"] * 0.5 + Xjoin["team_dnf_rate"] * 0.5 > threshold).astype(int)
@@ -201,3 +200,62 @@ def train_dnf_hazard_model(X: pd.DataFrame, hist: pd.DataFrame) -> Any:
     # Return the base mapping so inference can recreate the same features
     base_out = base[["driverId", "constructorId", "drv_dnf_rate", "team_dnf_rate"]].copy()
     return (clf, feat_cols, base_out)
+
+
+def estimate_dnf_probabilities(
+    hist: pd.DataFrame,
+    current_X: pd.DataFrame,
+    alpha: float = 2.0,
+    beta: float = 8.0,
+    driver_weight: float = 0.6,
+    team_weight: float = 0.4,
+    clip_min: float = 0.02,
+    clip_max: float = 0.35,
+) -> np.ndarray:
+    """
+    Estimate per-driver DNF probabilities using Beta-smoothed empirical base rates.
+
+    - Build DNF labels from historical race results.
+    - Compute per-driver and per-team counts (k, n) and apply Beta smoothing:
+        p = (k + alpha) / (n + alpha + beta)
+    - Combine: p_dnf = driver_weight * p_driver + team_weight * p_team
+    - Clip to [clip_min, clip_max] to avoid pathological extremes for tiny samples.
+
+    Returns: numpy array aligned to current_X rows.
+    """
+    races = hist[hist["session"] == "race"].copy()
+    if races.empty or current_X is None or current_X.empty:
+        return np.full(len(current_X) if current_X is not None else 0, 0.1, dtype=float)
+
+    status = races["status"].astype(str).str.lower()
+    dnf = (~races["position"].notna()) | status.str.contains(
+        "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch"
+    )
+    races["dnf"] = dnf.astype(int)
+
+    # Per-driver counts
+    drv_counts = races.groupby("driverId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
+    drv_counts["p"] = (drv_counts["k"] + alpha) / (drv_counts["n"] + alpha + beta)
+
+    # Per-team counts
+    team_counts = races.groupby("constructorId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
+    team_counts["p"] = (team_counts["k"] + alpha) / (team_counts["n"] + alpha + beta)
+
+    # Global fallback
+    global_k = races["dnf"].sum()
+    global_n = races.shape[0]
+    global_p = (global_k + alpha) / (global_n + alpha + beta)
+
+    # Map to current rows
+    drv_map = drv_counts["p"].to_dict()
+    team_map = team_counts["p"].to_dict()
+
+    p_drv = current_X["driverId"].map(drv_map).astype(float)
+    p_team = current_X["constructorId"].map(team_map).astype(float)
+
+    p_drv = p_drv.fillna(global_p)
+    p_team = p_team.fillna(global_p)
+
+    p = driver_weight * p_drv.values + team_weight * p_team.values
+    p = np.clip(p.astype(float), clip_min, clip_max)
+    return p
