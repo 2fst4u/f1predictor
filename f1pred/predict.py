@@ -254,8 +254,15 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
             if sess in ("race", "sprint"):
                 dnf_model = train_dnf_hazard_model(X, hist)
                 if dnf_model is not None:
-                    clf, cols = dnf_model
-                    Xdnf = X.copy()
+                    clf, cols, base = dnf_model
+                    # Recreate the same features the classifier was trained on
+                    Xdnf = X.merge(base, on=["driverId", "constructorId"], how="left")
+                    # Fill base rates with their training means if missing (e.g., rookies/new pairings)
+                    if "drv_dnf_rate" in Xdnf.columns:
+                        Xdnf["drv_dnf_rate"] = Xdnf["drv_dnf_rate"].fillna(base["drv_dnf_rate"].mean())
+                    if "team_dnf_rate" in Xdnf.columns:
+                        Xdnf["team_dnf_rate"] = Xdnf["team_dnf_rate"].fillna(base["team_dnf_rate"].mean())
+                    # Ensure any expected weather_* columns exist
                     for c in cols:
                         if c not in Xdnf.columns:
                             Xdnf[c] = 0.0
