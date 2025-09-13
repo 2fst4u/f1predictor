@@ -13,7 +13,7 @@ from .data.open_meteo import OpenMeteoClient
 from .data.openf1 import OpenF1Client
 from .data.fastf1_backend import init_fastf1, get_session_classification
 from .features import build_session_features, collect_historical_results
-from .models import train_pace_model, train_dnf_hazard_model
+from .models import train_pace_model, train_dnf_hazard_model, estimate_dnf_probabilities
 from .simulate import simulate_grid
 from .report import generate_html_report
 
@@ -245,6 +245,22 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
             # Train self-calibrating pace model on current features
             pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess)
 
+            # Temper pace: normalise and scale to avoid overconfident separation
+            try:
+                mu = float(np.mean(pace_hat))
+                sd = float(np.std(pace_hat))
+                if not np.isfinite(sd) or sd < 1e-6:
+                    sd = 1.0
+                pace_hat = (pace_hat - mu) / sd
+                pace_scale = getattr(getattr(cfg, 'modelling', object()), 'pace_scale', 0.6)
+                try:
+                    pace_scale = float(pace_scale)
+                except Exception:
+                    pace_scale = 0.6
+                pace_hat = pace_hat * pace_scale
+            except Exception:
+                pass
+
             # Reuse cached/optimized history for DNF (pass roster ids to hit cache/early stop)
             roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
             hist = collect_historical_results(jc, season=season_i, end_before=ref_date,
@@ -252,23 +268,14 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
 
             dnf_prob = np.zeros(X.shape[0], dtype=float)
             if sess in ("race", "sprint"):
-                dnf_model = train_dnf_hazard_model(X, hist)
-                if dnf_model is not None:
-                    clf, cols, base = dnf_model
-                    # Recreate the same features the classifier was trained on
-                    Xdnf = X.merge(base, on=["driverId", "constructorId"], how="left")
-                    # Fill base rates with their training means if missing (e.g., rookies/new pairings)
-                    if "drv_dnf_rate" in Xdnf.columns:
-                        Xdnf["drv_dnf_rate"] = Xdnf["drv_dnf_rate"].fillna(base["drv_dnf_rate"].mean())
-                    if "team_dnf_rate" in Xdnf.columns:
-                        Xdnf["team_dnf_rate"] = Xdnf["team_dnf_rate"].fillna(base["team_dnf_rate"].mean())
-                    # Ensure any expected weather_* columns exist
-                    for c in cols:
-                        if c not in Xdnf.columns:
-                            Xdnf[c] = 0.0
-                    dnf_prob = clf.predict_proba(Xdnf[cols])[:, 1]
-                else:
-                    dnf_prob[:] = 0.1
+                # Beta-smoothed empirical DNF estimate
+                try:
+                    dnf_prob = estimate_dnf_probabilities(hist, X,
+                                                          alpha=2.0, beta=8.0,
+                                                          driver_weight=0.6, team_weight=0.4,
+                                                          clip_min=0.02, clip_max=0.35)
+                except Exception:
+                    dnf_prob[:] = 0.12
 
             # Monte Carlo simulation to get distributions
             draws = cfg.modelling.monte_carlo.draws
