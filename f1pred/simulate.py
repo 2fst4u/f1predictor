@@ -15,7 +15,7 @@ def simulate_grid(pace_index: np.ndarray, dnf_prob: np.ndarray, draws: int = 500
     counts = np.zeros((n, n), dtype=float)
     pairwise = np.zeros((n, n), dtype=float)
 
-    noise_scale = np.std(pace_index) * 0.15 + 0.05
+    noise_scale = np.std(pace_index) * 0.15 + 0.02  # slightly lower base noise to reduce uniformity
     max_penalty = np.max(pace_index) + 10.0
 
     for _ in range(draws):
