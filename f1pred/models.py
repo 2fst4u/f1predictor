@@ -40,6 +40,9 @@ def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarra
 
     Target: y = -form_index (so lower predicted value = faster).
     To avoid target leakage, 'form_index' is excluded from the feature set.
+
+    Additionally, blend the learned prediction with a baseline from form/team_form/driver_team_form
+    to prevent near-uniform outputs when per-event features are low-variance.
     """
     # Target
     if "form_index" not in X.columns:
@@ -113,7 +116,32 @@ def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarra
     pipe.fit(Xmat, y)
     yhat = pipe.predict(Xmat)
 
-    return pipe, yhat, features
+    # Robust baseline pace from form signals (lower is better)
+    base = np.zeros(len(X), dtype=float)
+    if "form_index" in X.columns:
+        base = base - X["form_index"].astype(float).values
+    if "team_form_index" in X.columns:
+        base = base - 0.5 * X["team_form_index"].astype(float).values
+    if "driver_team_form_index" in X.columns:
+        base = base - 0.3 * X["driver_team_form_index"].astype(float).values
+
+    # If baseline has no variance, add tiny deterministic jitter for tie-breaks
+    try:
+        if np.nanstd(base) < 1e-9 and "driverId" in X.columns:
+            h = pd.util.hash_pandas_object(X["driverId"], index=False).astype(np.uint64) % 997
+            base = base + (h.astype(float) / 1e6)
+    except Exception:
+        pass
+
+    # Blend to avoid uniform outputs when either part degenerates
+    if np.nanstd(yhat) < 1e-6 and np.nanstd(base) > 0.0:
+        pace_hat = base
+    elif np.nanstd(base) < 1e-6 and np.nanstd(yhat) > 0.0:
+        pace_hat = yhat
+    else:
+        pace_hat = 0.6 * yhat + 0.4 * base
+
+    return pipe, pace_hat, features
 
 
 def train_dnf_hazard_model(X: pd.DataFrame, hist: pd.DataFrame) -> Any:
@@ -122,7 +150,9 @@ def train_dnf_hazard_model(X: pd.DataFrame, hist: pd.DataFrame) -> Any:
 
     Features: driver/team DNF base rates + available weather features.
     Labels: proxy from base rates (since per-event labels aren't assembled here).
-    Returns (clf, feature_columns) or None if insufficient data.
+    Returns (clf, feature_columns, base_rates_df) or None if insufficient data.
+
+    base_rates_df has columns: [driverId, constructorId, drv_dnf_rate, team_dnf_rate]
     """
     races = hist[hist["session"] == "race"].copy()
     if races.empty:
@@ -151,20 +181,23 @@ def train_dnf_hazard_model(X: pd.DataFrame, hist: pd.DataFrame) -> Any:
     base["drv_dnf_rate"] = base["drv_dnf_rate"].fillna(base["drv_dnf_rate"].mean())
     base["team_dnf_rate"] = base["team_dnf_rate"].fillna(base["team_dnf_rate"].mean())
 
-    # Join onto current X
+    # Join onto current X for training
     Xjoin = X.merge(base, on=["driverId", "constructorId"], how="left")
-    Xjoin["drv_dnf_rate"] = Xjoin["drv_dnf_rate"].fillna(Xjoin["drv_dnf_rate"].mean())
-    Xjoin["team_dnf_rate"] = Xjoin["team_dnf_rate"].fillna(Xjoin["team_dnf_rate"].mean())
+    Xjoin["drv_dnf_rate"] = Xjoin["drv_dnf_rate"].fillna(base["drv_dnf_rate"].mean())
+    Xjoin["team_dnf_rate"] = Xjoin["team_dnf_rate"].fillna(base["team_dnf_rate"].mean())
 
     feat_cols = ["drv_dnf_rate", "team_dnf_rate"] + [c for c in Xjoin.columns if c.startswith("weather_")]
 
-    # Build a proxy label from relative risk to let the classifier calibrate probabilities
-    # This is a heuristic; a full implementation would build event-level labels.
     if len(Xjoin) == 0:
         return None
+
+    # Proxy label from relative risk (heuristic)
     threshold = float(Xjoin["drv_dnf_rate"].mean())
     y_proxy = (Xjoin["drv_dnf_rate"] * 0.5 + Xjoin["team_dnf_rate"] * 0.5 > threshold).astype(int)
 
     clf = GradientBoostingClassifier(random_state=42)
     clf.fit(Xjoin[feat_cols], y_proxy)
-    return (clf, feat_cols)
+
+    # Return the base mapping so inference can recreate the same features
+    base_out = base[["driverId", "constructorId", "drv_dnf_rate", "team_dnf_rate"]].copy()
+    return (clf, feat_cols, base_out)
