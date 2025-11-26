@@ -9,43 +9,29 @@ Add at the top of README.md after the title:
 ```markdown
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)
 ```
 
-## Development Setup
+## Quick Commands
 
 Add after Installation section:
 
 ```markdown
-## Development Setup
+## Quick Commands
 
-For contributors and developers:
+For convenience, you can use the Makefile:
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/2fst4u/f1predictor.git
-   cd f1predictor
-   ```
+```bash
+make install   # Install dependencies
+make predict   # Run prediction for next race
+make backtest  # Run backtesting
+make clean     # Clear cache
+```
 
-2. Set up development environment:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # Windows: .venv\Scripts\activate
-   make install-dev
-   ```
+Or run directly:
 
-3. Run tests:
-   ```bash
-   make test
-   ```
-
-4. Lint and format code:
-   ```bash
-   make lint
-   make format
-   ```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
+```bash
+python main.py --round next --html
+```
 ```
 
 ## Troubleshooting
@@ -59,11 +45,13 @@ Add before the Extending section:
 
 **Solution:** Clear the cache and re-run:
 ```bash
+make clean
+# or
 rm -rf .cache/
 python main.py --round next
 ```
 
-The cache may contain outdated feature calculations from before the fixes.
+The cache may contain outdated feature calculations from before the v1.1.0 fixes.
 
 ### Low variance warnings in logs
 
@@ -81,14 +69,6 @@ pip install lightgbm --no-binary lightgbm
 ```
 
 **Alternative:** The system will fall back to XGBoost or scikit-learn if LightGBM is unavailable.
-
-### Tests failing
-
-Ensure you have dev dependencies:
-```bash
-pip install -r requirements-dev.txt
-pytest tests/ -v
-```
 
 For more details, see [FIXES_AND_IMPROVEMENTS.md](FIXES_AND_IMPROVEMENTS.md).
 ```
@@ -108,16 +88,11 @@ Add a new section:
 - Improved model blending strategy (75/25 model/baseline)
 - Better hyperparameters for faster training and generalization
 
-**Infrastructure:**
-- Added comprehensive test suite with pytest
-- Code quality tools (ruff, mypy)
-- Pre-commit hooks for local development
-- Makefile for common commands
-
-**Documentation:**
-- Added LICENSE (MIT)
-- Added CONTRIBUTING.md
-- Added FIXES_AND_IMPROVEMENTS.md with detailed fix explanations
+**Added:**
+- Comprehensive test suite (optional for contributors)
+- MIT License
+- Contributing guidelines
+- Detailed fix documentation
 
 **Impact:** Predictions now show meaningful hierarchy and correlate strongly with actual results.
 

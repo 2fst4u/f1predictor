@@ -60,7 +60,7 @@ This document describes the critical bugs fixed and improvements made to the F1 
 
 ## Infrastructure Improvements
 
-### Testing Infrastructure
+### Testing Infrastructure (Optional for Contributors)
 
 **Added:**
 - `tests/` directory with pytest configuration
@@ -76,54 +76,23 @@ This document describes the critical bugs fixed and improvements made to the F1 
 - Tests check DNF probabilities are in valid range
 - Tests ensure faster drivers win more often in simulation
 
-**Running Tests:**
+**Running Tests (optional):**
+If you want to contribute or verify the code:
 ```bash
-make test
-# or
+pip install pytest pytest-cov
 pytest tests/ -v
 ```
 
 ---
 
-### Code Quality Tools
+### User-Friendly Commands
 
 **Added:**
-- `pyproject.toml` - Project metadata and tool configuration
-- `ruff` for linting and formatting (120 char line length)
-- `mypy` for type checking
-- `.pre-commit-config.yaml` for optional git hooks
-- `.editorconfig` for consistent code style
-
-**Standards:**
-- PEP 8 compliance
-- Type hints enforcement
-- Import sorting
-- Security checks
-
-**Running Quality Checks:**
-```bash
-make lint    # Run linters
-make format  # Format code
-```
-
----
-
-### Development Workflow
-
-**Added:**
-- `Makefile` with common commands:
+- `Makefile` with simple commands:
   - `make install` - Install dependencies
-  - `make test` - Run tests
-  - `make lint` - Run linters
-  - `make format` - Format code
-  - `make clean` - Remove cache files
-  - `make predict` - Run prediction
+  - `make predict` - Run next race prediction
   - `make backtest` - Run backtesting
-
-**Dependencies:**
-- `requirements.txt` - Production dependencies (flexible versions)
-- `requirements-lock.txt` - Locked versions for reproducibility
-- `requirements-dev.txt` - Development tools
+  - `make clean` - Clear cache
 
 ---
 
@@ -133,6 +102,7 @@ make format  # Format code
 - `LICENSE` - MIT License
 - `CONTRIBUTING.md` - Contribution guidelines
 - This file - `FIXES_AND_IMPROVEMENTS.md`
+- `pyproject.toml` - Project metadata
 
 ---
 
@@ -176,10 +146,16 @@ pace = 0.75*model + 0.25*base  # More weight to trained model
 
 ## Testing the Fixes
 
-Run the test suite:
+For end users, just run:
 
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
+python main.py --round next
+```
+
+For contributors who want to verify:
+
+```bash
+pip install pytest
 pytest tests/ -v
 ```
 
@@ -216,21 +192,22 @@ If you have an existing installation:
 
 2. Clear old cache (important - form calculations changed):
    ```bash
+   make clean
+   # or
    rm -rf .cache/
    ```
 
 3. Update dependencies:
    ```bash
-   pip install -r requirements.txt -r requirements-dev.txt
+   make install
+   # or
+   pip install -r requirements.txt
    ```
 
-4. Run tests to verify:
+4. Re-run predictions:
    ```bash
-   pytest tests/
-   ```
-
-5. Re-run predictions:
-   ```bash
+   make predict
+   # or
    python main.py --round next --html
    ```
 
@@ -246,9 +223,9 @@ These fixes address the critical prediction accuracy issues. Additional improvem
    - Incorporate practice/qualifying session data
 
 2. **Model Improvements:**
-   - Hyperparameter tuning with Optuna
+   - Hyperparameter tuning
    - Ensemble methods (combine multiple models)
-   - Neural network option for complex interactions
+   - Alternative algorithms for different session types
 
 3. **Validation:**
    - Cross-validation across seasons
