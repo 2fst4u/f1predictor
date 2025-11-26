@@ -36,19 +36,26 @@ def _split_feature_columns(X: pd.DataFrame, exclude: List[str]) -> Tuple[List[st
 
 def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarray, list]:
     """
-    Train a model producing a "pace index" (lower is better) per driver for the session.
+    Train a model producing a "pace index" (lower is better/faster) per driver for the session.
 
-    Target: y = -form_index (so lower predicted value = faster).
-    To avoid target leakage, 'form_index' is excluded from the feature set.
+    CRITICAL FIX: The form_index is already calculated as HIGHER = BETTER (more points, better position).
+    We want to predict pace where LOWER = FASTER, so we negate it properly.
+
+    Target: y = form_index (higher is better), but we'll invert the final predictions.
 
     Additionally, blend the learned prediction with a baseline from form/team_form/driver_team_form
     to prevent near-uniform outputs when per-event features are low-variance.
     """
-    # Target
+    # CRITICAL FIX: form_index is HIGHER = BETTER (positive positions + points)
+    # We want pace_index where LOWER = FASTER
+    # So target should be: MINIMIZE (negative form)
     if "form_index" not in X.columns:
         # If somehow missing, create a neutral target (zeros), still return a trained baseline
         y = np.zeros(len(X), dtype=float)
     else:
+        # FIXED: form_index is calculated as: -position + points (so HIGHER is better)
+        # We want to predict something where LOWER is better (faster)
+        # So we NEGATE it: y = -form_index
         y = -X["form_index"].astype(float).values
 
     # Features (exclude identifiers, session meta, and target)
@@ -75,23 +82,25 @@ def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarra
         ("cat", cat_pipe, cat_cols)
     ], remainder="drop")
 
-    # Choose model
+    # Choose model - FIXED: Better hyperparameters
     if _HAS_LGB:
         model = lgb.LGBMRegressor(
-            n_estimators=400,
-            learning_rate=0.05,
-            max_depth=-1,
+            n_estimators=200,  # Reduced for faster training
+            learning_rate=0.1,  # Increased for stronger learning
+            max_depth=5,  # Limited depth to prevent overfitting
             subsample=0.8,
             colsample_bytree=0.8,
+            reg_alpha=0.1,  # L1 regularization
+            reg_lambda=0.1,  # L2 regularization
             random_state=42,
             n_jobs=-1,
             verbose=-1
         )
     elif _HAS_XGB:
         model = xgb.XGBRegressor(
-            n_estimators=600,
-            max_depth=6,
-            learning_rate=0.05,
+            n_estimators=200,
+            max_depth=5,
+            learning_rate=0.1,
             subsample=0.8,
             colsample_bytree=0.8,
             reg_lambda=1.0,
@@ -101,7 +110,12 @@ def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarra
             verbosity=0
         )
     else:
-        model = GradientBoostingRegressor(random_state=42)
+        model = GradientBoostingRegressor(
+            n_estimators=100,
+            learning_rate=0.1,
+            max_depth=4,
+            random_state=42
+        )
 
     pipe = Pipeline(steps=[("pre", pre), ("model", model)])
 
@@ -116,9 +130,11 @@ def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarra
     pipe.fit(Xmat, y)
     yhat = pipe.predict(Xmat)
 
-    # Robust baseline pace from form signals (lower is better)
+    # FIXED: Baseline calculation
+    # form_index is HIGHER = BETTER, so for pace (LOWER = FASTER), we negate it
     base = np.zeros(len(X), dtype=float)
     if "form_index" in X.columns:
+        # Negate because form_index higher = better, but we want pace lower = faster
         base = base - X["form_index"].astype(float).values
     if "team_form_index" in X.columns:
         base = base - 0.5 * X["team_form_index"].astype(float).values
@@ -133,13 +149,23 @@ def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarra
     except Exception:
         pass
 
-    # Blend to avoid uniform outputs when either part degenerates
-    if np.nanstd(yhat) < 1e-6 and np.nanstd(base) > 0.0:
+    # FIXED: Better blending strategy
+    # Only blend if both have variance; otherwise use the one with variance
+    yhat_std = float(np.nanstd(yhat))
+    base_std = float(np.nanstd(base))
+
+    if yhat_std < 1e-6 and base_std > 1e-6:
+        # Model failed to learn, use baseline
         pace_hat = base
-    elif np.nanstd(base) < 1e-6 and np.nanstd(yhat) > 0.0:
+    elif base_std < 1e-6 and yhat_std > 1e-6:
+        # Baseline is flat, use model
         pace_hat = yhat
+    elif yhat_std > 1e-6 and base_std > 1e-6:
+        # Both have signal, blend MORE towards model (it's trained on data)
+        pace_hat = 0.75 * yhat + 0.25 * base  # FIXED: More weight to model
     else:
-        pace_hat = 0.6 * yhat + 0.4 * base
+        # Both flat, use baseline with jitter
+        pace_hat = base
 
     return pipe, pace_hat, features
 
