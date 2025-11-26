@@ -7,7 +7,6 @@ Add these sections to your README.md:
 Add at the top of README.md after the title:
 
 ```markdown
-![Tests](https://github.com/2fst4u/f1predictor/workflows/Tests/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)
@@ -111,9 +110,9 @@ Add a new section:
 
 **Infrastructure:**
 - Added comprehensive test suite with pytest
-- CI/CD pipeline with GitHub Actions
-- Pre-commit hooks with ruff and mypy
-- Dependabot for automated updates
+- Code quality tools (ruff, mypy)
+- Pre-commit hooks for local development
+- Makefile for common commands
 
 **Documentation:**
 - Added LICENSE (MIT)

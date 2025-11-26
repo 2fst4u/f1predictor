@@ -76,21 +76,12 @@ This document describes the critical bugs fixed and improvements made to the F1 
 - Tests check DNF probabilities are in valid range
 - Tests ensure faster drivers win more often in simulation
 
----
-
-### CI/CD Pipeline
-
-**Added:**
-- `.github/workflows/test.yml` - Multi-OS, multi-Python version testing
-- `.github/workflows/security.yml` - Security scanning (bandit, safety)
-- `.github/dependabot.yml` - Automated dependency updates
-
-**Features:**
-- Runs on Ubuntu, Windows, macOS
-- Tests Python 3.11 and 3.12
-- Linting with ruff
-- Type checking with mypy
-- Coverage reporting to Codecov
+**Running Tests:**
+```bash
+make test
+# or
+pytest tests/ -v
+```
 
 ---
 
@@ -100,7 +91,7 @@ This document describes the critical bugs fixed and improvements made to the F1 
 - `pyproject.toml` - Project metadata and tool configuration
 - `ruff` for linting and formatting (120 char line length)
 - `mypy` for type checking
-- `.pre-commit-config.yaml` for git hooks
+- `.pre-commit-config.yaml` for optional git hooks
 - `.editorconfig` for consistent code style
 
 **Standards:**
@@ -108,6 +99,12 @@ This document describes the critical bugs fixed and improvements made to the F1 
 - Type hints enforcement
 - Import sorting
 - Security checks
+
+**Running Quality Checks:**
+```bash
+make lint    # Run linters
+make format  # Format code
+```
 
 ---
 
@@ -136,9 +133,6 @@ This document describes the critical bugs fixed and improvements made to the F1 
 - `LICENSE` - MIT License
 - `CONTRIBUTING.md` - Contribution guidelines
 - This file - `FIXES_AND_IMPROVEMENTS.md`
-
-**Improved:**
-- README.md badges section (ready for CI badges)
 
 ---
 
@@ -260,11 +254,6 @@ These fixes address the critical prediction accuracy issues. Additional improvem
    - Cross-validation across seasons
    - Temporal validation (train on past, test on future)
    - Calibration plots for probability estimates
-
-4. **Production Features:**
-   - Real-time API
-   - Web dashboard
-   - Historical prediction tracking database
 
 ---
 
