@@ -245,21 +245,14 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
             # Train self-calibrating pace model on current features
             pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess)
 
-            # Temper pace: normalise and scale to avoid overconfident separation
-            try:
-                mu = float(np.mean(pace_hat))
-                sd = float(np.std(pace_hat))
-                if not np.isfinite(sd) or sd < 1e-6:
-                    sd = 1.0
-                pace_hat = (pace_hat - mu) / sd
-                pace_scale = getattr(getattr(cfg, 'modelling', object()), 'pace_scale', 0.6)
-                try:
-                    pace_scale = float(pace_scale)
-                except Exception:
-                    pace_scale = 0.6
-                pace_hat = pace_hat * pace_scale
-            except Exception:
-                pass
+            # FIXED: Don't over-temper the pace predictions
+            # The model already has regularization and blending built in
+            # Just ensure it has some variance
+            pace_std = float(np.std(pace_hat))
+            if pace_std < 0.01:
+                # Add small noise to break ties if predictions are too uniform
+                logger.warning(f"[predict] Pace predictions have very low variance ({pace_std:.4f}), adding noise")
+                pace_hat = pace_hat + np.random.RandomState(42).normal(0, 0.1, size=len(pace_hat))
 
             # Reuse cached/optimized history for DNF (pass roster ids to hit cache/early stop)
             roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
