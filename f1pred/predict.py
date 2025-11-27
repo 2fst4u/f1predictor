@@ -13,7 +13,7 @@ from .data.open_meteo import OpenMeteoClient
 from .data.openf1 import OpenF1Client
 from .data.fastf1_backend import init_fastf1, get_session_classification
 from .features import build_session_features, collect_historical_results
-from .models import train_pace_model, train_dnf_hazard_model, estimate_dnf_probabilities
+from .models import train_pace_model, estimate_dnf_probabilities
 from .simulate import simulate_grid
 from .report import generate_html_report
 
@@ -84,35 +84,15 @@ def _session_title(stype: str) -> str:
     }.get(stype, stype)
 
 
-def _parse_lap_seconds(v) -> float:
-    # Accept numeric seconds or strings "M:SS.mmm" / "SS.mmm"
-    if v is None:
-        return np.nan
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip()
-    if not s:
-        return np.nan
-    try:
-        if ":" in s:
-            m, rest = s.split(":", 1)
-            return float(m) * 60.0 + float(rest)
-        return float(s)
-    except Exception:
-        return np.nan
-
-
 def _get_actual_positions_for_session(
     jc: JolpicaClient,
     season_i: int,
     round_i: int,
     sess: str,
-    roster_view: pd.DataFrame  # expects columns: driverId, number, code
+    roster_view: pd.DataFrame
 ) -> Optional[pd.Series]:
     """
     Return a Series aligned to roster_view with actual finishing/qualifying position where available.
-    Uses Jolpica for race/qual/sprint. For sprint_qualifying, uses FastF1 classification if present.
-    Never raises; returns None if not available.
     """
     try:
         if sess == "race":
@@ -151,37 +131,41 @@ def _get_actual_positions_for_session(
 
 def _filter_sessions_for_round(jc: JolpicaClient, season_i: int, round_i: int, requested: List[str]) -> List[str]:
     """
-    Assume a regular weekend unless confirmed otherwise:
-      - Always keep qualifying and race.
-      - Include sprint and sprint_qualifying only if the current round already has sprint results posted.
+    Filter sessions based on what's available for the round.
     """
     keep = []
     requested_norm = [s.strip().lower() for s in requested]
-    # Always keep these
+    
     for s in ("qualifying", "race"):
         if s in requested_norm:
             keep.append(s)
-    # Sprint only if confirmed by existing sprint results (for this round)
+    
     try:
         has_sprint = bool(jc.get_sprint_results(str(season_i), str(round_i)))
     except Exception:
         has_sprint = False
+    
     if has_sprint:
         for s in ("sprint_qualifying", "sprint"):
             if s in requested_norm:
                 keep.append(s)
+    
     return keep
 
 
-def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: List[str],
-                              generate_html: bool = True, open_browser: bool = False,
-                              return_results: bool = False):
+def run_predictions_for_event(
+    cfg,
+    season: Optional[str],
+    rnd: str,
+    sessions: List[str],
+    generate_html: bool = True,
+    open_browser: bool = False,
+    return_results: bool = False
+):
     """
     Generate predictions for given event, write CSV and optional HTML.
-    Returns a dict when return_results=True for the backtester.
-    Never raises on normal control flow; logs and skips sessions if necessary.
     """
-    # Ensure FastF1 cache is initialised (no-op if disabled/not installed)
+    # Initialize FastF1 cache if enabled
     try:
         if cfg.data_sources.fastf1.enabled:
             ensure_dirs(cfg.paths.fastf1_cache)
@@ -189,8 +173,12 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
     except Exception:
         pass
 
-    jc = JolpicaClient(cfg.data_sources.jolpica.base_url, cfg.data_sources.jolpica.timeout_seconds,
-                       cfg.data_sources.jolpica.rate_limit_sleep)
+    # Initialize API clients
+    jc = JolpicaClient(
+        cfg.data_sources.jolpica.base_url,
+        cfg.data_sources.jolpica.timeout_seconds,
+        cfg.data_sources.jolpica.rate_limit_sleep
+    )
     om = OpenMeteoClient(
         cfg.data_sources.open_meteo.forecast_url,
         cfg.data_sources.open_meteo.historical_weather_url,
@@ -202,22 +190,24 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
         windspeed_unit=cfg.data_sources.open_meteo.windspeed_unit,
         precipitation_unit=cfg.data_sources.open_meteo.precipitation_unit
     )
-    of1 = OpenF1Client(cfg.data_sources.openf1.base_url, cfg.data_sources.openf1.timeout_seconds,
-                       cfg.data_sources.openf1.enabled)
+    of1 = OpenF1Client(
+        cfg.data_sources.openf1.base_url,
+        cfg.data_sources.openf1.timeout_seconds,
+        cfg.data_sources.openf1.enabled
+    )
 
+    # Resolve event
     season_i, round_i, race_info = resolve_event(jc, season, rnd)
     event_title = f"{race_info.get('raceName') or 'Event'} {season_i} (Round {round_i})"
 
-    # Build a timezone-aware (UTC) event_date robustly
+    # Parse event date
     date_str = race_info.get("date") or datetime.utcnow().date().isoformat()
     time_str = race_info.get("time")
     if time_str:
-        if time_str.endswith("Z"):
-            timespec = time_str.replace("Z", "+00:00")
-        else:
-            timespec = f"{time_str}+00:00"
+        timespec = time_str.replace("Z", "+00:00") if time_str.endswith("Z") else f"{time_str}+00:00"
     else:
         timespec = "00:00:00+00:00"
+    
     try:
         event_date = datetime.fromisoformat(f"{date_str}T{timespec}")
         if event_date.tzinfo is None:
@@ -225,10 +215,9 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
     except Exception:
         event_date = datetime.now(timezone.utc)
 
-    # Filter sessions per your rule (assume regular weekend unless confirmed)
+    # Filter sessions
     sessions = _filter_sessions_for_round(jc, season_i, round_i, sessions)
 
-    sessions_out = []
     all_preds = []
     session_results: Dict[str, Dict[str, Any]] = {}
 
@@ -237,45 +226,55 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
             logger.info(f"Building features for {event_title} - {sess}")
             ref_date = event_date
 
+            # Build features
             X, meta, roster = build_session_features(jc, om, of1, season_i, round_i, sess, ref_date, cfg)
-            if X is None or roster is None or (hasattr(X, "empty") and X.empty) or (hasattr(roster, "empty") and roster.empty):
+            
+            if X is None or roster is None or X.empty or roster.empty:
                 logger.info(f"[predict] No features/roster available for {sess}; skipping")
                 continue
 
-            # Train self-calibrating pace model on current features
+            # Train pace model
             pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess)
 
-            # FIXED: Don't over-temper the pace predictions
-            # The model already has regularization and blending built in
-            # Just ensure it has some variance
+            # Log pace statistics for debugging
             pace_std = float(np.std(pace_hat))
+            pace_range = float(np.ptp(pace_hat))
+            logger.info(f"[predict] Pace stats: std={pace_std:.4f}, range={pace_range:.4f}")
+
+            # Warn if predictions look too uniform
             if pace_std < 0.01:
-                # Add small noise to break ties if predictions are too uniform
-                logger.warning(f"[predict] Pace predictions have very low variance ({pace_std:.4f}), adding noise")
-                pace_hat = pace_hat + np.random.RandomState(42).normal(0, 0.1, size=len(pace_hat))
+                logger.warning(f"[predict] Low pace variance ({pace_std:.4f}) - predictions may be unreliable")
 
-            # Reuse cached/optimized history for DNF (pass roster ids to hit cache/early stop)
+            # Get historical data for DNF estimation
             roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
-            hist = collect_historical_results(jc, season=season_i, end_before=ref_date,
-                                              lookback_years=75, roster_driver_ids=roster_ids)
+            hist = collect_historical_results(
+                jc, season=season_i, end_before=ref_date,
+                lookback_years=75, roster_driver_ids=roster_ids
+            )
 
+            # Estimate DNF probabilities (only for race-like sessions)
             dnf_prob = np.zeros(X.shape[0], dtype=float)
             if sess in ("race", "sprint"):
-                # Beta-smoothed empirical DNF estimate
                 try:
-                    dnf_prob = estimate_dnf_probabilities(hist, X,
-                                                          alpha=2.0, beta=8.0,
-                                                          driver_weight=0.6, team_weight=0.4,
-                                                          clip_min=0.02, clip_max=0.35)
-                except Exception:
-                    dnf_prob[:] = 0.12
+                    dnf_prob = estimate_dnf_probabilities(
+                        hist, X,
+                        alpha=2.0, beta=8.0,
+                        driver_weight=0.6, team_weight=0.4,
+                        clip_min=0.02, clip_max=0.30
+                    )
+                except Exception as e:
+                    logger.info(f"[predict] DNF estimation failed: {e}; using default")
+                    dnf_prob[:] = 0.08
 
-            # Monte Carlo simulation to get distributions
+            # Run Monte Carlo simulation
             draws = cfg.modelling.monte_carlo.draws
             prob_matrix, mean_pos, pairwise = simulate_grid(pace_hat, dnf_prob, draws=draws)
 
+            # Extract probabilities
             p_top3 = prob_matrix[:, :3].sum(axis=1)
             p_win = prob_matrix[:, 0]
+
+            # Create ranked output
             order = np.argsort(mean_pos)
             ranked = X.iloc[order].reset_index(drop=True)
             ranked["mean_pos"] = mean_pos[order]
@@ -284,12 +283,13 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
             ranked["p_dnf"] = dnf_prob[order]
             ranked["predicted_position"] = np.arange(1, len(ranked) + 1)
 
-            # Ensure required columns exist for actuals mapping
+            # Ensure required columns exist
             if "number" not in ranked.columns:
                 ranked["number"] = pd.Series([pd.NA] * len(ranked))
             if "code" not in ranked.columns:
                 ranked["code"] = ""
 
+            # Get actual positions if available
             actual_positions = _get_actual_positions_for_session(
                 jc, season_i, round_i, sess, ranked[["driverId", "number", "code"]]
             )
@@ -300,6 +300,7 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
                 ranked["actual_position"] = np.nan
                 ranked["delta"] = np.nan
 
+            # Build prediction records
             for _, row in ranked.iterrows():
                 all_preds.append({
                     "season": season_i,
@@ -319,22 +320,16 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
                     "model_version": cfg.app.model_version
                 })
 
+            # Print to console
             print_session_console(ranked, sess, cfg)
 
-            sess_rows = []
-            for _, row in ranked.iterrows():
-                sess_rows.append({
-                    "rank": int(row["predicted_position"]),
-                    "name": row.get("name"),
-                    "code": row.get("code") or "",
-                    "team": row.get("constructorName") or "",
-                    "mean_pos": float(row["mean_pos"]),
-                    "p_top3": float(row["p_top3"]),
-                    "p_win": float(row["p_win"]),
-                    "p_dnf": float(row["p_dnf"]),
-                    "delta": (int(row["delta"]) if pd.notna(row["delta"]) else None)
-                })
-            # Note: backtester support omitted for brevity here (can be re-added similarly)
+            # Store results for backtester
+            if return_results:
+                session_results[sess] = {
+                    "ranked": ranked,
+                    "prob_matrix": prob_matrix,
+                    "pairwise": pairwise
+                }
 
         except Exception as e:
             logger.info(f"[predict] Session {sess} failed: {e}; skipping")
@@ -346,16 +341,17 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
         ensure_dirs(os.path.dirname(outcsv))
         newdf = pd.DataFrame(all_preds)
         merged = newdf
+        
         if os.path.exists(outcsv) and os.path.getsize(outcsv) > 0:
             try:
                 old = pd.read_csv(outcsv)
                 merged = pd.concat(
-                    [old[~((old.season == season_i) & (old.round == round_i) & (old.event.isin(sessions)))], newdf],
+                    [old[~((old.season == season_i) & (old["round"] == round_i) & (old.event.isin(sessions)))], newdf],
                     ignore_index=True
                 )
             except Exception:
-                # corrupted or empty-parse file; overwrite with newdf
                 merged = newdf
+        
         if not merged.empty:
             merged = merged.sort_values(["season", "round", "event", "predicted_pos"])
         merged.to_csv(outcsv, index=False)
@@ -363,22 +359,35 @@ def run_predictions_for_event(cfg, season: Optional[str], rnd: str, sessions: Li
     except Exception as e:
         logger.info(f"[predict] Writing predictions CSV failed: {e}")
 
-    # HTML
+    # Generate HTML report
     try:
         if generate_html:
             report_path = os.path.join(cfg.paths.reports_dir, f"{season_i}_R{round_i}.html")
-            subtitle = f"{event_title}"
-            # If needed, build sessions_out from all_preds
-            sessions_out = []  # simplified (HTML reporting optional)
-            generate_html_report(report_path, title=event_title, subtitle=subtitle, sessions_data=sessions_out,
-                                 cfg=cfg, open_browser=open_browser)
+            generate_html_report(
+                report_path,
+                title=event_title,
+                subtitle=event_title,
+                sessions_data=[],
+                cfg=cfg,
+                open_browser=open_browser
+            )
     except Exception as e:
         logger.info(f"[predict] HTML report generation failed: {e}")
 
+    # Return results for backtester
+    if return_results:
+        return {
+            "season": season_i,
+            "round": round_i,
+            "sessions": session_results
+        }
+
 
 def print_session_console(df: pd.DataFrame, sess: str, cfg) -> None:
+    """Print session predictions to console."""
     title = _session_title(sess)
     print(f"\n== {title} ==")
+    
     for _, r in df.iterrows():
         pos = int(r["predicted_position"])
         name = (r.get("name") or "")[:30]
@@ -388,6 +397,7 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg) -> None:
         win = float(r["p_win"]) * 100
         dnf = float(r["p_dnf"]) * 100
         delta = r.get("delta")
+        
         if pd.notna(delta):
             if delta < 0:
                 delta_str = Fore.GREEN + f"↑ {-int(delta)}" + Style.RESET_ALL
@@ -397,4 +407,5 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg) -> None:
                 delta_str = "·"
         else:
             delta_str = "·"
+        
         print(f"{pos:2d}. {name:30s} [{team:18s}]  μ={mp:4.1f}  Top3={top3:4.1f}%  Win={win:4.1f}%  DNF={dnf:4.1f}%  {delta_str}")
