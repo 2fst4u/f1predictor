@@ -158,7 +158,14 @@ def collect_historical_results(
     lookback_years: int = 50,
     roster_driver_ids: Optional[List[str]] = None,
 ) -> pd.DataFrame:
-    """Optimized, roster-aware, season-bulk history builder."""
+    """
+    Optimized, roster-aware, season-bulk history builder.
+    - Uses bulk season endpoints (1–3 calls per season) to avoid 429s and reduce API pressure.
+    - Iterates seasons backwards from 'season' down to max(1950, season - lookback_years).
+    - Early stop: stop at the first season where none of the current roster drivers appear at all.
+    - Always respects time-cut end_before.
+    - In-process cached by (season, cutoff_date_str, roster_ids) to avoid duplicate work within the same run.
+    """
     cutoff_key = end_before.date().isoformat()
     roster_key = tuple(sorted(roster_driver_ids)) if roster_driver_ids else tuple()
     cache_key = (season, cutoff_key, roster_key)
@@ -325,7 +332,7 @@ def compute_grid_finish_delta(
 ) -> pd.DataFrame:
     """Recency-weighted average (grid - finish) in races."""
     if hist.empty:
-        return pdDataFrame(columns=["driverId", "grid_finish_delta"])
+        return pd.DataFrame(columns=["driverId", "grid_finish_delta"])
 
     races = hist[hist["session"] == "race"].copy()
     races = races.dropna(subset=["driverId", "grid", "position", "date"])
@@ -360,8 +367,8 @@ def _aggregate_weather(om: OpenMeteoClient, lat: float, lon: float, event_dt: da
 
 def compute_weather_sensitivity(
     om: OpenMeteoClient,
-    hist: pdDataFrame,
-    roster: pdDataFrame,
+    hist: pd.DataFrame,
+    roster: pd.DataFrame,
     ref_date: datetime,
     recent_years: int = 5
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
