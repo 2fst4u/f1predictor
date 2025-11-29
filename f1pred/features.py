@@ -241,7 +241,12 @@ def compute_driver_team_form(
     half_life_days: int,
     window_days: int = 730,
 ) -> pd.DataFrame:
-    """Driver-team specific form for current constructor."""
+    """
+    Driver-team specific form (recency-weighted, last 'window_days') using only events
+    where the driver's event constructor equals their current roster constructor.
+
+    Returns DataFrame: [driverId, driver_team_form_index, team_tenure_events]
+    """
     if df.empty or roster.empty:
         return pd.DataFrame(columns=["driverId", "driver_team_form_index", "team_tenure_events"])
 
@@ -275,20 +280,11 @@ def compute_teammate_delta(
     ref_date: datetime,
     half_life_days: int,
 ) -> pd.DataFrame:
-    """Recency-weighted average qualifying advantage vs team-mate.
-
-    For each qualifying session where a driver has at least one team-mate
-    (same constructor, same season/round), we compute the team average qpos
-    and define delta = team_avg - driver_qpos so that positive = better than
-    team average.
-    """
+    """Recency-weighted average qualifying advantage vs. team-mate."""
     if hist.empty:
         return pd.DataFrame(columns=["driverId", "teammate_delta"])
 
     q = hist[hist["session"] == "qualifying"].copy()
-    if q.empty:
-        return pd.DataFrame(columns=["driverId", "teammate_delta"])
-
     q = q.dropna(subset=["constructorId", "driverId", "qpos", "date"])
     if q.empty:
         return pd.DataFrame(columns=["driverId", "teammate_delta"])
@@ -298,31 +294,26 @@ def compute_teammate_delta(
     q["w"] = w
 
     rows: List[Dict[str, Any]] = []
-    grp = q.groupby(["season", "round", "constructorId"])
-    for (_, _, _), g in grp:
+    for (_, _, cons), g in q.groupby(["season", "round", "constructorId"]):
         if g.shape[0] < 2:
             continue
         team_avg = g["qpos"].mean()
         for _, r in g.iterrows():
-            rows.append(
-                {
-                    "driverId": r["driverId"],
-                    "delta": team_avg - float(r["qpos"]),
-                    "w": r["w"],
-                }
-            )
+            rows.append({
+                "driverId": r["driverId"],
+                "delta": team_avg - float(r["qpos"]),
+                "w": r["w"],
+            })
 
     if not rows:
         return pd.DataFrame(columns=["driverId", "teammate_delta"])
 
     df = pd.DataFrame(rows)
     agg = df.groupby("driverId").apply(
-        lambda g: pd.Series(
-            {
-                "teammate_delta": float((g["delta"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
-            }
-        ),
-        include_groups=False,
+        lambda g: pd.Series({
+            "teammate_delta": float((g["delta"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
+        }),
+        include_groups=False
     ).reset_index()
     return agg
 
@@ -332,12 +323,9 @@ def compute_grid_finish_delta(
     ref_date: datetime,
     half_life_days: int,
 ) -> pd.DataFrame:
-    """Recency-weighted average (grid - finish) in races.
-
-    positive = tends to gain positions (start further back than finish).
-    """
+    """Recency-weighted average (grid - finish) in races."""
     if hist.empty:
-        return pd.DataFrame(columns=["driverId", "grid_finish_delta"])
+        return pdDataFrame(columns=["driverId", "grid_finish_delta"])
 
     races = hist[hist["session"] == "race"].copy()
     races = races.dropna(subset=["driverId", "grid", "position", "date"])
@@ -349,18 +337,19 @@ def compute_grid_finish_delta(
     races["w"] = w
 
     agg = races.groupby("driverId").apply(
-        lambda g: pd.Series(
-            {
-                "grid_finish_delta": float((g["gain"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
-            }
-        ),
-        include_groups=False,
+        lambda g: pd.Series({
+            "grid_finish_delta": float((g["gain"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
+        }),
+        include_groups=False
     ).reset_index()
     return agg
 
 
 def _aggregate_weather(om: OpenMeteoClient, lat: float, lon: float, event_dt: datetime) -> Dict[str, float]:
-    """Aggregate Open-Meteo hourly weather around event_dt +/- 1 day."""
+    """
+    Aggregate Open-Meteo hourly weather around event_dt +/- 1 day. Uses historical weather
+    (ERA5) with a +/-1 day window, 2h aggregation via OpenMeteoClient.aggregate_for_session.
+    """
     try:
         wdf = om.get_historical_weather(lat, lon, event_dt - timedelta(days=1), event_dt + timedelta(days=1))
         agg = om.aggregate_for_session(wdf, event_dt - timedelta(hours=1), event_dt + timedelta(hours=1))
@@ -371,21 +360,32 @@ def _aggregate_weather(om: OpenMeteoClient, lat: float, lon: float, event_dt: da
 
 def compute_weather_sensitivity(
     om: OpenMeteoClient,
-    hist: pd.DataFrame,
-    roster: pd.DataFrame,
+    hist: pdDataFrame,
+    roster: pdDataFrame,
     ref_date: datetime,
     recent_years: int = 5
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
-    """Learn per-driver weather sensitivities from recent historical events."""
+    """
+    Learn per-driver weather sensitivities from recent historical events.
+    For each driver, correlates performance residual (better = higher) with
+    weather variables across their recent events, to produce coefficients:
+      weather_beta_temp, weather_beta_pressure, weather_beta_wind, weather_beta_rain.
+    Returns:
+      - DataFrame with columns [driverId, weather_beta_temp, weather_beta_pressure, weather_beta_wind, weather_beta_rain]
+      - Dict current_weather (temp_mean, pressure_mean, wind_mean, rain_sum) for convenience (callers may have it already)
+    """
     if hist.empty or roster.empty:
         return pd.DataFrame(columns=[
             "driverId", "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain"
         ]), {}
 
+    # Limit to recent years to control Open-Meteo calls
     min_year = max(1950, ref_date.year - recent_years)
     hist_recent = hist[(hist["date"].dt.year >= min_year)].copy()
+    # Deduplicate events
     evt_keys = hist_recent[["season", "round", "circuit", "lat", "lon", "date"]].drop_duplicates()
 
+    # Build weather per event (race session proxy around event date/time)
     evt_weather: Dict[Tuple[int, int], Dict[str, float]] = {}
     for _, row in evt_keys.iterrows():
         try:
@@ -401,18 +401,22 @@ def compute_weather_sensitivity(
         except Exception:
             continue
 
+    # Merge per-driver past results with event weather
     races = hist_recent[hist_recent["session"] == "race"].copy()
     if races.empty:
         return pd.DataFrame(columns=[
             "driverId", "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain"
         ]), {}
 
+    # Compute a simple performance residual: negative normalized position
+    # Lower position is better; invert and z-score within season to reduce era effects
     races = races.dropna(subset=["driverId", "position", "season", "round", "date"])
     races["pos_inv"] = -races["position"].astype(float)
     races["pos_inv_z"] = races.groupby("season")["pos_inv"].transform(
         lambda s: (s - s.mean()) / (s.std() + 1e-6)
     )
 
+    # Attach event weather
     w_rows = []
     for _, r in races.iterrows():
         key = (int(r["season"]), int(r["round"]))
@@ -426,6 +430,7 @@ def compute_weather_sensitivity(
     wdf = pd.DataFrame(w_rows, index=races.index)
     races = pd.concat([races.reset_index(drop=True), wdf.reset_index(drop=True)], axis=1)
 
+    # Drop rows missing weather data
     weather_cols = ["weather_temp", "weather_pressure", "weather_wind", "weather_rain"]
     races = races.dropna(subset=weather_cols + ["pos_inv_z"])
     if races.empty:
@@ -433,9 +438,11 @@ def compute_weather_sensitivity(
             "driverId", "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain"
         ]), {}
 
+    # Compute per-driver coefficients as correlation between pos_inv_z and each weather variable
     betas = []
     for drv, g in races.groupby("driverId"):
         if g.shape[0] < 5:
+            # not enough samples; neutral
             betas.append({
                 "driverId": drv,
                 "weather_beta_temp": 0.0,
@@ -458,7 +465,7 @@ def compute_weather_sensitivity(
         })
     beta_df = pd.DataFrame(betas)
 
-    return beta_df, {}
+    return beta_df, {}  # current weather passed separately by caller
 
 
 def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional[OpenF1Client],
@@ -547,7 +554,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
         logger.info(f"[features] Historical results fetch failed: {e}")
         hist = pd.DataFrame(columns=["driverId", "position", "date", "session", "constructorId", "points"])
 
-    # Form indices
+    # Generic driver form and team form indices
     form = compute_form_indices(hist, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.base)
 
     team_form = hist[hist["session"] == "race"].dropna(subset=["constructorId", "date", "points"])
@@ -562,11 +569,12 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
     else:
         team_idx = pd.DataFrame(columns=["constructorId", "team_form_index"])
 
+    # Driver-team specific form (current constructor only)
     drv_team_form = compute_driver_team_form(
         hist, roster, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.team, window_days=730
     )
 
-    # New dynamic features: teammate_delta & grid_finish_delta
+    # Teammate advantage & racecraft deltas
     try:
         tm_delta = compute_teammate_delta(
             hist,
@@ -589,7 +597,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
         logger.info(f"[features] grid_finish_delta computation failed: {e}")
         gf_delta = pd.DataFrame(columns=["driverId", "grid_finish_delta"])
 
-    # Weather sensitivity per driver
+    # Learned weather sensitivity per driver (inherent)
     try:
         beta_df, _ = compute_weather_sensitivity(om, hist, roster, ref_date=ref_date, recent_years=5)
     except Exception:
@@ -597,12 +605,13 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
             "driverId", "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain"
         ])
 
+    # Weather sensitivity placeholder features
     weather_df = pd.DataFrame({
         "driverId": roster["driverId"] if not roster.empty else [],
         "wet_skill": 0.0, "cold_skill": 0.0, "wind_skill": 0.0, "pressure_skill": 0.0
     })
 
-    # Merge features
+    # Merge features (handle empty frames gracefully)
     X = _empty_feature_frame()
     if not roster.empty:
         X = roster.copy()
@@ -619,15 +628,15 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
         X = X.merge(tm_delta, on="driverId", how="left")
         X = X.merge(gf_delta, on="driverId", how="left")
 
-        for col in [
-            "form_index", "team_form_index", "driver_team_form_index", "team_tenure_events",
-            "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain",
-            "wet_skill", "cold_skill", "wind_skill", "pressure_skill",
-            "teammate_delta", "grid_finish_delta",
-        ]:
+        # Fill NaNs
+        for col in ["form_index", "team_form_index", "driver_team_form_index", "team_tenure_events",
+                    "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain",
+                    "wet_skill", "cold_skill", "wind_skill", "pressure_skill",
+                    "teammate_delta", "grid_finish_delta"]:
             if col in X.columns:
                 X[col] = X[col].fillna(0.0)
 
+        # Compute driver-specific weather effect = beta · current_weather
         wt = wagg or {}
         X["weather_effect"] = (
             X.get("weather_beta_temp", 0.0) * float(wt.get("temp_mean", 0.0)) +
@@ -636,11 +645,13 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
             X.get("weather_beta_rain", 0.0) * float(wt.get("rain_sum", 0.0))
         )
 
+    # Session type encoding
     X["session_type"] = session_type
     X["is_race"] = 1 if session_type == "race" else 0
     X["is_qualifying"] = 1 if session_type in ("qualifying", "sprint_qualifying") else 0
     X["is_sprint"] = 1 if "sprint" in session_type else 0
 
+    # Weather features (aggregate)
     for k, v in (wagg or {}).items():
         X[f"weather_{k}"] = v
 
