@@ -250,6 +250,7 @@ def run_predictions_for_event(
 
     all_preds: List[Dict[str, Any]] = []
     session_results: Dict[str, Dict[str, Any]] = {}
+    sessions_out: List[Dict[str, Any]] = []
 
     for sess in sessions:
         try:
@@ -366,6 +367,10 @@ def run_predictions_for_event(
             ranked["p_dnf"] = dnf_prob[order]
             ranked["predicted_position"] = np.arange(1, len(ranked) + 1)
 
+            prob_matrix_sorted = prob_matrix[order] if prob_matrix.size else prob_matrix
+            pairwise_sorted = pairwise[np.ix_(order, order)] if pairwise.size else pairwise
+            dnf_prob_sorted = dnf_prob[order]
+
             # Ensure required columns exist for actuals mapping
             if "number" not in ranked.columns:
                 ranked["number"] = pd.Series([pd.NA] * len(ranked))
@@ -408,6 +413,39 @@ def run_predictions_for_event(
                 )
 
             print_session_console(ranked, sess, cfg)
+
+            sess_rows: List[Dict[str, Any]] = []
+            for _, row in ranked.iterrows():
+                sess_rows.append(
+                    {
+                        "rank": int(row["predicted_position"]),
+                        "name": row.get("name"),
+                        "code": row.get("code") or "",
+                        "team": row.get("constructorName") or "",
+                        "mean_pos": float(row["mean_pos"]),
+                        "p_top3": float(row["p_top3"]),
+                        "p_win": float(row["p_win"]),
+                        "p_dnf": float(row["p_dnf"]),
+                        "actual_pos": int(row["actual_position"]) if pd.notna(row["actual_position"]) else None,
+                        "delta": (int(row["delta"]) if pd.notna(row["delta"]) else None),
+                    }
+                )
+
+            sessions_out.append(
+                {
+                    "session": sess,
+                    "session_title": _session_title(sess),
+                    "rows": sess_rows,
+                }
+            )
+
+            session_results[sess] = {
+                "ranked": ranked.copy(),
+                "prob_matrix": prob_matrix_sorted.copy(),
+                "pairwise": pairwise_sorted.copy(),
+                "dnf_prob": dnf_prob_sorted.copy(),
+                "meta": meta,
+            }
 
         except Exception as e:
             logger.info(f"[predict] Session {sess} failed: {e}; skipping")
@@ -454,7 +492,7 @@ def run_predictions_for_event(
                 report_path,
                 title=event_title,
                 subtitle=subtitle,
-                sessions_data=[],
+                sessions_data=sessions_out,
                 cfg=cfg,
                 open_browser=open_browser,
             )
