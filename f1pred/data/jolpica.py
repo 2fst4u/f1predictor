@@ -26,7 +26,8 @@ class JolpicaClient:
         self.rate_limit_sleep = rate_limit_sleep
         self.session = session_with_retries()
 
-    def _retry_after_seconds(self, headers: Dict[str, str], attempt: int, base: float, cap: float) -> float:
+    @staticmethod
+    def _retry_after_seconds(headers: Dict[str, str], attempt: int, base: float, cap: float) -> float:
         """
         Choose backoff duration:
           - If Retry-After is a number (seconds), use it.
@@ -45,11 +46,8 @@ class JolpicaClient:
             try:
                 dt = parsedate_to_datetime(ra)
                 if dt:
-                    now = parsedate_to_datetime(parsedate_to_datetime(time.ctime()).ctime()) if False else None
-                # simpler: compute relative to time.time()
-                epoch_target = dt.timestamp()
-                now_epoch = time.time()
-                return max(0.0, epoch_target - now_epoch)
+                    now_epoch = time.time()
+                    return max(0.0, dt.timestamp() - now_epoch)
             except Exception:
                 pass
         # Fallback: exponential with jitter
@@ -78,22 +76,24 @@ class JolpicaClient:
                 if self.rate_limit_sleep and self.rate_limit_sleep > 0:
                     time.sleep(self.rate_limit_sleep)
                 if attempt > 0:
-                    logger.info(f"429 retries succeeded for {url} after {attempt} attempt(s), slept {slept_total:.2f}s total")
+                    logger.info(
+                        f"429 retries succeeded for {url} after {attempt} attempt(s), slept {slept_total:.2f}s total"
+                    )
                 return data
             except HTTPError as e:
                 status_code = getattr(e.response, "status_code", None) if e.response is not None else None
                 if status_code == 429 and attempt < max_429_retries:
                     headers = e.response.headers if e.response is not None else {}
                     sleep_s = self._retry_after_seconds(headers, attempt, backoff_base, backoff_max)
-                    logger.info(f"429 from {url}; backing off {sleep_s:.2f}s (attempt {attempt + 1}/{max_429_retries})")
+                    logger.info(
+                        f"429 from {url}; backing off {sleep_s:.2f}s (attempt {attempt + 1}/{max_429_retries})"
+                    )
                     time.sleep(sleep_s)
                     slept_total += sleep_s
                     attempt += 1
                     continue
-                # Log and re-raise other HTTP errors
                 raise
             except Exception:
-                # Non-HTTP error; re-raise
                 raise
 
     @staticmethod
