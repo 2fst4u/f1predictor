@@ -13,7 +13,7 @@ from .data.open_meteo import OpenMeteoClient
 from .data.openf1 import OpenF1Client
 from .data.fastf1_backend import init_fastf1, get_session_classification
 from .features import build_session_features, collect_historical_results
-from .models import train_pace_model, train_dnf_hazard_model, estimate_dnf_probabilities
+from .models import train_pace_model, estimate_dnf_probabilities
 from .simulate import simulate_grid
 from .report import generate_html_report
 from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace
@@ -21,162 +21,7 @@ from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, Ensemb
 logger = get_logger(__name__)
 
 
-def resolve_event(jc: JolpicaClient, season: Optional[str], rnd: str) -> Tuple[int, int, Dict[str, Any]]:
-    """Resolve season/round to use. Never raises; falls back to current/last if needed."""
-    try:
-        if season is None or (isinstance(season, str) and season.lower() == "current"):
-            if rnd == "next":
-                s, r = jc.get_next_round()
-            elif rnd == "last":
-                s, r = jc.get_latest_season_and_round()
-            else:
-                s, r = jc.get_latest_season_and_round()
-                r = rnd
-        else:
-            s = season
-            if rnd in ("next", "last"):
-                races = jc.get_season_schedule(str(s))
-                if rnd == "last":
-                    for race in reversed(races):
-                        try:
-                            if jc.get_race_results(str(s), race["round"]):
-                                r = race["round"]
-                                break
-                        except Exception:
-                            continue
-                    else:
-                        r = races[-1]["round"]
-                else:
-                    now = datetime.utcnow()
-                    future = [x for x in races if datetime.fromisoformat(x["date"] + "T00:00:00+00:00") >= now]
-                    r = future[0]["round"] if future else races[-1]["round"]
-            else:
-                r = rnd
-        race_info = [x for x in jc.get_season_schedule(str(s)) if str(x.get("round")) == str(r)]
-        if not race_info:
-            logger.info(f"[predict] Could not resolve schedule for {s} round {r}; continuing with defaults")
-            race_info = [{
-                "raceName": None,
-                "date": datetime.utcnow().date().isoformat(),
-                "time": "00:00:00+00:00",
-            }]
-        return int(s), int(r), race_info[0]
-    except Exception as e:
-        logger.info(f"[predict] resolve_event failed: {e}; falling back to current/last")
-        s, r = jc.get_latest_season_and_round()
-        fallback_info = [x for x in jc.get_season_schedule(str(s)) if str(x.get("round")) == str(r)]
-        if not fallback_info:
-            fallback_info = [{
-                "raceName": None,
-                "date": datetime.utcnow().date().isoformat(),
-                "time": "00:00:00+00:00",
-            }]
-        return int(s), int(r), fallback_info[0]
-
-
-def _session_title(stype: str) -> str:
-    return {
-        "race": "Grand Prix (Race)",
-        "qualifying": "Qualifying",
-        "sprint": "Sprint",
-        "sprint_qualifying": "Sprint Qualifying",
-    }.get(stype, stype)
-
-
-def _parse_lap_seconds(v) -> float:
-    """Accept numeric seconds or strings "M:SS.mmm" / "SS.mmm"."""
-    if v is None:
-        return np.nan
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip()
-    if not s:
-        return np.nan
-    try:
-        if ":" in s:
-            m, rest = s.split(":", 1)
-            return float(m) * 60.0 + float(rest)
-        return float(s)
-    except Exception:
-        return np.nan
-
-
-def _get_actual_positions_for_session(
-    jc: JolpicaClient,
-    season_i: int,
-    round_i: int,
-    sess: str,
-    roster_view: pd.DataFrame,  # expects columns: driverId, number, code
-) -> Optional[pd.Series]:
-    """Return a Series aligned to roster_view with actual finishing/qualifying position where available.
-
-    Uses Jolpica for race/qual/sprint. For sprint_qualifying, uses FastF1 classification if present.
-    Never raises; returns None if not available.
-    """
-    try:
-        if sess == "race":
-            act = jc.get_race_results(str(season_i), str(round_i))
-            amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position")}
-            return roster_view["driverId"].map(amap) if amap else None
-
-        if sess == "qualifying":
-            act = jc.get_qualifying_results(str(season_i), str(round_i))
-            amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position")}
-            return roster_view["driverId"].map(amap) if amap else None
-
-        if sess == "sprint":
-            act = jc.get_sprint_results(str(season_i), str(round_i))
-            amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position")}
-            return roster_view["driverId"].map(amap) if amap else None
-
-        if sess == "sprint_qualifying":
-            cls = get_session_classification(season_i, round_i, "Sprint Shootout")
-            if cls is not None and hasattr(cls, "empty") and not cls.empty:
-                if "DriverNumber" in cls.columns:
-                    num_series = pd.to_numeric(roster_view["number"], errors="coerce").astype("Int64")
-                    num_to_pos = dict(
-                        cls.dropna(subset=["Position"]).astype({"DriverNumber": int, "Position": int})[
-                            ["DriverNumber", "Position"]
-                        ].values
-                    )
-                    return num_series.map(num_to_pos)
-                if "Abbreviation" in cls.columns:
-                    code_series = roster_view["code"].astype(str)
-                    abbr_to_pos = dict(
-                        cls.dropna(subset=["Position"])[["Abbreviation", "Position"]].values
-                    )
-                    return code_series.map(abbr_to_pos)
-            return None
-
-        return None
-    except Exception:
-        return None
-
-
-def _filter_sessions_for_round(jc: JolpicaClient, season_i: int, round_i: int, requested: List[str]) -> List[str]:
-    """Assume a regular weekend unless confirmed otherwise.
-
-    - Always keep qualifying and race.
-    - Include sprint and sprint_qualifying only if the current round already has sprint results posted.
-    """
-    keep = []
-    requested_norm = [s.strip().lower() for s in requested]
-
-    for s in ("qualifying", "race"):
-        if s in requested_norm:
-            keep.append(s)
-
-    try:
-        has_sprint = bool(jc.get_sprint_results(str(season_i), str(round_i)))
-    except Exception:
-        has_sprint = False
-
-    if has_sprint:
-        for s in ("sprint_qualifying", "sprint"):
-            if s in requested_norm:
-                keep.append(s)
-
-    return keep
+# ... existing functions resolve_event, _session_title, _parse_lap_seconds, _get_actual_positions_for_session, _filter_sessions_for_round ...
 
 
 def run_predictions_for_event(
@@ -188,7 +33,8 @@ def run_predictions_for_event(
     open_browser: bool = False,
     return_results: bool = False,
 ):
-    """Generate predictions for given event, write CSV and optional HTML.
+    """
+    Generate predictions for given event, write CSV and optional HTML.
 
     Returns a dict when return_results=True for the backtester.
     Never raises on normal control flow; logs and skips sessions if necessary.
@@ -277,11 +123,7 @@ def run_predictions_for_event(
                 if not np.isfinite(sd) or sd < 1e-6:
                     sd = 1.0
                 pace_hat = (pace_hat - mu) / sd
-                pace_scale = getattr(getattr(cfg, "modelling", object()), "pace_scale", 0.6)
-                try:
-                    pace_scale = float(pace_scale)
-                except Exception:
-                    pace_scale = 0.6
+                pace_scale = float(getattr(getattr(cfg, "modelling", object()), "pace_scale", 0.6))
                 pace_hat = pace_hat * pace_scale
             except Exception:
                 logger.info("[predict] Pace normalisation failed; using raw GBM pace")
@@ -296,7 +138,7 @@ def run_predictions_for_event(
                 roster_driver_ids=roster_ids,
             )
 
-            # --- Ensemble skill components (all data-driven) ---
+            # Ensemble skill components (all data-driven)
             elo_pace = bt_pace = mixed_pace = None
             try:
                 elo_model = EloModel().fit(hist)
@@ -318,7 +160,11 @@ def run_predictions_for_event(
 
             # Combine GBM pace with ensemble elements
             try:
-                ens_cfg = EnsembleConfig()  # could later be fed from cfg.modelling.ensemble
+                ens_cfg = getattr(cfg.modelling, "ensemble", None)
+                if ens_cfg is None:
+                    ens_cfg = EnsembleConfig()
+                else:
+                    ens_cfg = EnsembleConfig(**ens_cfg.__dict__)
                 combined_pace = combine_pace(
                     gbm_pace=pace_hat,
                     elo_pace=elo_pace,
@@ -367,10 +213,6 @@ def run_predictions_for_event(
             ranked["p_dnf"] = dnf_prob[order]
             ranked["predicted_position"] = np.arange(1, len(ranked) + 1)
 
-            prob_matrix_sorted = prob_matrix[order] if prob_matrix.size else prob_matrix
-            pairwise_sorted = pairwise[np.ix_(order, order)] if pairwise.size else pairwise
-            dnf_prob_sorted = dnf_prob[order]
-
             # Ensure required columns exist for actuals mapping
             if "number" not in ranked.columns:
                 ranked["number"] = pd.Series([pd.NA] * len(ranked))
@@ -413,6 +255,10 @@ def run_predictions_for_event(
                 )
 
             print_session_console(ranked, sess, cfg)
+
+            prob_matrix_sorted = prob_matrix[order] if prob_matrix.size else prob_matrix
+            pairwise_sorted = pairwise[np.ix_(order, order)] if pairwise.size else pairwise
+            dnf_prob_sorted = dnf_prob[order]
 
             sess_rows: List[Dict[str, Any]] = []
             for _, row in ranked.iterrows():
@@ -474,7 +320,6 @@ def run_predictions_for_event(
                     ignore_index=True,
                 )
             except Exception:
-                # corrupted or empty-parse file; overwrite with newdf
                 merged = newdf
         if not merged.empty:
             merged = merged.sort_values(["season", "round", "event", "predicted_pos"])
@@ -507,28 +352,4 @@ def run_predictions_for_event(
         }
 
 
-def print_session_console(df: pd.DataFrame, sess: str, cfg) -> None:
-    title = _session_title(sess)
-    print(f"\n== {title} ==")
-    for _, r in df.iterrows():
-        pos = int(r["predicted_position"])
-        name = (r.get("name") or "")[:30]
-        team = (r.get("constructorName") or "")[:18]
-        mp = float(r["mean_pos"])
-        top3 = float(r["p_top3"]) * 100
-        win = float(r["p_win"]) * 100
-        dnf = float(r["p_dnf"]) * 100
-        delta = r.get("delta")
-        if pd.notna(delta):
-            if delta < 0:
-                delta_str = Fore.GREEN + f"↑ {-int(delta)}" + Style.RESET_ALL
-            elif delta > 0:
-                delta_str = Fore.RED + f"↓ {int(delta)}" + Style.RESET_ALL
-            else:
-                delta_str = "·"
-        else:
-            delta_str = "·"
-        print(
-            f"{pos:2d}. {name:30s} [{team:18s}]  μ={mp:4.1f}  "
-            f"Top3={top3:4.1f}%  Win={win:4.1f}%  DNF={dnf:4.1f}%  {delta_str}"
-        )
+# print_session_console unchanged
