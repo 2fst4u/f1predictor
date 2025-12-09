@@ -109,11 +109,22 @@ class TargetsCfg:
 
 
 @dataclass
+class EnsembleCfg:
+    w_elo: float
+    w_bt: float
+    w_mixed: float
+    w_gbm: float
+    min_std: float
+
+
+@dataclass
 class Modelling:
     recency_half_life_days: RecencyHalfLives
     monte_carlo: MonteCarlo
     features: FeaturesCfg
     targets: TargetsCfg
+    pace_scale: float
+    ensemble: EnsembleCfg
 
 
 @dataclass
@@ -156,10 +167,12 @@ _ALLOWED_PRECIP_UNITS = {"mm", "inch"}
 def _norm_path(p: str) -> str:
     return str(Path(os.path.expandvars(os.path.expanduser(p))))
 
+
 def _require(d: Dict, key: str, ctx: str):
     if key not in d:
         raise KeyError(f"Missing required key '{ctx}.{key}'")
     return d[key]
+
 
 def _is_http_url(s: str) -> bool:
     return isinstance(s, str) and (s.startswith("http://") or s.startswith("https://"))
@@ -180,8 +193,15 @@ def load_config(path: str) -> AppConfig:
 
     # Paths
     paths_in = cfg["paths"]
-    for k in ("cache_dir", "output_dir", "reports_dir", "predictions_csv",
-              "backtest_metrics_csv", "backtest_report", "fastf1_cache"):
+    for k in (
+        "cache_dir",
+        "output_dir",
+        "reports_dir",
+        "predictions_csv",
+        "backtest_metrics_csv",
+        "backtest_report",
+        "fastf1_cache",
+    ):
         if k not in paths_in:
             errors.append(f"Missing paths.{k}")
     if not errors:
@@ -195,7 +215,13 @@ def load_config(path: str) -> AppConfig:
             errors.append("data_sources.jolpica.base_url must be http(s) URL")
 
         om = _require(ds_in, "open_meteo", "data_sources")
-        for ukey in ("forecast_url", "historical_weather_url", "historical_forecast_url", "elevation_url", "geocoding_url"):
+        for ukey in (
+            "forecast_url",
+            "historical_weather_url",
+            "historical_forecast_url",
+            "elevation_url",
+            "geocoding_url",
+        ):
             if not _is_http_url(om.get(ukey, "")):
                 errors.append(f"data_sources.open_meteo.{ukey} must be http(s) URL")
         # Unit validation
@@ -224,8 +250,10 @@ def load_config(path: str) -> AppConfig:
         else:
             unknown = [x for x in stypes if x not in _ALLOWED_SESSIONS]
             if unknown:
-                errors.append(f"modelling.targets.session_types contains unknown entries: {unknown}. "
-                              f"Allowed: {sorted(_ALLOWED_SESSIONS)}")
+                errors.append(
+                    f"modelling.targets.session_types contains unknown entries: {unknown}. "
+                    f"Allowed: {sorted(_ALLOWED_SESSIONS)}"
+                )
     except KeyError as e:
         errors.append(str(e))
 
@@ -256,9 +284,25 @@ def load_config(path: str) -> AppConfig:
     mc = MonteCarlo(**cfg["modelling"]["monte_carlo"])
     feat = FeaturesCfg(**cfg["modelling"]["features"])
     tgt_dc = TargetsCfg(**cfg["modelling"]["targets"])
-    modelling = Modelling(recency_half_life_days=rh, monte_carlo=mc, features=feat, targets=tgt_dc)
+    ens_dc = EnsembleCfg(**cfg["modelling"].get("ensemble", {}))
+    pace_scale = float(cfg["modelling"].get("pace_scale", 0.6))
+    modelling = Modelling(
+        recency_half_life_days=rh,
+        monte_carlo=mc,
+        features=feat,
+        targets=tgt_dc,
+        pace_scale=pace_scale,
+        ensemble=ens_dc,
+    )
     backtesting = Backtesting(**cfg["backtesting"])
     output = OutputCfg(**cfg["output"])
 
-    return AppConfig(app=app, paths=paths, data_sources=data_sources, caching=caching,
-                     modelling=modelling, backtesting=backtesting, output=output)
+    return AppConfig(
+        app=app,
+        paths=paths,
+        data_sources=data_sources,
+        caching=caching,
+        modelling=modelling,
+        backtesting=backtesting,
+        output=output,
+    )
