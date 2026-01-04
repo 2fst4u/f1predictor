@@ -4,7 +4,7 @@ from pathlib import Path
 import webbrowser
 
 import pandas as pd
-from jinja2 import Template
+from jinja2 import Environment, BaseLoader
 
 from .util import get_logger
 
@@ -144,9 +144,18 @@ BACKTEST_TEMPLATE = """
 </html>
 """
 
-def generate_html_report(path: str, title: str, subtitle: str, sessions_data: List[Dict[str, Any]],
-                         cfg, open_browser: bool = False) -> None:
-    template = Template(HTML_TEMPLATE)
+
+def generate_html_report(
+    path: str,
+    title: str,
+    subtitle: str,
+    sessions_data: List[Dict[str, Any]],
+    cfg,
+    open_browser: bool = False,
+) -> None:
+    # Use Environment with autoescape=True for security
+    env = Environment(loader=BaseLoader(), autoescape=True)
+    template = env.from_string(HTML_TEMPLATE)
     html = template.render(
         title=title,
         subtitle=subtitle,
@@ -166,22 +175,33 @@ def generate_html_report(path: str, title: str, subtitle: str, sessions_data: Li
         except Exception:
             pass
 
+
 def generate_backtest_summary_html(metrics_csv: str, out_path: str, cfg) -> None:
     df = pd.read_csv(metrics_csv) if Path(metrics_csv).exists() else pd.DataFrame()
     if df.empty:
         logger.warning("No backtest metrics available to build report.")
         return
-    agg = df.groupby("event").agg(
-        n_events=("season", "count"),
-        spearman=("spearman", "mean"),
-        kendall=("kendall", "mean"),
-        accuracy_top3=("accuracy_top3", "mean"),
-        brier_pairwise=("brier_pairwise", "mean"),
-        crps=("crps", "mean"),
-    ).reset_index()
-    recent = df.sort_values(["season", "round"], ascending=[False, False]).head(50).to_dict(orient="records")
+    agg = (
+        df.groupby("event")
+        .agg(
+            n_events=("season", "count"),
+            spearman=("spearman", "mean"),
+            kendall=("kendall", "mean"),
+            accuracy_top3=("accuracy_top3", "mean"),
+            brier_pairwise=("brier_pairwise", "mean"),
+            crps=("crps", "mean"),
+        )
+        .reset_index()
+    )
+    recent = (
+        df.sort_values(["season", "round"], ascending=[False, False])
+        .head(50)
+        .to_dict(orient="records")
+    )
 
-    template = Template(BACKTEST_TEMPLATE)
+    # Use Environment with autoescape=True for security
+    env = Environment(loader=BaseLoader(), autoescape=True)
+    template = env.from_string(BACKTEST_TEMPLATE)
     html = template.render(
         generated_at=pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         model_version=cfg.app.model_version,

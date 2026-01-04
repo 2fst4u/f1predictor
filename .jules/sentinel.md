@@ -1,0 +1,4 @@
+## 2026-01-04 - XSS in HTML Report Generation
+**Vulnerability:** The HTML report generation using `jinja2.Template` did not have autoescaping enabled. This means that if any data passed to the template (e.g., driver names, team names, or session titles) contained HTML or script tags, they would be rendered as raw HTML in the browser. This could allow for Cross-Site Scripting (XSS) attacks if the data source is compromised or contains malicious input.
+**Learning:** `jinja2.Template` defaults to `autoescape=False`. Explicitly using `jinja2.Environment(autoescape=True)` is necessary to ensure security when generating HTML.
+**Prevention:** Always use `jinja2.Environment` with `autoescape=True` when rendering HTML templates, especially when including data from external sources. Avoid using `jinja2.Template` directly for HTML unless you are certain the input is trusted or already escaped.
