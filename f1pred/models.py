@@ -1,5 +1,11 @@
+"""Machine learning models for F1 predictions.
+
+This module provides pace prediction and DNF probability estimation using
+gradient boosting models. Supports LightGBM, XGBoost, or sklearn fallback.
+"""
 from __future__ import annotations
-from typing import Tuple, Any, List
+from typing import Tuple, Any, List, Optional
+import warnings
 import numpy as np
 import pandas as pd
 
@@ -9,6 +15,14 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
 
+# Suppress harmless sklearn warning about feature names when using preprocessing pipelines
+warnings.filterwarnings("ignore", message="X does not have valid feature names")
+
+__all__ = [
+    "train_pace_model",
+    "train_dnf_hazard_model",
+    "estimate_dnf_probabilities",
+]
 
 # Try optional boosters; fall back to sklearn GBM
 try:
@@ -34,7 +48,8 @@ def _split_feature_columns(X: pd.DataFrame, exclude: List[str]) -> Tuple[List[st
     return features, num_cols, cat_cols
 
 
-def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarray, list]:
+
+def train_pace_model(X: pd.DataFrame, session_type: str, cfg: Any = None) -> Tuple[Any, np.ndarray, list]:
     """
     Train a model producing a "pace index" (lower is better/faster) per driver.
 
@@ -73,7 +88,8 @@ def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarra
         ("cat", cat_pipe, cat_cols)
     ], remainder="drop")
 
-    # Model selection with tuned hyperparameters
+    # Model selection with eager hyperparameters
+    # (Hyperparameters could also be moved to config, but sticking to hardcoded model params for now as requested)
     if _HAS_LGB:
         model = lgb.LGBMRegressor(
             n_estimators=150,
@@ -126,11 +142,27 @@ def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarra
     base = np.zeros(len(X), dtype=float)
     if "form_index" in X.columns:
         base = -X["form_index"].astype(float).values
+    
+    # Blending weights from config or defaults
+    w_base_team = 0.3
+    w_base_dt = 0.2
+    w_gbm = 0.75
+    w_base = 0.25
+    
+    if cfg:
+        try:
+            w_gbm = cfg.modelling.blending.gbm_weight
+            w_base = cfg.modelling.blending.baseline_weight
+            w_base_team = cfg.modelling.blending.baseline_team_factor
+            w_base_dt = cfg.modelling.blending.baseline_driver_team_factor
+        except AttributeError:
+            pass
+
     if "team_form_index" in X.columns:
         # team_form_index is points-based, HIGHER = BETTER, so negate
-        base = base - 0.3 * X["team_form_index"].astype(float).values
+        base = base - w_base_team * X["team_form_index"].astype(float).values
     if "driver_team_form_index" in X.columns:
-        base = base - 0.2 * X["driver_team_form_index"].astype(float).values
+        base = base - w_base_dt * X["driver_team_form_index"].astype(float).values
 
     # Add small jitter if baseline is flat (for tie-breaking)
     if np.nanstd(base) < 1e-9 and "driverId" in X.columns:
@@ -145,16 +177,16 @@ def train_pace_model(X: pd.DataFrame, session_type: str) -> Tuple[Any, np.ndarra
     base_std = float(np.nanstd(base))
 
     if yhat_std < 1e-6 and base_std > 1e-6:
-        # Model failed, use baseline only
+        # Model failed to learn, use baseline only
         pace_hat = base
     elif base_std < 1e-6 and yhat_std > 1e-6:
-        # Baseline is flat, use model only
+        # Baseline is flat (e.g., all same form), use model only
         pace_hat = yhat
     elif yhat_std > 1e-6 and base_std > 1e-6:
-        # Both have signal - weight towards model (it's trained on actual data)
-        pace_hat = 0.7 * yhat + 0.3 * base
+        # Both have signal - weight heavily towards trained model
+        pace_hat = w_gbm * yhat + w_base * base
     else:
-        # Both flat - use baseline with some noise
+        # Both flat - use baseline with small noise for tie-breaking
         pace_hat = base + np.random.RandomState(42).normal(0, 0.01, size=len(base))
 
     return pipe, pace_hat, features
@@ -217,10 +249,23 @@ def estimate_dnf_probabilities(
     team_weight: float = 0.4,
     clip_min: float = 0.02,
     clip_max: float = 0.30,
+    cfg: Any = None,
 ) -> np.ndarray:
     """
     Estimate per-driver DNF probabilities using Beta-smoothed empirical base rates.
+    Arguments allow overrides, but cfg takes precedence if provided.
     """
+    if cfg:
+        try:
+            alpha = cfg.modelling.dnf.alpha
+            beta = cfg.modelling.dnf.beta
+            driver_weight = cfg.modelling.dnf.driver_weight
+            team_weight = cfg.modelling.dnf.team_weight
+            clip_min = cfg.modelling.dnf.clip_min
+            clip_max = cfg.modelling.dnf.clip_max
+        except AttributeError:
+            pass
+
     races = hist[hist["session"] == "race"].copy()
     if races.empty or current_X is None or current_X.empty:
         return np.full(len(current_X) if current_X is not None else 0, 0.08, dtype=float)

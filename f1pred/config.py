@@ -22,7 +22,6 @@ class Paths:
     cache_dir: str
     output_dir: str
     reports_dir: str
-    predictions_csv: str
     backtest_metrics_csv: str
     backtest_report: str
     fastf1_cache: str
@@ -118,13 +117,41 @@ class EnsembleCfg:
 
 
 @dataclass
+class SimulationCfg:
+    noise_factor: float
+    min_noise: float
+    max_penalty_base: float
+
+
+@dataclass
+class BlendingCfg:
+    gbm_weight: float
+    baseline_weight: float
+    baseline_team_factor: float
+    baseline_driver_team_factor: float
+
+
+@dataclass
+class DNFCfg:
+    alpha: float
+    beta: float
+    driver_weight: float
+    team_weight: float
+    clip_min: float
+    clip_max: float
+
+
+@dataclass
 class Modelling:
     recency_half_life_days: RecencyHalfLives
     monte_carlo: MonteCarlo
     features: FeaturesCfg
     targets: TargetsCfg
-    pace_scale: float
     ensemble: EnsembleCfg
+    simulation: SimulationCfg
+    blending: BlendingCfg
+    dnf: DNFCfg
+    pace_scale: float = 1.0  # Deprecated - kept for backwards compatibility
 
 
 @dataclass
@@ -197,7 +224,6 @@ def load_config(path: str) -> AppConfig:
         "cache_dir",
         "output_dir",
         "reports_dir",
-        "predictions_csv",
         "backtest_metrics_csv",
         "backtest_report",
         "fastf1_cache",
@@ -285,14 +311,22 @@ def load_config(path: str) -> AppConfig:
     feat = FeaturesCfg(**cfg["modelling"]["features"])
     tgt_dc = TargetsCfg(**cfg["modelling"]["targets"])
     ens_dc = EnsembleCfg(**cfg["modelling"].get("ensemble", {}))
-    pace_scale = float(cfg["modelling"].get("pace_scale", 0.6))
+    
+    sim_dc = SimulationCfg(**cfg["modelling"].get("simulation", {}))
+    blend_dc = BlendingCfg(**cfg["modelling"].get("blending", {}))
+    dnf_dc = DNFCfg(**cfg["modelling"].get("dnf", {}))
+    
+    pace_scale = float(cfg["modelling"].get("pace_scale", 1.0))  # Default 1.0 (no scaling)
     modelling = Modelling(
         recency_half_life_days=rh,
         monte_carlo=mc,
         features=feat,
         targets=tgt_dc,
-        pace_scale=pace_scale,
         ensemble=ens_dc,
+        simulation=sim_dc,
+        blending=blend_dc,
+        dnf=dnf_dc,
+        pace_scale=pace_scale,
     )
     backtesting = Backtesting(**cfg["backtesting"])
     output = OutputCfg(**cfg["output"])

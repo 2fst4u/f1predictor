@@ -12,7 +12,6 @@ paths:
   cache_dir: ".cache/f1pred"
   output_dir: "output"
   reports_dir: "output/reports"
-  predictions_csv: "output/predictions.csv"
   backtest_metrics_csv: "output/backtest_metrics.csv"
   backtest_report: "output/reports/backtest_summary.html"
   fastf1_cache: ".cache/fastf1"
@@ -26,7 +25,7 @@ data_sources:
   openf1:
     base_url: "https://api.openf1.org/v1"
     timeout_seconds: 30
-    enabled: true  # historical only
+    enabled: false  # API service outage (502) - fixed code ready when API recovers
   fastf1:
     enabled: true
   open_meteo:
@@ -65,6 +64,29 @@ modelling:
     include_weather_ensemble: true
   targets:
     session_types: ["qualifying", "race", "sprint_qualifying", "sprint"]
+  # pace_scale removed - was destroying variance in predictions
+  simulation:
+    noise_factor: 0.15
+    min_noise: 0.05
+    max_penalty_base: 20.0
+  blending:
+    gbm_weight: 0.75
+    baseline_weight: 0.25
+    baseline_team_factor: 0.3
+    baseline_driver_team_factor: 0.2
+  dnf:
+    alpha: 2.0
+    beta: 8.0
+    driver_weight: 0.6
+    team_weight: 0.4
+    clip_min: 0.02
+    clip_max: 0.35
+  ensemble:
+    w_elo: 0.2
+    w_bt: 0.2
+    w_mixed: 0.2
+    w_gbm: 0.4
+    min_std: 0.05
 
 backtesting:
   enabled: true

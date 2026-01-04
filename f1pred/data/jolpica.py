@@ -173,19 +173,84 @@ class JolpicaClient:
     # Bulk season endpoints (reduce calls and 429s)
 
     def get_season_race_results(self, season: str) -> List[Dict[str, Any]]:
-        """All race results for a season across all rounds."""
-        js = self._get(f"{season}/results.json", params={"limit": 1000})
-        mr = self._extract_mrdata(js)
-        return mr.get("RaceTable", {}).get("Races", []) or []
+        """All race results for a season across all rounds (paginated)."""
+        all_races: Dict[str, Dict[str, Any]] = {}  # round -> race dict
+        offset = 0
+        limit = 100  # API-enforced limit
+        
+        while True:
+            js = self._get(f"{season}/results.json", params={"limit": limit, "offset": offset})
+            mr = self._extract_mrdata(js)
+            races = mr.get("RaceTable", {}).get("Races", []) or []
+            
+            # Merge results into existing race dicts (API may split results across pages)
+            for r in races:
+                rnd = str(r.get("round"))
+                if rnd not in all_races:
+                    all_races[rnd] = r
+                else:
+                    # Extend results for this round
+                    existing = all_races[rnd].get("Results", []) or []
+                    new_results = r.get("Results", []) or []
+                    all_races[rnd]["Results"] = existing + new_results
+            
+            total = int(mr.get("total", 0))
+            offset += limit
+            if offset >= total or not races:
+                break
+        
+        return list(all_races.values())
 
     def get_season_qualifying_results(self, season: str) -> List[Dict[str, Any]]:
-        """All qualifying results for a season across all rounds."""
-        js = self._get(f"{season}/qualifying.json", params={"limit": 1000})
-        mr = self._extract_mrdata(js)
-        return mr.get("RaceTable", {}).get("Races", []) or []
+        """All qualifying results for a season across all rounds (paginated)."""
+        all_races: Dict[str, Dict[str, Any]] = {}
+        offset = 0
+        limit = 100
+        
+        while True:
+            js = self._get(f"{season}/qualifying.json", params={"limit": limit, "offset": offset})
+            mr = self._extract_mrdata(js)
+            races = mr.get("RaceTable", {}).get("Races", []) or []
+            
+            for r in races:
+                rnd = str(r.get("round"))
+                if rnd not in all_races:
+                    all_races[rnd] = r
+                else:
+                    existing = all_races[rnd].get("QualifyingResults", []) or []
+                    new_results = r.get("QualifyingResults", []) or []
+                    all_races[rnd]["QualifyingResults"] = existing + new_results
+            
+            total = int(mr.get("total", 0))
+            offset += limit
+            if offset >= total or not races:
+                break
+        
+        return list(all_races.values())
 
     def get_season_sprint_results(self, season: str) -> List[Dict[str, Any]]:
-        """All sprint results for a season across all rounds."""
-        js = self._get(f"{season}/sprint.json", params={"limit": 1000})
-        mr = self._extract_mrdata(js)
-        return mr.get("RaceTable", {}).get("Races", []) or []
+        """All sprint results for a season across all rounds (paginated)."""
+        all_races: Dict[str, Dict[str, Any]] = {}
+        offset = 0
+        limit = 100
+        
+        while True:
+            js = self._get(f"{season}/sprint.json", params={"limit": limit, "offset": offset})
+            mr = self._extract_mrdata(js)
+            races = mr.get("RaceTable", {}).get("Races", []) or []
+            
+            for r in races:
+                rnd = str(r.get("round"))
+                if rnd not in all_races:
+                    all_races[rnd] = r
+                else:
+                    existing = all_races[rnd].get("SprintResults", []) or []
+                    new_results = r.get("SprintResults", []) or []
+                    all_races[rnd]["SprintResults"] = existing + new_results
+            
+            total = int(mr.get("total", 0))
+            offset += limit
+            if offset >= total or not races:
+                break
+        
+        return list(all_races.values())

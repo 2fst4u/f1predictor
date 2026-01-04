@@ -1,13 +1,24 @@
+"""Monte Carlo simulation for F1 race outcomes.
+
+This module simulates race finishes by adding stochastic noise to pace
+predictions and applying DNF probabilities.
+"""
 from __future__ import annotations
 from typing import Tuple
 import numpy as np
+
+__all__ = ["simulate_grid"]
+
 
 
 def simulate_grid(
     pace_index: np.ndarray,
     dnf_prob: np.ndarray,
     draws: int = 5000,
-    random_seed: int = 42
+    random_seed: int = 42,
+    noise_factor: float = 0.15,
+    min_noise: float = 0.05,
+    max_penalty_base: float = 20.0
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Monte Carlo simulation: for each draw, add noise to pace, apply DNFs, and derive finishing order.
@@ -17,11 +28,9 @@ def simulate_grid(
         dnf_prob: Probability of DNF for each driver (0 to 1)
         draws: Number of simulation iterations
         random_seed: For reproducibility
-
-    Returns:
-        - prob_matrix: [n_drivers, n_drivers] probability of finishing at each position (1..N)
-        - mean_pos: expected finishing position for each driver
-        - pairwise_matrix: [n_drivers, n_drivers] where entry (i,j) = P(i finishes ahead of j)
+        noise_factor: Multiplier for pace spread to determine noise scale
+        min_noise: Minimum noise standard deviation
+        max_penalty_base: Base penalty added to max pace for DNF drivers
     """
     rng = np.random.RandomState(random_seed)
     n = len(pace_index)
@@ -34,21 +43,20 @@ def simulate_grid(
 
     # Calculate noise scale based on pace spread
     # We want enough noise for uncertainty but not so much that it overwhelms skill differences
-    pace_std = np.std(pace_index)
-    pace_range = np.ptp(pace_index)  # max - min
+    pace_std = float(np.std(pace_index))
+    pace_range = float(np.ptp(pace_index))  # max - min
     
     # Noise should be proportional to the pace spread, but with a minimum
-    # This allows ~10-20% chance of adjacent drivers swapping on pure noise
     if pace_range > 0.01:
-        noise_scale = pace_range * 0.15
+        noise_scale = pace_range * noise_factor
     else:
         noise_scale = 0.1
     
     # Ensure minimum noise for some randomness
-    noise_scale = max(noise_scale, 0.05)
+    noise_scale = max(noise_scale, min_noise)
     
     # DNF penalty - move driver to back of grid
-    max_penalty = abs(np.max(pace_index)) + abs(np.min(pace_index)) + 20.0
+    max_penalty = abs(np.max(pace_index)) + abs(np.min(pace_index)) + max_penalty_base
 
     for _ in range(draws):
         # Add performance noise

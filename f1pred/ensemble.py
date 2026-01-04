@@ -185,7 +185,7 @@ class MixedEffectsLikeModel:
         team_mu = races.groupby("constructorId")["perf"].mean()
         team_eff = team_mu - mu
         races = races.join(team_eff.rename("team_eff"), on="constructorId")
-        races["team_eff"].fillna(0.0, inplace=True)
+        races["team_eff"] = races["team_eff"].fillna(0.0)
 
         races["driver_resid"] = races["perf"] - mu - races["team_eff"]
         drv_mu = races.groupby("driverId")["driver_resid"].mean()
@@ -288,6 +288,6 @@ def combine_pace(
     out = z + jitter
 
     logger.info(
-        "[ensemble.combine] Combined pace: std=%.6f, range=%.6f", float(out.std()), float(out.ptp())
+        "[ensemble.combine] Combined pace: std=%.6f, range=%.6f", float(out.std()), float(np.ptp(out))
     )
     return out

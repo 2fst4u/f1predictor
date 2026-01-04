@@ -137,26 +137,100 @@ def _roster_from_round(jc: JolpicaClient, season: str, rnd: str) -> List[Dict]:
     return []
 
 
+
+def _roster_from_openf1(of1: Optional[Any], season: int, rnd: int) -> List[Dict]:
+    """Attempt to fetch roster from OpenF1 API."""
+    if of1 is None or not of1.enabled:
+        return []
+    
+    # Try to find a relevant session (Practice 1 is usually first with entry list)
+    # If we are verifying a future race, we want ANY session with data.
+    # Force fresh check (no cache) to pick up late changes.
+    session_key = of1.find_session(season, rnd, "Practice 1", use_cache=False)
+    if not session_key:
+        session_key = of1.find_session(season, rnd, "Qualifying", use_cache=False)
+    
+    if not session_key:
+        return []
+
+    try:
+        drivers = of1.get_drivers(session_key, use_cache=False)
+        if drivers.empty:
+            return []
+        
+        roster = []
+        for _, d in drivers.iterrows():
+            # OpenF1 fields: driver_number, full_name, team_name, etc.
+            roster.append({
+                "driverId": d.get("name_acronym", "")[:3].lower(), # Fallback ID
+                "code": d.get("name_acronym"),
+                "givenName": d.get("first_name"),
+                "familyName": d.get("last_name"),
+                "permanentNumber": str(d.get("driver_number")),
+                "constructorId": d.get("team_name", "").lower().replace(" ", "_"),
+                "constructorName": d.get("team_name"),
+            })
+        logger.info(f"[roster] Fetched {len(roster)} drivers from OpenF1")
+        return roster
+    except Exception as e:
+        logger.warning(f"[roster] OpenF1 fetch failed: {e}")
+        return []
+
+
+def _roster_from_fastf1(season: int, rnd: int) -> List[Dict]:
+    """Attempt to fetch roster from FastF1 (live timing)."""
+    try:
+        # Import here to avoid circular dependencies if not already imported
+        from .data import fastf1_backend as ff1
+        
+        ev = ff1.get_event(season, rnd)
+        if ev is None:
+            return []
+            
+        # Try to load session (e.g., FP1)
+        # FastF1 often requires a session to be loaded to get drivers
+        try:
+            # We don't need full data, just metadata
+            sess = ev.get_session("FP1")
+            sess.load(telemetry=False, laps=False, weather=False, messages=False)
+            results = sess.results
+            if results is None or results.empty:
+                return []
+                
+            roster = []
+            for _, r in results.iterrows():
+                roster.append({
+                    "driverId": r["Abbreviation"].lower() if "Abbreviation" in r else None,
+                    "code": r.get("Abbreviation"),
+                    "givenName": r.get("FirstName"),
+                    "familyName": r.get("LastName"),
+                    "permanentNumber": str(r.get("DriverNumber")),
+                    "constructorId": r.get("TeamName", "").lower().replace(" ", "_"),
+                    "constructorName": r.get("TeamName"),
+                })
+            logger.info(f"[roster] Fetched {len(roster)} drivers from FastF1")
+            return roster
+        except Exception:
+            # If FP1 fails, maybe it hasn't happened. FastF1 relies on finding data.
+            pass
+    except Exception as e:
+        logger.warning(f"[roster] FastF1 fetch failed: {e}")
+    return []
+
+
 def derive_roster(
     jc: JolpicaClient,
     season: str,
     rnd: str,
     event_dt: Optional[datetime] = None,
-    now_dt: Optional[datetime] = None
+    now_dt: Optional[datetime] = None,
+    openf1_client: Optional[Any] = None 
 ) -> List[Dict]:
     """
-    Single source of truth for roster derivation with your specified logic:
-
-    - If prediction is in the past (event_dt < now): use the known roster for that event
-      (same round), trying qualifying -> race -> sprint.
-
-    - If prediction is in the future: attempt a known roster (same round). If that fails,
-      use the roster from the previous event (race or qualifying, whichever happened just
-      prior). The "previous event" search walks back through rounds in this season, then
-      previous seasons if needed.
-
-    Returns a list of dicts with:
-      driverId, code, givenName, familyName, permanentNumber, constructorId, constructorName
+    Derive roster using a prioritized cascade:
+    1. OpenF1 (Session Entry List) - Best for verified entry lists slightly ahead of time.
+    2. FastF1 (Live Timing) - Good for active weekends.
+    3. Jolpica/Ergast (Results) - Reliable historical fallback.
     """
     # Normalise times
     if now_dt is None:
@@ -164,33 +238,35 @@ def derive_roster(
     if event_dt is not None and event_dt.tzinfo is None:
         event_dt = event_dt.replace(tzinfo=timezone.utc)
 
-    # 1) Past event: use known roster for this round if available
-    if event_dt is not None and event_dt < now_dt:
-        same = _same_round_known_roster(jc, season, rnd)
-        if same:
-            return same
-        # Fall back to previous event if same round has no posted results
-        try:
-            prev = _previous_completed_event_global(jc, int(season), int(rnd))
-        except Exception:
-            prev = _previous_completed_event_global(jc, int(season), None)
-        if prev:
-            ps, pr = prev
-            return _roster_from_round(jc, ps, pr)
-        return []
+    s_int = int(season)
+    r_int = int(rnd)
 
-    # 2) Future event: try same-round known roster (e.g., if qualifying already happened)
+    # 1. OPTION A: OpenF1 (If available)
+    # We check this even for future events if they are close enough to have an entry list
+    roster = _roster_from_openf1(openf1_client, s_int, r_int)
+    if roster:
+        return roster
+
+    # 2. OPTION B: Jolpica known results for this round
+    # Check this BEFORE FastF1 because FastF1 may return test session data (e.g., post-season tests)
     same = _same_round_known_roster(jc, season, rnd)
     if same:
         return same
 
-    # Else use previous completed event (race > qualifying), walking back across seasons if needed
+    # 3. OPTION C: FastF1 (live timing, good for active weekends before results are posted)
+    roster = _roster_from_fastf1(s_int, r_int)
+    if roster:
+        return roster
+
+    # 4. OPTION D: Previous completed event (fallback for future events)
     try:
-        prev = _previous_completed_event_global(jc, int(season), int(rnd))
+        prev = _previous_completed_event_global(jc, s_int, r_int)
     except Exception:
-        prev = _previous_completed_event_global(jc, int(season), None)
+        prev = _previous_completed_event_global(jc, s_int, None)
+    
     if prev:
         ps, pr = prev
+        logger.info(f"[roster] Falling back to roster from {ps} R{pr}")
         return _roster_from_round(jc, ps, pr)
 
     return []

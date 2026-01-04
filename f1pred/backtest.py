@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 import pandas as pd
@@ -29,7 +29,7 @@ def run_backtests(cfg) -> None:
     if seasons == "auto":
         season_list = _auto_backtest_seasons(jc)
     elif seasons == "all":
-        season_list = list(range(1950, datetime.utcnow().year))
+        season_list = list(range(1950, datetime.now(timezone.utc).year))
     elif isinstance(seasons, list):
         season_list = [int(x) for x in seasons]
     else:

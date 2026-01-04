@@ -24,20 +24,22 @@ def test_train_pace_model_variance(sample_features):
 
 
 def test_pace_model_order_makes_sense(sample_features):
-    """Test that better form results in better pace."""
-    # Set clear form differences
+    """Test that better form results in better (lower) pace."""
+    # Set clear form differences: form_index 0=worst, 19=best
+    # (form_index is HIGHER = BETTER: -position + points)
     sample_features['form_index'] = np.arange(len(sample_features), dtype=float)
     sample_features['team_form_index'] = 0.0
     sample_features['driver_team_form_index'] = 0.0
 
     _, pace_hat, _ = train_pace_model(sample_features, session_type='race')
 
-    # Lower pace index should correlate with better (lower) form_index
-    # Since we're predicting -form_index, lower predicted values should
-    # correspond to better drivers
-    order = np.argsort(pace_hat)
-    # First few in order should have lower form_index
-    assert np.mean(sample_features.iloc[order[:5]]['form_index']) < \
+    # Pace is LOWER = FASTER. Since we predict y = -form_index:
+    # - Driver with form_index=19 (best) should have pace ~ -19 (lowest/fastest)
+    # - Driver with form_index=0 (worst) should have pace ~ 0 (highest/slowest)
+    # So drivers with lowest pace should have HIGHEST form_index
+    order = np.argsort(pace_hat)  # Sorted from lowest (fastest) to highest (slowest)
+    # First few in order (fastest) should have HIGHER form_index
+    assert np.mean(sample_features.iloc[order[:5]]['form_index']) > \
            np.mean(sample_features.iloc[order[-5:]]['form_index'])
 
 

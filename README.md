@@ -1,171 +1,172 @@
-F1 Prediction Application
+# F1 Prediction
 
-Overview
-This application predicts Formula 1 results for upcoming and historical rounds across multiple session types:
-- Qualifying
-- Race
-- Sprint Qualifying (Sprint Shootout)
-- Sprint
+![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-It uses:
-- Jolpica’s Ergast-compatible API for schedules, rosters, and results
-- Open-Meteo for historical and forecast weather
-- OpenF1 (historical data only) and FastF1 as enrichers for session timing and classification (especially for Sprint Shootout)
+A Formula 1 race prediction tool that uses historical data and machine learning to forecast qualifying and race results.
 
-Predictions are fully empirical and re-trained on each run (self-calibrating). No model weights are persisted between runs.
+> **Note:** This project was built with significant assistance from AI (GitHub Copilot / Claude). The codebase, documentation, and overall architecture were developed collaboratively with AI tools.
 
-Key Features
-- Predicts Q, R, SQ, S for past and future rounds
-- Time-cut logic: for past predictions, only data available before the event is used
-- Automatic roster inference for future rounds (season-aware)
-- Recency-weighted driver and team form, teammate head-to-head
-- Weather features (temperature, precipitation, pressure, wind, humidity), with configurable units
-- DNF risk model for race-like sessions
-- Monte Carlo simulation for finish distributions (mean position, win probability, top-3 probability)
-- Outputs a tidy CSV and optional HTML report
-- Backtesting with metrics and a summary HTML report
-- Live mode that re-runs periodically, switches to actuals when posted, and shows movement indicators
+## What It Does
 
-Data Sources
-- Jolpica F1 (Ergast-compatible): schedules, drivers, constructors, results, standings
-- Open-Meteo: historical weather, historical forecast archive, forecast; elevation, geocoding as needed
-- OpenF1 (historical only): laps, stints, weather, session metadata (used for Sprint Shootout actuals when Jolpica lacks a distinct endpoint)
-- FastF1: event schedule, timings, and classification fallback for Sprint Shootout
+This tool predicts finishing positions for F1 sessions:
+- **Qualifying** – Grid positions
+- **Race** – Final standings
+- **Sprint Qualifying** – Sprint grid
+- **Sprint** – Sprint race results
 
-Installation
-1) Create a virtual environment and install requirements
-   python -m venv .venv
-   # Windows: .venv\Scripts\activate
-   # Linux/macOS: source .venv/bin/activate
-   pip install -r requirements.txt
+It pulls data from public APIs, builds features from historical performance, and trains models fresh on each run—no saved weights, fully self-calibrating.
 
-2) Confirm Python 3.11+ (recommended). The code uses typing features and scikit-learn versions that match the included requirements.
+## Quick Start
 
-Configuration
-All settings are in config.yaml. Key sections:
+```bash
+# Set up environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 
-- app
-  - model_version: arbitrary version string for tracking
-  - random_seed: fixed seed for reproducibility
-  - live_refresh_seconds: polling interval in live mode
-  - open_browser_for_html: default behaviour for opening HTML reports
+# Predict the next race
+python main.py --round next
 
-- paths
-  - cache_dir: directory for HTTP cache (requests-cache)
-  - fastf1_cache: directory for FastF1 cache
-  - output_dir, reports_dir: location for outputs
-  - predictions_csv: main CSV output for predictions
-  - backtest_metrics_csv: CSV with backtest evaluation metrics
-  - backtest_report: HTML summary of backtest metrics
+# Predict a specific past event
+python main.py --season 2024 --round 5 --sessions qualifying race
 
-- data_sources
-  - jolpica.base_url: must be Ergast-compatible (e.g., https://api.jolpi.ca/ergast/f1)
-  - openf1.enabled: true for historical enrichment; no live paid data is used
-  - fastf1.enabled: true to use FastF1 for session timing/classification fallback
-  - open_meteo: URLs for weather endpoints, plus configurable units
-    - temperature_unit: celsius or fahrenheit
-    - windspeed_unit: kmh, ms, mph, kn
-    - precipitation_unit: mm or inch
+# Generate HTML report
+python main.py --round next --html --open-browser
+```
 
-- caching
-  - requests_cache: HTTP cache settings, with separate TTLs for forecast and historical endpoints
+## Data Sources
 
-- modelling
-  - recency_half_life_days: base, weather, team half-lives for form features
-  - monte_carlo.draws: number of simulation draws (default 5000)
-  - features: toggles for additional enrichments (tyres/laps if available historically)
-  - targets.session_types: which sessions to run by default
+The app fetches data from free, public APIs:
 
-- backtesting
-  - seasons: auto (last 5 completed seasons), all, or list of specific years
-  - metrics: which metrics to compute (spearman, kendall, accuracy_top3, brier_pairwise, crps)
+- **[Jolpica F1](https://github.com/jolpica/jolpica-f1)** – Schedules, results, standings (Ergast-compatible)
+- **[Open-Meteo](https://open-meteo.com/)** – Weather forecasts and historical weather
+- **[OpenF1](https://openf1.org/)** – Session timing data (historical only)
+- **[FastF1](https://theoehrly.github.io/Fast-F1/)** – Detailed timing and telemetry fallback
 
-- output
-  - colours and toggles for HTML output
+## How It Works
 
-Caching and Rate Limits
-- HTTP responses are cached via requests-cache. Forecast endpoints get a short TTL (hours), historical endpoints get a longer TTL (days).
-- Only GET requests are cached.
-- Retries with exponential backoff and Retry-After support are enabled for robustness.
+1. **Roster inference** – For future races, the entry list comes from the most recent completed event
+2. **Feature engineering** – Driver form, team performance, weather conditions, teammate comparisons
+3. **Model training** – Gradient boosting (LightGBM/XGBoost/sklearn) trained on historical data
+4. **DNF estimation** – Separate classifier for retirement probability
+5. **Monte Carlo simulation** – 5000 draws to get win probability, podium chances, and expected position
 
-Usage
+## Configuration
 
-Basic predictions:
-- Predict the next round, all sessions:
-  python main.py --round next
+All settings live in `config.yaml`. The main things you might want to tweak:
 
-- Predict a specific past round and open HTML:
-  python main.py --season 2023 --round 5 --sessions qualifying race --html --open-browser
+```yaml
+modelling:
+  recency_half_life_days:
+    base: 120      # How quickly old results fade in importance
+    weather: 180   # Weather skill memory
+    team: 240      # Team performance memory
+  monte_carlo:
+    draws: 5000    # Simulation iterations (more = slower but smoother)
 
-- Predict all sessions and store output only:
-  python main.py --season 2024 --round 2
+data_sources:
+  open_meteo:
+    temperature_unit: "celsius"  # or fahrenheit
+    windspeed_unit: "kmh"        # kmh, ms, mph, kn
+```
 
-Live mode:
-- Live re-run every 30 seconds, with HTML and browser open once:
-  python main.py --season 2025 --round next --live --refresh 30 --html --open-browser
+## Output
 
-Backtesting:
-- Run backtests and generate metrics CSV + HTML summary:
-  python main.py --backtest
+**CSV** (`output/predictions.csv`):
+```
+season, round, event, driver_id, driver, team,
+predicted_pos, mean_pos, p_top3, p_win, p_dnf,
+actual_pos, delta, generated_at, model_version
+```
 
-Outputs
-- CSV: output/predictions.csv
-  Columns:
-    season, round, event, driver_id, driver, team,
-    predicted_pos, mean_pos, p_top3, p_win, p_dnf,
-    actual_pos (if available), delta (actual - predicted),
-    generated_at, model_version
-  The file is grouped by season/round/session and sorted by predicted_pos.
+**HTML reports** (`output/reports/`):
+- Per-event predictions with probabilities
+- Movement indicators when actuals are available
+- Backtest summaries with accuracy metrics
 
-- HTML report per event: output/reports/{season}_R{round}.html
-  Shows predicted ranking with mean position, top-3%, win%, DNF%, and movement when actuals are present.
+## Usage Modes
 
-- Backtest:
-  - CSV metrics: output/backtest_metrics.csv (event-level metrics)
-  - HTML summary: output/reports/backtest_summary.html (aggregate metrics by session and recent events)
+### Standard Prediction
+```bash
+python main.py --season 2024 --round 10
+```
 
-Modelling Details
-- Pace model: gradient boosting regressor (LightGBM or XGBoost if available; fall back to sklearn GBDT), trained on features excluding the target to avoid leakage.
-- Target: inverse of form_index (lower is better) so model produces a “pace index”.
-- DNF model: gradient boosting classifier using driver/team DNF base rates and weather features as a proxy.
-- Simulation: Monte Carlo draws add stochasticity and DNF hazards to convert pace to an order. Derives:
-  - p_win: probability of winning
-  - p_top3: probability of finishing in top 3
-  - mean_pos: expected finishing position
-  - pairwise probabilities for head-to-head metrics in backtests
+### Live Mode
+Re-runs predictions periodically and updates when results come in:
+```bash
+python main.py --round next --live --refresh 30 --html
+```
 
-Roster Logic
-- For future events, the entry list is inferred from the most recent completed round within the same season (race results preferred; qualifying fallback).
-- If none exist (e.g., Round 1), season drivers are used and constructors are mapped via driver standings where possible.
+### Backtesting
+Evaluate model accuracy across historical seasons:
+```bash
+python main.py --backtest
+```
 
-Weather Handling
-- Aggregates hourly weather around the session window into features: means/min/max for temperature, pressure, wind, gusts, precipitation, etc.
-- Configurable units via config.yaml.
+## Known Limitations
 
-Sprint Shootout (Sprint Qualifying) Actuals
-- When Jolpica does not supply Sprint Shootout classification, the app:
-  - Uses OpenF1 laps to build a classification from best lap per driver_number, or
-  - Falls back to FastF1 classification if available (by DriverNumber or Abbreviation).
-- This enables delta-to-actuals for Sprint Shootout in predictions.
+- **No real-time data** – OpenF1 is used for historical data only, not live timing
+- **Weather is approximate** – Forecasts are aggregated around session windows
+- **DNF model is basic** – Uses historical base rates, not detailed reliability analysis
+- **First race of season** – Limited data for brand new driver/team combinations
 
-Reproducibility
-- Random seed is fixed via config.yaml.
-- The ranking helper’s noise can be made reproducible if wired, but the top-level simulation uses the seed for consistency across runs.
+## Project Structure
 
-Limitations
-- OpenF1 is used only for historical data. No paid real-time OpenF1 endpoints are used.
-- Weather sensitivity features are conservative unless richer historical weather alignment is built per event.
-- The DNF proxy model uses base rates; a full per-event hazard analysis would be a future enhancement.
+```
+f1pred/
+├── predict.py      # Main prediction pipeline
+├── features.py     # Feature engineering
+├── models.py       # ML model training
+├── simulate.py     # Monte Carlo simulation
+├── roster.py       # Entry list inference
+├── backtest.py     # Historical evaluation
+├── report.py       # HTML generation
+└── data/           # API clients
+    ├── jolpica.py
+    ├── open_meteo.py
+    ├── openf1.py
+    └── fastf1_backend.py
+```
 
-Troubleshooting
-- If no HTML opens in live mode: pass --html --open-browser explicitly.
-- If you see missing actuals for sprint_qualifying, ensure OpenF1 is enabled and/or FastF1 is installed.
-- If requests fail due to rate limiting, the built-in retry and cache should mitigate; otherwise increase live_refresh_seconds.
+## Requirements
 
-Extending
-- Add features to f1pred/features.py and wire into the model in f1pred/models.py.
-- Add other weather variables via Open-Meteo by updating the client and aggregate function.
-- Integrate additional metrics in f1pred/metrics.py and expose them in the backtest HTML.
+- Python 3.11+
+- See `requirements.txt` for dependencies
 
-Support
-If you run into issues with endpoints or data availability, verify the base URLs in config.yaml and re-run with a clean cache (delete the .cache directory).
+## Troubleshooting
+
+**Predictions seem random or uniform?**
+Clear the cache and re-run:
+```bash
+rm -rf .cache/
+python main.py --round next
+```
+
+**Missing actuals for sprint qualifying?**
+Enable OpenF1 and/or install FastF1 in `config.yaml`.
+
+**Rate limiting errors?**
+The built-in cache and retry logic should handle most cases. Try increasing `live_refresh_seconds` or clearing the `.cache/` directory.
+
+**HTML report not opening?**
+Pass `--html --open-browser` explicitly.
+
+**Import errors for LightGBM on macOS?**
+```bash
+pip uninstall lightgbm
+pip install lightgbm --no-binary lightgbm
+```
+The system will fall back to XGBoost or scikit-learn if LightGBM is unavailable.
+
+## Running Tests
+
+If you want to verify the code or contribute:
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+## License
+
+MIT – see [LICENSE](LICENSE)

@@ -73,8 +73,8 @@ def main() -> None:
     try:
         if cfg.data_sources.fastf1.enabled:
             init_fastf1(cfg.paths.fastf1_cache)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"FastF1 initialization failed (non-fatal): {e}")
 
     if args.backtest:
         run_backtests(cfg)
