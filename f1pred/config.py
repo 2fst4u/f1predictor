@@ -3,6 +3,7 @@ from typing import List, Any, Dict
 from pathlib import Path
 import os
 import yaml
+from urllib.parse import urlparse
 
 
 # -----------------------
@@ -202,7 +203,13 @@ def _require(d: Dict, key: str, ctx: str):
 
 
 def _is_http_url(s: str) -> bool:
-    return isinstance(s, str) and (s.startswith("http://") or s.startswith("https://"))
+    if not isinstance(s, str):
+        return False
+    try:
+        parsed = urlparse(s)
+        return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+    except Exception:
+        return False
 
 
 def load_config(path: str) -> AppConfig:
@@ -217,6 +224,16 @@ def load_config(path: str) -> AppConfig:
 
     if errors:
         raise ValueError("Invalid config:\n- " + "\n- ".join(errors))
+
+    # App settings validation
+    try:
+        app_in = cfg["app"]
+        refresh = app_in.get("live_refresh_seconds")
+        if isinstance(refresh, (int, float)):
+             if refresh < 10:
+                 errors.append("app.live_refresh_seconds must be at least 10 seconds to avoid API rate limits.")
+    except Exception as e:
+        errors.append(f"Error checking app settings: {e}")
 
     # Paths
     paths_in = cfg["paths"]
@@ -280,6 +297,13 @@ def load_config(path: str) -> AppConfig:
                     f"modelling.targets.session_types contains unknown entries: {unknown}. "
                     f"Allowed: {sorted(_ALLOWED_SESSIONS)}"
                 )
+
+        # Monte Carlo validation
+        mc = _require(cfg["modelling"], "monte_carlo", "modelling")
+        draws = mc.get("draws", 0)
+        if not isinstance(draws, int) or draws < 100 or draws > 1000000:
+             errors.append("modelling.monte_carlo.draws must be an integer between 100 and 1,000,000")
+
     except KeyError as e:
         errors.append(str(e))
 
