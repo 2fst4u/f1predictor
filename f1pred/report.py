@@ -281,6 +281,12 @@ HTML_TEMPLATE = """
    th, td { padding: 0.6rem 0.4rem; }
    .badge { font-size: 0.7rem; padding: 0.2rem 0.4rem; }
  }
+
+ th abbr {
+   text-decoration: none;
+   cursor: help;
+   border-bottom: 1px dotted var(--text-muted);
+ }
 </style>
 </head>
 <body>
@@ -297,14 +303,14 @@ HTML_TEMPLATE = """
       <table>
         <thead>
           <tr>
-            <th class="pos">#</th>
-            <th>Driver</th>
-            <th>Team</th>
-            <th>Pred pos (μ)</th>
-            <th>Top3 %</th>
-            <th>Win %</th>
-            <th>DNF %</th>
-            <th>Change</th>
+            <th scope="col" class="pos"><abbr title="Rank">#</abbr></th>
+            <th scope="col">Driver</th>
+            <th scope="col">Team</th>
+            <th scope="col"><abbr title="Predicted Position (Mean)">Pred pos (μ)</abbr></th>
+            <th scope="col"><abbr title="Top 3 Probability">Top3 %</abbr></th>
+            <th scope="col"><abbr title="Win Probability">Win %</abbr></th>
+            <th scope="col"><abbr title="Did Not Finish Probability">DNF %</abbr></th>
+            <th scope="col">Change</th>
           </tr>
         </thead>
         <tbody>
@@ -615,6 +621,12 @@ BACKTEST_TEMPLATE = """
    table { font-size: 0.85rem; }
    th, td { padding: 0.6rem 0.4rem; }
  }
+
+ th abbr {
+   text-decoration: none;
+   cursor: help;
+   border-bottom: 1px dotted var(--text-muted);
+ }
 </style>
 </head>
 <body>
@@ -630,13 +642,13 @@ BACKTEST_TEMPLATE = """
       <table>
         <thead>
           <tr>
-            <th>Session</th>
-            <th>N events</th>
-            <th>Spearman</th>
-            <th>Kendall</th>
-            <th>Top3 Acc</th>
-            <th>Brier (pairwise)</th>
-            <th>CRPS</th>
+            <th scope="col">Session</th>
+            <th scope="col"><abbr title="Number of Events">N events</abbr></th>
+            <th scope="col"><abbr title="Spearman Rank Correlation">Spearman</abbr></th>
+            <th scope="col"><abbr title="Kendall Rank Correlation">Kendall</abbr></th>
+            <th scope="col"><abbr title="Top 3 Accuracy">Top3 Acc</abbr></th>
+            <th scope="col"><abbr title="Brier Score (Pairwise)">Brier (pairwise)</abbr></th>
+            <th scope="col"><abbr title="Continuous Ranked Probability Score">CRPS</abbr></th>
           </tr>
         </thead>
         <tbody>
@@ -662,14 +674,14 @@ BACKTEST_TEMPLATE = """
       <table>
         <thead>
           <tr>
-            <th>Season</th>
-            <th>Round</th>
-            <th>Session</th>
-            <th>Spearman</th>
-            <th>Kendall</th>
-            <th>Top3 Acc</th>
-            <th>Brier (pairwise)</th>
-            <th>CRPS</th>
+            <th scope="col">Season</th>
+            <th scope="col">Round</th>
+            <th scope="col">Session</th>
+            <th scope="col"><abbr title="Spearman Rank Correlation">Spearman</abbr></th>
+            <th scope="col"><abbr title="Kendall Rank Correlation">Kendall</abbr></th>
+            <th scope="col"><abbr title="Top 3 Accuracy">Top3 Acc</abbr></th>
+            <th scope="col"><abbr title="Brier Score (Pairwise)">Brier (pairwise)</abbr></th>
+            <th scope="col"><abbr title="Continuous Ranked Probability Score">CRPS</abbr></th>
           </tr>
         </thead>
         <tbody>
