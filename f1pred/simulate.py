@@ -4,18 +4,17 @@ This module simulates race finishes by adding stochastic noise to pace
 predictions and applying DNF probabilities.
 """
 from __future__ import annotations
-from typing import Tuple
+from typing import Tuple, Optional
 import numpy as np
 
 __all__ = ["simulate_grid"]
-
 
 
 def simulate_grid(
     pace_index: np.ndarray,
     dnf_prob: np.ndarray,
     draws: int = 5000,
-    random_seed: int = 42,
+    random_seed: Optional[int] = 42,
     noise_factor: float = 0.15,
     min_noise: float = 0.05,
     max_penalty_base: float = 20.0
@@ -23,11 +22,13 @@ def simulate_grid(
     """
     Monte Carlo simulation: for each draw, add noise to pace, apply DNFs, and derive finishing order.
 
+    Optimized implementation using vectorized numpy operations.
+
     Args:
         pace_index: Lower values = faster driver
         dnf_prob: Probability of DNF for each driver (0 to 1)
         draws: Number of simulation iterations
-        random_seed: For reproducibility
+        random_seed: For reproducibility. If None, uses system entropy.
         noise_factor: Multiplier for pace spread to determine noise scale
         min_noise: Minimum noise standard deviation
         max_penalty_base: Base penalty added to max pace for DNF drivers
@@ -38,46 +39,47 @@ def simulate_grid(
     if n == 0:
         return np.array([]).reshape(0, 0), np.array([]), np.array([]).reshape(0, 0)
     
-    counts = np.zeros((n, n), dtype=float)
-    pairwise = np.zeros((n, n), dtype=float)
-
     # Calculate noise scale based on pace spread
-    # We want enough noise for uncertainty but not so much that it overwhelms skill differences
-    pace_std = float(np.std(pace_index))
-    pace_range = float(np.ptp(pace_index))  # max - min
+    pace_range = float(np.ptp(pace_index))
     
-    # Noise should be proportional to the pace spread, but with a minimum
     if pace_range > 0.01:
         noise_scale = pace_range * noise_factor
     else:
         noise_scale = 0.1
-    
-    # Ensure minimum noise for some randomness
     noise_scale = max(noise_scale, min_noise)
     
-    # DNF penalty - move driver to back of grid
     max_penalty = abs(np.max(pace_index)) + abs(np.min(pace_index)) + max_penalty_base
 
-    for _ in range(draws):
-        # Add performance noise
-        noisy = pace_index + rng.normal(0.0, noise_scale, size=n)
-        
-        # Apply DNFs (driver gets large penalty, effectively placing them last)
-        dnf_draw = rng.binomial(1, dnf_prob, size=n)
-        sim = noisy + dnf_draw * max_penalty
+    # Generate all draws at once (vectorized)
+    # Shape: (draws, n)
+    noisy = pace_index + rng.normal(0.0, noise_scale, size=(draws, n))
+    dnf_draw = rng.binomial(1, dnf_prob, size=(draws, n))
+    sim = noisy + dnf_draw * max_penalty
 
-        # Determine finishing order (lower sim value = better position)
-        order = np.argsort(sim)
-        for pos, idx in enumerate(order):
-            counts[idx, pos] += 1.0
+    # Get ranks for each draw
+    # argsort(sim, axis=1) gives indices of drivers sorted by sim (finishing order)
+    # argsort again gives the rank of each driver (0-based)
+    ranks = np.argsort(np.argsort(sim, axis=1), axis=1)
 
-        # Calculate pairwise comparisons
-        rank = np.empty(n, dtype=int)
-        rank[order] = np.arange(n)
-        r_i = rank.reshape(-1, 1)
-        r_j = rank.reshape(1, -1)
-        ahead = (r_i < r_j).astype(float)
-        pairwise += ahead
+    # Calculate counts (probabilities of finishing position)
+    counts = np.zeros((n, n), dtype=float)
+
+    # For each driver (column in ranks), count occurrences of each rank
+    for i in range(n):
+        # ranks[:, i] contains the ranks obtained by driver i across all draws
+        counts[i, :] = np.bincount(ranks[:, i], minlength=n)
+
+    # Calculate pairwise comparisons
+    # ranks shape (draws, n)
+    # Expand dims for broadcasting:
+    # r_i: (draws, n, 1) -> ranks of driver i
+    # r_j: (draws, 1, n) -> ranks of driver j
+    r_i = ranks[:, :, np.newaxis]
+    r_j = ranks[:, np.newaxis, :]
+
+    # ahead[d, i, j] = 1 if driver i finished ahead of driver j in draw d
+    ahead = (r_i < r_j).astype(float)
+    pairwise = ahead.sum(axis=0)
 
     # Convert counts to probabilities
     prob_matrix = counts / draws
