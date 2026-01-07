@@ -33,9 +33,6 @@ python main.py --season 2024 --round 5 --sessions qualifying race
 
 # Generate HTML report
 python main.py --round next --html --open-browser
-
-# Start the web interface
-python start_app.py
 ```
 
 ## Data Sources
@@ -95,12 +92,6 @@ actual_pos, delta, generated_at, model_version
 python main.py --season 2024 --round 10
 ```
 
-### Web Interface
-Launch the interactive web UI to select seasons, rounds, and view predictions in your browser:
-```bash
-python start_app.py
-```
-
 ### Live Mode
 Re-runs predictions periodically and updates when results come in:
 ```bash
@@ -136,10 +127,6 @@ f1pred/
     ├── open_meteo.py
     ├── openf1.py
     └── fastf1_backend.py
-
-app.py              # Flask web application
-start_app.py        # Launcher for web app
-templates/          # Web interface templates
 ```
 
 ## Requirements
