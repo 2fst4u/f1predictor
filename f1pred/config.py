@@ -230,8 +230,8 @@ def load_config(path: str) -> AppConfig:
         app_in = cfg["app"]
         refresh = app_in.get("live_refresh_seconds")
         if isinstance(refresh, (int, float)):
-             if refresh < 10:
-                 errors.append("app.live_refresh_seconds must be at least 10 seconds to avoid API rate limits.")
+            if refresh < 10:
+                errors.append("app.live_refresh_seconds must be at least 10 seconds to avoid API rate limits.")
     except Exception as e:
         errors.append(f"Error checking app settings: {e}")
 
@@ -302,7 +302,7 @@ def load_config(path: str) -> AppConfig:
         mc = _require(cfg["modelling"], "monte_carlo", "modelling")
         draws = mc.get("draws", 0)
         if not isinstance(draws, int) or draws < 100 or draws > 1000000:
-             errors.append("modelling.monte_carlo.draws must be an integer between 100 and 1,000,000")
+            errors.append("modelling.monte_carlo.draws must be an integer between 100 and 1,000,000")
 
     except KeyError as e:
         errors.append(str(e))
