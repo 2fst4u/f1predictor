@@ -98,12 +98,16 @@ class JolpicaClient:
 
     @staticmethod
     def _extract_mrdata(data: Dict[str, Any]) -> Dict[str, Any]:
-        if isinstance(data, dict) and "MRData" in data:
+        if not isinstance(data, dict):
+            # If data is not a dict (e.g. raw string from http_get_json fallback),
+            # return empty dict to prevent AttributeError downstream.
+            logger.warning(f"Unexpected data format from Jolpica API: {type(data)}")
+            return {}
+
+        if "MRData" in data:
             return data["MRData"]
-        # If data is not a dict (e.g. raw string from http_get_json fallback) or missing MRData,
-        # return empty dict to prevent AttributeError downstream.
-        logger.warning(f"Unexpected data format from Jolpica API: {type(data)}")
-        return {}
+
+        return data
 
     # Schedules and events
 
