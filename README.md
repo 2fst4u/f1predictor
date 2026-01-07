@@ -19,12 +19,27 @@ It pulls data from public APIs, builds features from historical performance, and
 
 ## Quick Start
 
+### Web App (Recommended)
+
+The easiest way to use the predictor is via the web interface:
+
 ```bash
 # Set up environment
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
+# Launch the Web App
+python start_app.py
+```
+
+This will automatically open your web browser where you can select the season, round, and sessions to predict.
+
+### CLI Usage
+
+You can still use the command line for automation or advanced usage:
+
+```bash
 # Predict the next race
 python main.py --round next
 
@@ -127,6 +142,10 @@ f1pred/
     ├── open_meteo.py
     ├── openf1.py
     └── fastf1_backend.py
+
+app.py              # Flask web server
+start_app.py        # Web app launcher
+templates/          # HTML templates for web app
 ```
 
 ## Requirements
