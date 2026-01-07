@@ -419,6 +419,13 @@ def run_predictions_for_event(
                     }
                 )
 
+            if return_results:
+                session_results[sess] = {
+                    "ranked": ranked,
+                    "prob_matrix": prob_matrix,
+                    "pairwise": pairwise,
+                }
+
             print_session_console(ranked, sess, cfg, meta.get("weather"))
 
         except Exception as e:
@@ -490,6 +497,9 @@ def run_predictions_for_event(
             "season": season_i,
             "round": round_i,
             "sessions": session_results,
+            "all_preds": all_preds,
+            "race_info": race_info,
+            "event_title": event_title
         }
 
 
