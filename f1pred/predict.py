@@ -20,7 +20,6 @@ from .data.fastf1_backend import init_fastf1, get_session_classification
 from .features import build_session_features, collect_historical_results
 from .models import train_pace_model, estimate_dnf_probabilities
 from .simulate import simulate_grid
-from .report import generate_html_report
 from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace
 
 __all__ = [
@@ -195,11 +194,9 @@ def run_predictions_for_event(
     season: Optional[str],
     rnd: str,
     sessions: List[str],
-    generate_html: bool = True,
-    open_browser: bool = False,
     return_results: bool = False,
 ):
-    """Generate predictions for given event, write CSV and optional HTML.
+    """Generate predictions for given event with terminal output only.
 
     Returns a dict when return_results=True for the backtester.
     Never raises on normal control flow; logs and skips sessions if necessary.
@@ -427,63 +424,6 @@ def run_predictions_for_event(
                 import traceback
                 logger.info(traceback.format_exc())
                 continue
-
-    # HTML report
-    try:
-        if generate_html:
-            report_path = os.path.join(cfg.paths.reports_dir, f"{season_i}_R{round_i}.html")
-            subtitle = f"{event_title}"
-            
-            # Aggregate data for HTML report from the already calculated results
-            # We need to reconstruct the structure expected by the template
-            html_sessions_data = []
-            
-            # Since we iterate sessions in the loop above, we need to have stored them.
-            # But the loop above just appends to all_preds (flat list).
-            # We should probably reconstruct it from all_preds or modify the loop to store it.
-            # Easier approach: Filter all_preds for each session since they are already collected.
-            
-            for sess_key in sessions:
-                # Get rows for this session
-                sess_rows = [p for p in all_preds if p["event"] == sess_key]
-                if not sess_rows:
-                    continue
-                
-                # Sort by predicted position just in case
-                sess_rows.sort(key=lambda x: x["predicted_pos"])
-                
-                rows_for_template = []
-                for r in sess_rows:
-                    # Look up number/code if missing (it's in the dict)
-                    # The dict has: driver, team, p_win...
-                    # We need formatted dict for template
-                    rows_for_template.append({
-                        "rank": r["predicted_pos"],
-                        "name": r["driver"],
-                        "code": r.get("code"),
-                        "team": r["team"],
-                        "mean_pos": r["mean_pos"],
-                        "p_top3": r["p_top3"],
-                        "p_win": r["p_win"],
-                        "p_dnf": r["p_dnf"],
-                        "delta": r["delta"],
-                    })
-                    
-                html_sessions_data.append({
-                    "session_title": _session_title(sess_key),
-                    "rows": rows_for_template
-                })
-
-            generate_html_report(
-                report_path,
-                title=event_title,
-                subtitle=subtitle,
-                sessions_data=html_sessions_data,
-                cfg=cfg,
-                open_browser=open_browser,
-            )
-    except Exception as e:
-        logger.info(f"[predict] HTML report generation failed: {e}")
 
     if return_results:
         return {

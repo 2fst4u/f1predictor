@@ -30,9 +30,6 @@ python main.py --round next
 
 # Predict a specific past event
 python main.py --season 2024 --round 5 --sessions qualifying race
-
-# Generate HTML report
-python main.py --round next --html --open-browser
 ```
 
 ## Data Sources
@@ -73,17 +70,12 @@ data_sources:
 
 ## Output
 
-**CSV** (`output/predictions.csv`):
-```
-season, round, event, driver_id, driver, team,
-predicted_pos, mean_pos, p_top3, p_win, p_dnf,
-actual_pos, delta, generated_at, model_version
-```
-
-**HTML reports** (`output/reports/`):
-- Per-event predictions with probabilities
-- Movement indicators when actuals are available
-- Backtest summaries with accuracy metrics
+**Terminal output only** – Predictions display directly in the console with:
+- Driver names and teams
+- Predicted positions
+- Win probability, podium probability, DNF probability
+- Weather conditions
+- Position changes when actual results are available
 
 ## Usage Modes
 
@@ -95,7 +87,7 @@ python main.py --season 2024 --round 10
 ### Live Mode
 Re-runs predictions periodically and updates when results come in:
 ```bash
-python main.py --round next --live --refresh 30 --html
+python main.py --round next --live --refresh 30
 ```
 
 ### Backtesting
@@ -121,7 +113,6 @@ f1pred/
 ├── simulate.py     # Monte Carlo simulation
 ├── roster.py       # Entry list inference
 ├── backtest.py     # Historical evaluation
-├── report.py       # HTML generation
 └── data/           # API clients
     ├── jolpica.py
     ├── open_meteo.py
@@ -148,9 +139,6 @@ Enable OpenF1 and/or install FastF1 in `config.yaml`.
 
 **Rate limiting errors?**
 The built-in cache and retry logic should handle most cases. Try increasing `live_refresh_seconds` or clearing the `.cache/` directory.
-
-**HTML report not opening?**
-Pass `--html --open-browser` explicitly.
 
 **Import errors for LightGBM on macOS?**
 ```bash

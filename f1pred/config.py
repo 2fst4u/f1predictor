@@ -14,16 +14,11 @@ class AppSettings:
     random_seed: int
     timezone: str
     live_refresh_seconds: int
-    open_browser_for_html: bool
 
 
 @dataclass
 class Paths:
     cache_dir: str
-    output_dir: str
-    reports_dir: str
-    backtest_metrics_csv: str
-    backtest_report: str
     fastf1_cache: str
 
 
@@ -161,15 +156,7 @@ class Backtesting:
     metrics: List[str]
 
 
-@dataclass
-class OutputCfg:
-    html_theme: str
-    show_feature_contributions: bool
-    show_uncertainty: bool
-    live_change_symbols: bool
-    color_up: str
-    color_down: str
-    color_neutral: str
+
 
 
 @dataclass
@@ -180,7 +167,6 @@ class AppConfig:
     caching: Caching
     modelling: Modelling
     backtesting: Backtesting
-    output: OutputCfg
 
 
 # -----------------------
@@ -211,7 +197,7 @@ def load_config(path: str) -> AppConfig:
 
     errors: List[str] = []
 
-    for section in ("app", "paths", "data_sources", "caching", "modelling", "backtesting", "output"):
+    for section in ("app", "paths", "data_sources", "caching", "modelling", "backtesting"):
         if section not in cfg:
             errors.append(f"Missing top-level section '{section}'")
 
@@ -220,14 +206,7 @@ def load_config(path: str) -> AppConfig:
 
     # Paths
     paths_in = cfg["paths"]
-    for k in (
-        "cache_dir",
-        "output_dir",
-        "reports_dir",
-        "backtest_metrics_csv",
-        "backtest_report",
-        "fastf1_cache",
-    ):
+    for k in ("cache_dir", "fastf1_cache"):
         if k not in paths_in:
             errors.append(f"Missing paths.{k}")
     if not errors:
@@ -329,7 +308,6 @@ def load_config(path: str) -> AppConfig:
         pace_scale=pace_scale,
     )
     backtesting = Backtesting(**cfg["backtesting"])
-    output = OutputCfg(**cfg["output"])
 
     return AppConfig(
         app=app,
@@ -338,5 +316,4 @@ def load_config(path: str) -> AppConfig:
         caching=caching,
         modelling=modelling,
         backtesting=backtesting,
-        output=output,
     )

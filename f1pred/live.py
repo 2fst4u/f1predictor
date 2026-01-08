@@ -10,7 +10,7 @@ from .predict import run_predictions_for_event, resolve_event
 
 logger = get_logger(__name__)
 
-def live_loop(cfg, season: Optional[str], rnd: str, sessions: List[str], open_browser: bool = False) -> None:
+def live_loop(cfg, season: Optional[str], rnd: str, sessions: List[str]) -> None:
     """
     Live mode: periodically refresh predictions.
     """
@@ -20,9 +20,6 @@ def live_loop(cfg, season: Optional[str], rnd: str, sessions: List[str], open_br
     title = f"{race_info.get('raceName')} {season_i} (Round {round_i})"
     refresh = cfg.app.live_refresh_seconds
 
-    # Only open the browser once if requested
-    opened_browser_once = False
-
     logger.info(f"Live mode started for {title} | refresh={refresh}s")
     while True:
         run_predictions_for_event(
@@ -30,10 +27,6 @@ def live_loop(cfg, season: Optional[str], rnd: str, sessions: List[str], open_br
             season=str(season_i),
             rnd=str(round_i),
             sessions=sessions,
-            generate_html=True,
-            open_browser=(open_browser and not opened_browser_once)
         )
-        if open_browser and not opened_browser_once:
-            opened_browser_once = True
 
         time.sleep(refresh)

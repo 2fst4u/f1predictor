@@ -5,11 +5,10 @@ import os
 
 import pandas as pd
 
-from .util import get_logger, ensure_dirs
+from .util import get_logger
 from .data.jolpica import JolpicaClient
 from .predict import run_predictions_for_event
 from .metrics import compute_event_metrics
-from .report import generate_backtest_summary_html
 
 logger = get_logger(__name__)
 
@@ -45,7 +44,7 @@ def run_backtests(cfg) -> None:
             try:
                 res = run_predictions_for_event(cfg, season=str(season), rnd=str(rnd),
                                                 sessions=cfg.modelling.targets.session_types,
-                                                generate_html=False, open_browser=False, return_results=True)
+                                                return_results=True)
                 if not res:
                     continue
                 for sess, sdata in res["sessions"].items():
@@ -56,17 +55,8 @@ def run_backtests(cfg) -> None:
                                                  season=res["season"], rnd=res["round"])
                     metrics_rows.append(mrow)
 
-                    outcsv = cfg.paths.backtest_metrics_csv
-                    ensure_dirs(os.path.dirname(outcsv))
-                    pd.DataFrame(metrics_rows).to_csv(outcsv, index=False)
-
             except Exception as e:
                 logger.warning(f"Backtest prediction failed for {season} R{rnd}: {e}")
                 continue
 
-    outcsv = cfg.paths.backtest_metrics_csv
-    if os.path.exists(outcsv):
-        generate_backtest_summary_html(outcsv, cfg.paths.backtest_report, cfg)
-        logger.info(f"Backtesting complete. Metrics CSV: {outcsv} | HTML: {cfg.paths.backtest_report}")
-    else:
-        logger.info("Backtesting complete, but no metrics were produced.")
+    logger.info(f"Backtesting complete. Processed {len(metrics_rows)} session predictions.")

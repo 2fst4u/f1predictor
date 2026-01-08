@@ -6,14 +6,9 @@ app:
   random_seed: 42
   timezone: "UTC"
   live_refresh_seconds: 600
-  open_browser_for_html: true
 
 paths:
   cache_dir: ".cache/f1pred"
-  output_dir: "output"
-  reports_dir: "output/reports"
-  backtest_metrics_csv: "output/backtest_metrics.csv"
-  backtest_report: "output/reports/backtest_summary.html"
   fastf1_cache: ".cache/fastf1"
 
 data_sources:
@@ -92,12 +87,3 @@ backtesting:
   enabled: true
   seasons: "auto"
   metrics: ["spearman", "kendall", "accuracy_top3", "brier_pairwise", "crps"]
-
-output:
-  html_theme: "light"
-  show_feature_contributions: true
-  show_uncertainty: true
-  live_change_symbols: true
-  color_up: "#0a7f2e"
-  color_down: "#c1121f"
-  color_neutral: "#6c757d"
