@@ -44,10 +44,20 @@ The app fetches data from free, public APIs:
 ## How It Works
 
 1. **Roster inference** – For future races, the entry list comes from the most recent completed event
-2. **Feature engineering** – Driver form, team performance, weather conditions, teammate comparisons
-3. **Model training** – Gradient boosting (LightGBM/XGBoost/sklearn) trained on historical data
-4. **DNF estimation** – Separate classifier for retirement probability
-5. **Monte Carlo simulation** – 5000 draws to get win probability, podium chances, and expected position
+2. **Feature engineering** – Driver form, team performance, weather conditions, teammate comparisons, starting grid
+3. **Grid position handling** – Uses actual grid from race results when available; for pre-race predictions, runs a qualifying simulation to estimate starting positions
+4. **Model training** – Gradient boosting (LightGBM/XGBoost/sklearn) trained on historical data
+5. **DNF estimation** – Separate classifier for retirement probability
+6. **Monte Carlo simulation** – 5000 draws to get win probability, podium chances, and expected position
+
+### Two-Stage Prediction (Race)
+
+When predicting a race before qualifying has occurred:
+1. The system first runs a full qualifying prediction
+2. Uses predicted qualifying positions as the starting grid
+3. Feeds this grid into the race prediction model
+
+This allows accurate race predictions even before the grid is known, and accounts for grid penalties and unexpected qualifying results when actual data is available.
 
 ## Configuration
 
@@ -102,6 +112,7 @@ python main.py --backtest
 - **Weather is approximate** – Forecasts are aggregated around session windows
 - **DNF model is basic** – Uses historical base rates, not detailed reliability analysis
 - **First race of season** – Limited data for brand new driver/team combinations
+- **Grid penalties** – Only reflected if race results are available (post-qualifying predictions may not account for all penalties)
 
 ## Project Structure
 

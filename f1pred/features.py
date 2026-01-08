@@ -667,6 +667,32 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
         logger.info(f"[features] Roster derivation failed: {e}")
         roster = pd.DataFrame(columns=["driverId", "constructorId", "name"])
 
+    # Fetch actual starting grid for this race (if available)
+    # Grid comes from race results endpoint - it shows the actual grid after penalties
+    grid_df = pd.DataFrame(columns=["driverId", "grid"])
+    if session_type == "race" and not roster.empty:
+        try:
+            race_results = jc.get_race_results(str(season), str(rnd))
+            if race_results:
+                grid_rows = []
+                for res in race_results:
+                    drv = res.get("Driver", {}) or {}
+                    driver_id = drv.get("driverId")
+                    grid_pos = res.get("grid")
+                    if driver_id and grid_pos is not None:
+                        grid_rows.append({
+                            "driverId": driver_id,
+                            "grid": int(grid_pos) if grid_pos else None
+                        })
+                if grid_rows:
+                    grid_df = pd.DataFrame(grid_rows)
+                    logger.info(f"[features] Fetched actual grid for {len(grid_df)} drivers")
+            else:
+                logger.info("[features] Race results not yet available - grid will be NaN")
+        except Exception as e:
+            logger.info(f"[features] Could not fetch grid from race results: {e}")
+
+
     # Historical results (optimized, cached, roster-aware)
     logger.info("[features] Collecting historical results")
     t3 = time.time()
@@ -764,6 +790,12 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
         X = X.merge(weather_df, on="driverId", how="left")
         X = X.merge(tm_delta, on="driverId", how="left")
         X = X.merge(gf_delta, on="driverId", how="left")
+        
+        # Merge grid position (will be NaN if not yet available)
+        if not grid_df.empty:
+            X = X.merge(grid_df, on="driverId", how="left")
+        else:
+            X["grid"] = np.nan
 
 
 

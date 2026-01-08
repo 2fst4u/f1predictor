@@ -189,6 +189,121 @@ def _filter_sessions_for_round(jc: JolpicaClient, season_i: int, round_i: int, r
     return keep
 
 
+def _run_single_prediction(
+    jc: JolpicaClient,
+    om: OpenMeteoClient,
+    of1: OpenF1Client,
+    season_i: int,
+    round_i: int,
+    sess: str,
+    ref_date: datetime,
+    cfg,
+    X_override: Optional[pd.DataFrame] = None,
+) -> Optional[pd.DataFrame]:
+    """Run prediction for a single session and return ranked DataFrame.
+    
+    If X_override is provided, use it instead of building features.
+    Returns None if prediction cannot be completed.
+    """
+    from .features import build_session_features, collect_historical_results
+    
+    # Build features (or use override)
+    if X_override is not None:
+        X = X_override.copy()
+        roster = X_override.copy()
+        meta = {}
+    else:
+        X, meta, roster = build_session_features(jc, om, of1, season_i, round_i, sess, ref_date, cfg)
+    
+    if X is None or roster is None or X.empty or roster.empty:
+        return None
+    
+    # Train pace model
+    pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
+    
+    # Standardize pace
+    try:
+        mu = float(np.mean(pace_hat))
+        sd = float(np.std(pace_hat))
+        if not np.isfinite(sd) or sd < 1e-6:
+            sd = 1.0
+        pace_hat = (pace_hat - mu) / sd
+    except Exception:
+        pass
+    
+    # Historical results for ensemble models
+    roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
+    hist = collect_historical_results(
+        jc,
+        season=season_i,
+        end_before=ref_date,
+        lookback_years=75,
+        roster_driver_ids=roster_ids,
+    )
+    
+    # Ensemble skill components
+    elo_pace = bt_pace = mixed_pace = None
+    try:
+        elo_model = EloModel().fit(hist)
+        elo_pace = elo_model.predict(X)
+    except Exception:
+        pass
+    try:
+        bt_model = BradleyTerryModel().fit(hist)
+        bt_pace = bt_model.predict(X)
+    except Exception:
+        pass
+    try:
+        mixed_model = MixedEffectsLikeModel().fit(hist)
+        mixed_pace = mixed_model.predict(X)
+    except Exception:
+        pass
+    
+    # Combine pace
+    try:
+        ens_cfg = EnsembleConfig()
+        combined_pace = combine_pace(
+            gbm_pace=pace_hat,
+            elo_pace=elo_pace,
+            bt_pace=bt_pace,
+            mixed_pace=mixed_pace,
+            cfg=ens_cfg,
+        )
+    except Exception:
+        combined_pace = pace_hat
+    
+    # DNF probabilities (only for race/sprint)
+    dnf_prob = np.zeros(X.shape[0], dtype=float)
+    if sess in ("race", "sprint"):
+        try:
+            dnf_prob = estimate_dnf_probabilities(hist, X, cfg=cfg)
+        except Exception:
+            dnf_prob[:] = 0.12
+    
+    # Monte Carlo simulation
+    draws = cfg.modelling.monte_carlo.draws
+    prob_matrix, mean_pos, pairwise = simulate_grid(
+        combined_pace,
+        dnf_prob,
+        draws=draws,
+        noise_factor=cfg.modelling.simulation.noise_factor,
+        min_noise=cfg.modelling.simulation.min_noise,
+        max_penalty_base=cfg.modelling.simulation.max_penalty_base
+    )
+    
+    p_top3 = prob_matrix[:, :3].sum(axis=1)
+    p_win = prob_matrix[:, 0]
+    order = np.argsort(mean_pos)
+    ranked = X.iloc[order].reset_index(drop=True)
+    ranked["mean_pos"] = mean_pos[order]
+    ranked["p_top3"] = p_top3[order]
+    ranked["p_win"] = p_win[order]
+    ranked["p_dnf"] = dnf_prob[order]
+    ranked["predicted_position"] = np.arange(1, len(ranked) + 1)
+    
+    return ranked
+
+
 def run_predictions_for_event(
     cfg,
     season: Optional[str],
@@ -273,6 +388,35 @@ def run_predictions_for_event(
             ):
                 logger.info(f"[predict] No features/roster available for {sess}; skipping")
                 continue
+
+            # Two-stage prediction: if predicting race and grid is missing, run qualifying first
+            grid_source = "actual"
+            if sess == "race" and "grid" in X.columns:
+                if X["grid"].isna().any():
+                    logger.info("[predict] Grid not available - running qualifying prediction to estimate grid")
+                    qual_ranked = _run_single_prediction(
+                        jc, om, of1, season_i, round_i, "qualifying", ref_date, cfg
+                    )
+                    if qual_ranked is not None and not qual_ranked.empty:
+                        # Use predicted qualifying positions as grid
+                        grid_map = dict(zip(
+                            qual_ranked["driverId"],
+                            qual_ranked["predicted_position"]
+                        ))
+                        X["grid"] = X["driverId"].map(grid_map)
+                        grid_source = "predicted (from qualifying simulation)"
+                        logger.info(f"[predict] Using predicted grid from qualifying simulation")
+                    else:
+                        # Fallback: use form-based ranking as proxy
+                        if "form_index" in X.columns:
+                            X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
+                            grid_source = "estimated (from form index)"
+                            logger.info("[predict] Qualifying prediction failed - using form-based grid estimate")
+                        else:
+                            X["grid"] = np.arange(1, len(X) + 1)
+                            grid_source = "default (no data)"
+                else:
+                    logger.info("[predict] Using actual grid from race results")
 
             # Train pace model
             pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
