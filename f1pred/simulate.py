@@ -10,7 +10,6 @@ import numpy as np
 __all__ = ["simulate_grid"]
 
 
-
 def simulate_grid(
     pace_index: np.ndarray,
     dnf_prob: np.ndarray,
@@ -38,46 +37,75 @@ def simulate_grid(
     if n == 0:
         return np.array([]).reshape(0, 0), np.array([]), np.array([]).reshape(0, 0)
     
-    counts = np.zeros((n, n), dtype=float)
-    pairwise = np.zeros((n, n), dtype=float)
-
     # Calculate noise scale based on pace spread
-    # We want enough noise for uncertainty but not so much that it overwhelms skill differences
     pace_std = float(np.std(pace_index))
     pace_range = float(np.ptp(pace_index))  # max - min
     
-    # Noise should be proportional to the pace spread, but with a minimum
     if pace_range > 0.01:
         noise_scale = pace_range * noise_factor
     else:
         noise_scale = 0.1
     
-    # Ensure minimum noise for some randomness
     noise_scale = max(noise_scale, min_noise)
     
     # DNF penalty - move driver to back of grid
     max_penalty = abs(np.max(pace_index)) + abs(np.min(pace_index)) + max_penalty_base
 
-    for _ in range(draws):
-        # Add performance noise
-        noisy = pace_index + rng.normal(0.0, noise_scale, size=n)
-        
-        # Apply DNFs (driver gets large penalty, effectively placing them last)
-        dnf_draw = rng.binomial(1, dnf_prob, size=n)
-        sim = noisy + dnf_draw * max_penalty
+    # ---------------------------------------------------------
+    # Vectorized Simulation
+    # ---------------------------------------------------------
 
-        # Determine finishing order (lower sim value = better position)
-        order = np.argsort(sim)
-        for pos, idx in enumerate(order):
-            counts[idx, pos] += 1.0
+    # 1. Generate all random events at once (Shape: draws x n)
+    noise = rng.normal(0.0, noise_scale, size=(draws, n))
+    dnf_draws = rng.binomial(1, dnf_prob, size=(draws, n))
 
-        # Calculate pairwise comparisons
-        rank = np.empty(n, dtype=int)
-        rank[order] = np.arange(n)
-        r_i = rank.reshape(-1, 1)
-        r_j = rank.reshape(1, -1)
-        ahead = (r_i < r_j).astype(float)
-        pairwise += ahead
+    # 2. Compute simulated pace for all draws
+    # pace_index broadcasts to (draws, n)
+    sim = pace_index + noise + dnf_draws * max_penalty
+
+    # 3. Determine finishing order (indices of drivers sorted by sim value)
+    # axis=1 sorts each draw independently
+    order = np.argsort(sim, axis=1)
+
+    # 4. Compute Counts Matrix (n x n)
+    # counts[driver_i, pos_j] = number of times driver i finished at pos j
+
+    counts = np.zeros((n, n), dtype=float)
+
+    # Flatten order to get driver indices for all (draw, position) pairs
+    drivers_flat = order.flatten()
+
+    # Corresponding positions: [0, 1, ..., n-1] repeated 'draws' times
+    positions_flat = np.tile(np.arange(n), draws)
+
+    # Accumulate counts
+    np.add.at(counts, (drivers_flat, positions_flat), 1.0)
+
+    # 5. Compute Pairwise Matrix (n x n)
+    # pairwise[i, j] = count of draws where driver i finished ahead of driver j
+
+    # Compute ranks: ranks[d, i] is the position (0..n-1) of driver i in draw d
+    ranks = np.empty((draws, n), dtype=int)
+
+    # Create row indices: [[0], [1], ..., [draws-1]]
+    row_indices = np.arange(draws)[:, None]
+
+    # Use advanced indexing to invert the permutation
+    # If order[d, p] = driver_idx, then ranks[d, driver_idx] = p
+    ranks[row_indices, order] = np.arange(n)
+
+    # Pairwise comparison via broadcasting
+    # r_i shape: (draws, n, 1)
+    # r_j shape: (draws, 1, n)
+    r_i = ranks[:, :, None]
+    r_j = ranks[:, None, :]
+
+    # Sum boolean comparisons across draws
+    pairwise = np.sum(r_i < r_j, axis=0, dtype=float)
+
+    # ---------------------------------------------------------
+    # Post-processing (same as before)
+    # ---------------------------------------------------------
 
     # Convert counts to probabilities
     prob_matrix = counts / draws
