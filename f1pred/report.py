@@ -142,6 +142,12 @@ HTML_TEMPLATE = """
    color: var(--text-secondary);
    border-bottom: 2px solid var(--border-color);
  }
+
+ th[title] {
+   cursor: help;
+   text-decoration: underline dotted;
+   text-decoration-color: var(--text-muted);
+ }
  
  td {
    padding: 1rem 0.75rem;
@@ -297,14 +303,14 @@ HTML_TEMPLATE = """
       <table>
         <thead>
           <tr>
-            <th class="pos">#</th>
+            <th class="pos" title="Predicted finishing rank">#</th>
             <th>Driver</th>
             <th>Team</th>
-            <th>Pred pos (μ)</th>
-            <th>Top3 %</th>
-            <th>Win %</th>
-            <th>DNF %</th>
-            <th>Change</th>
+            <th title="Mean predicted finishing position across 5000 simulations">Pred pos (μ)</th>
+            <th title="Probability of finishing on the podium (1st, 2nd, or 3rd)">Top3 %</th>
+            <th title="Probability of winning the race">Win %</th>
+            <th title="Estimated probability of Did Not Finish (Retirement)">DNF %</th>
+            <th title="Difference between actual and predicted position (Green = improvement)">Change</th>
           </tr>
         </thead>
         <tbody>
@@ -360,11 +366,11 @@ HTML_TEMPLATE = """
             </td>
             <td class="delta">
               {% if row.delta is not none %}
-                {% if row.delta < 0 %}<span class="up">↑{{ -row.delta }}</span>
-                {% elif row.delta > 0 %}<span class="down">↓{{ row.delta }}</span>
-                {% else %}<span class="neutral">·</span>{% endif %}
+                {% if row.delta < 0 %}<span class="up" aria-label="Gained {{ -row.delta }} positions">↑{{ -row.delta }}</span>
+                {% elif row.delta > 0 %}<span class="down" aria-label="Lost {{ row.delta }} positions">↓{{ row.delta }}</span>
+                {% else %}<span class="neutral" aria-label="No change">·</span>{% endif %}
               {% else %}
-                <span class="neutral">·</span>
+                <span class="neutral" aria-label="No data">·</span>
               {% endif %}
             </td>
           </tr>
