@@ -70,6 +70,11 @@ def train_pace_model(X: pd.DataFrame, session_type: str, cfg: Any = None) -> Tup
         "driverId", "name", "code", "constructorId", "constructorName", "number",
         "session_type", "form_index"
     ]
+    
+    # Also exclude columns that are entirely NaN (e.g., grid for qualifying)
+    all_nan_cols = [c for c in X.columns if c not in exclude_cols and X[c].isna().all()]
+    exclude_cols.extend(all_nan_cols)
+    
     features, num_cols, cat_cols = _split_feature_columns(X, exclude=exclude_cols)
 
     # Build preprocessing pipeline

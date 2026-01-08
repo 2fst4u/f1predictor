@@ -370,16 +370,35 @@ def run_predictions_for_event(
 
     # Filter requested sessions for this round
     sessions = _filter_sessions_for_round(jc, season_i, round_i, sessions)
-
+    
+    # Sort sessions chronologically to ensure history flows correctly
+    # Standard order: Practice -> Sprint Shootout -> Sprint -> Qualifying -> Race
+    session_order_map = {
+        "practice_1": 1, 
+        "practice_2": 2, 
+        "practice_3": 3,
+        "sprint_qualifying": 4, 
+        "sprint": 5, 
+        "qualifying": 6, 
+        "race": 7,
+    }
+    sessions.sort(key=lambda s: session_order_map.get(s, 99))
+    
     all_preds: List[Dict[str, Any]] = []
     session_results: Dict[str, Dict[str, Any]] = {}
+
+    # Accumulate results from sessions within this run to feed into subsequent sessions
+    accumulated_history: List[Dict[str, Any]] = []
 
     for sess in sessions:
         try:
             logger.info(f"Building features for {event_title} - {sess}")
             ref_date = event_date
 
-            X, meta, roster = build_session_features(jc, om, of1, season_i, round_i, sess, ref_date, cfg)
+            # Convert accumulator to DataFrame for injection
+            extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
+            
+            X, meta, roster = build_session_features(jc, om, of1, season_i, round_i, sess, ref_date, cfg, extra_history=extra_hist_df)
             if (
                 X is None
                 or roster is None
@@ -389,34 +408,62 @@ def run_predictions_for_event(
                 logger.info(f"[predict] No features/roster available for {sess}; skipping")
                 continue
 
-            # Two-stage prediction: if predicting race and grid is missing, run qualifying first
+            # Universal Grid Feature logic (Race<-Quali, Sprint<-SprintQuali)
+            # Map target session -> precursor session that determines grid
+            grid_precursor_map = {
+                "race": "qualifying",
+                "sprint": "sprint_qualifying",
+            }
+            
+            has_grid_concept = sess in grid_precursor_map
+            
             grid_source = "actual"
-            if sess == "race" and "grid" in X.columns:
+            if has_grid_concept and "grid" in X.columns:
                 if X["grid"].isna().any():
-                    logger.info("[predict] Grid not available - running qualifying prediction to estimate grid")
-                    qual_ranked = _run_single_prediction(
-                        jc, om, of1, season_i, round_i, "qualifying", ref_date, cfg
-                    )
-                    if qual_ranked is not None and not qual_ranked.empty:
-                        # Use predicted qualifying positions as grid
-                        grid_map = dict(zip(
-                            qual_ranked["driverId"],
-                            qual_ranked["predicted_position"]
-                        ))
+                    precursor = grid_precursor_map[sess]
+                    logger.info(f"[predict] Grid not available for {sess} - looking for {precursor} results")
+                    
+                    # 1. Check if precursor was already run in this loop (internal consistency)
+                    precursor_results = [p for p in accumulated_history if p["session"] == precursor]
+                    
+                    if precursor_results:
+                        logger.info(f"[predict] Using {precursor} results from current run as grid")
+                        # precursor_results is list of dicts: need map driverId -> position
+                        # 'position' in accumulated_history typically maps to the finish position
+                        # 'accumulated_history' rows should have 'driverId' and 'position'
+                        
+                        grid_map = {r["driverId"]: int(r["position"]) for r in precursor_results}
                         X["grid"] = X["driverId"].map(grid_map)
-                        grid_source = "predicted (from qualifying simulation)"
-                        logger.info(f"[predict] Using predicted grid from qualifying simulation")
+                        grid_source = f"predicted (from {precursor} in loop)"
+                        
                     else:
-                        # Fallback: use form-based ranking as proxy
-                        if "form_index" in X.columns:
-                            X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
-                            grid_source = "estimated (from form index)"
-                            logger.info("[predict] Qualifying prediction failed - using form-based grid estimate")
+                        # 2. Run simulation if not in loop
+                        logger.info(f"[predict] {precursor} not in current loop - running simulation to estimate grid")
+                        # Note: _run_single_prediction does NOT see accumulated_history currently, 
+                        # but it's a cold start anyway if not in loop.
+                        qual_ranked = _run_single_prediction(
+                            jc, om, of1, season_i, round_i, precursor, ref_date, cfg
+                        )
+                        if qual_ranked is not None and not qual_ranked.empty:
+                            grid_map = dict(zip(
+                                qual_ranked["driverId"],
+                                qual_ranked["predicted_position"]
+                            ))
+                            X["grid"] = X["driverId"].map(grid_map)
+                            grid_source = f"predicted (from simulated {precursor})"
+                            
+                            # Optional: append this simulation to history? 
+                            # Maybe complex to convert format. Rely on simple map for now.
                         else:
-                            X["grid"] = np.arange(1, len(X) + 1)
-                            grid_source = "default (no data)"
+                            # 3. Fallback
+                            if "form_index" in X.columns:
+                                X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
+                                grid_source = "estimated (from form index)"
+                            else:
+                                X["grid"] = np.arange(1, len(X) + 1)
+                                grid_source = "default (no data)"
                 else:
-                    logger.info("[predict] Using actual grid from race results")
+                    logger.info(f"[predict] Using actual grid for {sess}")
 
             # Train pace model
             pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
@@ -500,8 +547,8 @@ def run_predictions_for_event(
             # Monte Carlo simulation
             draws = cfg.modelling.monte_carlo.draws
             prob_matrix, mean_pos, pairwise = simulate_grid(
-                combined_pace, 
-                dnf_prob, 
+                combined_pace,
+                dnf_prob,
                 draws=draws,
                 noise_factor=cfg.modelling.simulation.noise_factor,
                 min_noise=cfg.modelling.simulation.min_noise,
@@ -539,6 +586,7 @@ def run_predictions_for_event(
                 ranked["delta"] = np.nan
 
             for _, row in ranked.iterrows():
+                # Add to flat list for reporting/backtesting
                 all_preds.append(
                     {
                         "season": season_i,
@@ -559,6 +607,20 @@ def run_predictions_for_event(
                         "model_version": cfg.app.model_version,
                     }
                 )
+                
+                # Add to accumulated history for subsequent sessions in this run
+                # We need columns: driverId, position, date, session, constructorId, points, qpos, grid
+                # Note: 'points' are estimates, 'qpos' is relevant for 'qualifying' session
+                accumulated_history.append({
+                    "driverId": row["driverId"],
+                    "position": int(row["predicted_position"]),
+                    "date": ref_date,
+                    "session": sess,
+                    "constructorId": row.get("constructorId"),
+                    "points": 0.0, # Placeholder
+                    "grid": row.get("grid"),
+                    "qpos": int(row["predicted_position"]) if sess in ("qualifying", "sprint_qualifying") else np.nan
+                })
 
             # Check for wet session via FastF1
             is_wet = False
@@ -656,22 +718,45 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
     
     # Session-specific column labels
     is_quali = sess in ("qualifying", "sprint_qualifying")
+    is_race = sess in ("race", "sprint")
     win_label = "Pole" if is_quali else "Win"
     
+    # Check if grid data is available for race/sprint sessions
+    # (Checking generic is_race is enough if we generalized is_race above, but let's be explicit)
+    has_grid = is_race and "grid" in df.columns and df["grid"].notna().any()
+    
     # Print column headers
-    header = (
-        f"{Style.DIM}{'#':>3}   "
-        f"{'Driver':<{max_name}}   "
-        f"{'Team':<{max_team+2}}   "
-        f"{'Avg':>5}   "
-        f"{'Top3':>6}   "
-        f"{win_label:>6}   "
-        f"{'DNF':>6}   "
-        f"{'Pos':>3}{Style.RESET_ALL}"
-    )
+    if has_grid:
+        header = (
+            f"{Style.DIM}{'#':>3}   "
+            f"{'Driver':<{max_name}}   "
+            f"{'Team':<{max_team+2}}   "
+            f"{'Grid':>4}   "
+            f"{'Δ':>4}   "
+            f"{'Avg':>5}   "
+            f"{'Top3':>6}   "
+            f"{win_label:>6}   "
+            f"{'DNF':>6}   "
+            f"{'Pos':>3}{Style.RESET_ALL}"
+        )
+    else:
+        header = (
+            f"{Style.DIM}{'#':>3}   "
+            f"{'Driver':<{max_name}}   "
+            f"{'Team':<{max_team+2}}   "
+            f"{'Avg':>5}   "
+            f"{'Top3':>6}   "
+            f"{win_label:>6}   "
+            f"{'DNF':>6}   "
+            f"{'Pos':>3}{Style.RESET_ALL}"
+        )
     print(header)
+    
     # Horizontal separator
-    sep_width = 3 + 3 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 6 + 3 + 6 + 3 + 6 + 3 + 3
+    if has_grid:
+        sep_width = 3 + 3 + max_name + 3 + max_team + 2 + 3 + 4 + 3 + 4 + 3 + 5 + 3 + 6 + 3 + 6 + 3 + 6 + 3 + 3
+    else:
+        sep_width = 3 + 3 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 6 + 3 + 6 + 3 + 6 + 3 + 3
     print(f"{Style.DIM}{'─' * sep_width}{Style.RESET_ALL}")
     
     for _, r in df.iterrows():
@@ -688,6 +773,25 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
         dnf_color = Fore.RED if dnf > 15 else Fore.WHITE
         top3_color = Fore.GREEN if top3 > 75 else Fore.WHITE
         
+        # Grid position and delta for race sessions
+        grid_str = ""
+        delta_str = ""
+        if has_grid:
+            grid_pos = r.get("grid")
+            if pd.notna(grid_pos):
+                grid_int = int(grid_pos)
+                delta = grid_int - pos  # positive = gained positions (started lower, finished higher)
+                grid_str = f"{grid_int:>4}"
+                if delta > 0:
+                    delta_str = f"{Fore.GREEN}↑{delta:>2}{Style.RESET_ALL} "
+                elif delta < 0:
+                    delta_str = f"{Fore.RED}↓{abs(delta):>2}{Style.RESET_ALL} "
+                else:
+                    delta_str = f"{Style.DIM}  ={Style.RESET_ALL} "
+            else:
+                grid_str = f"{Style.DIM}  --{Style.RESET_ALL}"
+                delta_str = f"{Style.DIM}  --{Style.RESET_ALL}"
+        
         # Actual classification display
         actual_pos = r.get("actual_position")
         if pd.notna(actual_pos):
@@ -696,14 +800,28 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
             classified_str = f"{Style.DIM}{'--':>3}{Style.RESET_ALL}"
         
         # Left-aligned columns with good padding
-        print(
-            f"{Fore.YELLOW}{pos:>3}.{Style.RESET_ALL}  "
-            f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
-            f"{Style.DIM}[{team:<{max_team}}]{Style.RESET_ALL}   "
-            f"{mp:5.1f}   "
-            f"{top3_color}{top3:5.1f}%{Style.RESET_ALL}   "
-            f"{win_color}{win:5.1f}%{Style.RESET_ALL}   "
-            f"{dnf_color}{dnf:5.1f}%{Style.RESET_ALL}   "
-            f"{classified_str}"
-        )
+        if has_grid:
+            print(
+                f"{Fore.YELLOW}{pos:>3}.{Style.RESET_ALL}  "
+                f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
+                f"{Style.DIM}[{team:<{max_team}}]{Style.RESET_ALL}   "
+                f"{grid_str}   "
+                f"{delta_str}  "
+                f"{mp:5.1f}   "
+                f"{top3_color}{top3:5.1f}%{Style.RESET_ALL}   "
+                f"{win_color}{win:5.1f}%{Style.RESET_ALL}   "
+                f"{dnf_color}{dnf:5.1f}%{Style.RESET_ALL}   "
+                f"{classified_str}"
+            )
+        else:
+            print(
+                f"{Fore.YELLOW}{pos:>3}.{Style.RESET_ALL}  "
+                f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
+                f"{Style.DIM}[{team:<{max_team}}]{Style.RESET_ALL}   "
+                f"{mp:5.1f}   "
+                f"{top3_color}{top3:5.1f}%{Style.RESET_ALL}   "
+                f"{win_color}{win:5.1f}%{Style.RESET_ALL}   "
+                f"{dnf_color}{dnf:5.1f}%{Style.RESET_ALL}   "
+                f"{classified_str}"
+            )
 

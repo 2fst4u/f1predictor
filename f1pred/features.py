@@ -584,7 +584,7 @@ def compute_weather_sensitivity(
 def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional[OpenF1Client],
                            season: int, rnd: int, session_type: str,
                            ref_date: datetime,
-                           cfg) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
+                           cfg, extra_history: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
     logger.info(f"[features] Fetching schedule for {season} R{rnd}")
     t_all = time.time()
 
@@ -701,6 +701,13 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
         hist = collect_historical_results(jc, season=season, end_before=ref_date + timedelta(seconds=1),
                                           lookback_years=75, roster_driver_ids=roster_ids,
                                           cache_dir=cfg.paths.cache_dir)
+        
+        # Inject extra intra-weekend history if provided
+        if extra_history is not None and not extra_history.empty:
+            logger.info(f"[features] Appending {len(extra_history)} rows of extra history")
+            # Ensure proper concatenation
+            hist = pd.concat([hist, extra_history], ignore_index=True)
+            
         logger.info(f"[features] [history] Collection finished in {time.time() - t3:.2f}s (rows={len(hist)})")
     except Exception as e:
         logger.info(f"[features] Historical results fetch failed: {e}")
