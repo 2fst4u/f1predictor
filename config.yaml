@@ -6,6 +6,7 @@ app:
   random_seed: 42
   timezone: "UTC"
   live_refresh_seconds: 600
+  log_level: "WARNING"  # DEBUG, INFO, WARNING, ERROR - reduces default verbosity
 
 paths:
   cache_dir: ".cache/f1pred"

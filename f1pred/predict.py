@@ -16,7 +16,7 @@ from .util import get_logger, ensure_dirs
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.openf1 import OpenF1Client
-from .data.fastf1_backend import init_fastf1, get_session_classification
+from .data.fastf1_backend import init_fastf1, get_session_classification, get_session_weather_status
 from .features import build_session_features, collect_historical_results
 from .models import train_pace_model, estimate_dnf_probabilities
 from .simulate import simulate_grid
@@ -416,7 +416,23 @@ def run_predictions_for_event(
                     }
                 )
 
-            print_session_console(ranked, sess, cfg, meta.get("weather"))
+            # Check for wet session via FastF1
+            is_wet = False
+            try:
+                session_name_map = {
+                    "race": "Race",
+                    "qualifying": "Qualifying", 
+                    "sprint": "Sprint",
+                    "sprint_qualifying": "Sprint Shootout",
+                }
+                ff1_sess_name = session_name_map.get(sess, sess.title())
+                weather_status = get_session_weather_status(season_i, round_i, ff1_sess_name)
+                if weather_status:
+                    is_wet = weather_status.get("is_wet", False)
+            except Exception:
+                pass
+            
+            print_session_console(ranked, sess, cfg, meta.get("weather"), is_wet=is_wet, event_date=ref_date)
 
         except Exception as e:
                 logger.info(f"[predict] Session {sess} failed with exception:")
@@ -433,45 +449,117 @@ def run_predictions_for_event(
         }
 
 
-def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Optional[Dict[str, float]] = None) -> None:
+def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Optional[Dict[str, float]] = None, is_wet: bool = False, event_date: Optional[datetime] = None) -> None:
     title = _session_title(sess)
-    print(f"\n== {title} ==")
+    print(f"\n{Fore.YELLOW}{Style.BRIGHT}== {title} =={Style.RESET_ALL}")
     
+    # Weather display with condition-based coloring
     if weather_info:
         t = weather_info.get("temp_mean")
         r = weather_info.get("rain_sum")
         w = weather_info.get("wind_mean")
-        w_str = []
-        if t is not None: w_str.append(f"{t:.1f}°C")
-        if r is not None: w_str.append(f"Rain: {r:.1f}mm")
-        if w is not None: w_str.append(f"Wind: {w:.1f}km/h")
-        if w_str:
-            print(f"Weather: {', '.join(w_str)}")
-
+        
+        # Check if weather data is valid (not NaN)
+        import math
+        has_valid_weather = (
+            t is not None and not math.isnan(t) and
+            r is not None and not math.isnan(r)
+        )
+        
+        if has_valid_weather:
+            w_parts = []
+            # Color temp: blue if cold (<15°C), red if hot (>30°C), white otherwise
+            if t < 15:
+                temp_color = Fore.BLUE
+            elif t > 30:
+                temp_color = Fore.RED
+            else:
+                temp_color = Fore.WHITE
+            w_parts.append(f"{temp_color}{t:.0f}°C{Style.RESET_ALL}")
+            
+            # Color rain: cyan if any rain
+            rain_color = Fore.CYAN if r > 0 else Fore.WHITE
+            w_parts.append(f"{rain_color}Rain:{r:.1f}mm{Style.RESET_ALL}")
+            
+            if w is not None and not math.isnan(w):
+                # Color wind: yellow if strong (>20km/h)
+                wind_color = Fore.YELLOW if w > 20 else Fore.WHITE
+                w_parts.append(f"{wind_color}Wind:{w:.0f}km/h{Style.RESET_ALL}")
+            
+            # Add wet indicator
+            if is_wet:
+                w_parts.append(f"{Fore.CYAN}{Style.BRIGHT}[WET]{Style.RESET_ALL}")
+            
+            print(f"Weather: {' | '.join(w_parts)}")
+        else:
+            # Weather data unavailable - show when it will be available
+            if event_date:
+                now = datetime.now(timezone.utc)
+                days_until = (event_date - now).days
+                forecast_available_in = max(0, days_until - 7)  # Forecasts typically 7 days ahead
+                if forecast_available_in > 0:
+                    print(f"{Style.DIM}Weather: Unknown (forecast available in ~{forecast_available_in} days){Style.RESET_ALL}")
+                else:
+                    print(f"{Style.DIM}Weather: Unknown{Style.RESET_ALL}")
+            else:
+                print(f"{Style.DIM}Weather: Unknown{Style.RESET_ALL}")
+    
+    # Calculate column widths for alignment
+    max_name = max(len((r.get("name") or "")[:22]) for _, r in df.iterrows()) if not df.empty else 18
+    max_team = max(len((r.get("constructorName") or "")[:14]) for _, r in df.iterrows()) if not df.empty else 10
+    max_name = max(max_name, 14)  # Minimum for readability
+    max_team = max(max_team, 10)  # Minimum for readability
+    
+    # Session-specific column labels
+    is_quali = sess in ("qualifying", "sprint_qualifying")
+    win_label = "Pole" if is_quali else "Win"
+    
+    # Print column headers
+    header = (
+        f"{Style.DIM}{'#':>3}   "
+        f"{'Driver':<{max_name}}   "
+        f"{'Team':<{max_team+2}}   "
+        f"{'Avg':>5}   "
+        f"{'Top3':>6}   "
+        f"{win_label:>6}   "
+        f"{'DNF':>6}   "
+        f"{'Pos':>3}{Style.RESET_ALL}"
+    )
+    print(header)
+    # Horizontal separator
+    sep_width = 3 + 3 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 6 + 3 + 6 + 3 + 6 + 3 + 3
+    print(f"{Style.DIM}{'─' * sep_width}{Style.RESET_ALL}")
+    
     for _, r in df.iterrows():
         pos = int(r["predicted_position"])
-        name = (r.get("name") or "")[:30]
-        team = (r.get("constructorName") or "")[:18]
+        name = (r.get("name") or "")[:max_name]
+        team = (r.get("constructorName") or "")[:max_team]
         mp = float(r["mean_pos"])
         top3 = float(r["p_top3"]) * 100
         win = float(r["p_win"]) * 100
         dnf = float(r["p_dnf"]) * 100
         
-        # Weather impact
-        wx_imp = r.get("weather_effect", 0.0)
-        wx_str = f"{wx_imp:+.2f}" if abs(wx_imp) > 0.01 else "  -  "
+        # Color coding for probabilities
+        win_color = Fore.GREEN if win > 25 else Fore.WHITE
+        dnf_color = Fore.RED if dnf > 15 else Fore.WHITE
+        top3_color = Fore.GREEN if top3 > 75 else Fore.WHITE
         
-        delta = r.get("delta")
-        if pd.notna(delta):
-            if delta < 0:
-                delta_str = Fore.GREEN + f"↑ {-int(delta)}" + Style.RESET_ALL
-            elif delta > 0:
-                delta_str = Fore.RED + f"↓ {int(delta)}" + Style.RESET_ALL
-            else:
-                delta_str = "·"
+        # Actual classification display
+        actual_pos = r.get("actual_position")
+        if pd.notna(actual_pos):
+            classified_str = f"{Fore.CYAN}{Style.BRIGHT}{int(actual_pos):>3d}{Style.RESET_ALL}"
         else:
-            delta_str = "·"
+            classified_str = f"{Style.DIM}{'--':>3}{Style.RESET_ALL}"
+        
+        # Left-aligned columns with good padding
         print(
-            f"{pos:2d}. {name:30s} [{team:18s}]  μ={mp:4.1f}  "
-            f"Top3={top3:4.1f}%  Win={win:4.1f}%  DNF={dnf:4.1f}%  WxImp={wx_str}  {delta_str}"
+            f"{Fore.YELLOW}{pos:>3}.{Style.RESET_ALL}  "
+            f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
+            f"{Style.DIM}[{team:<{max_team}}]{Style.RESET_ALL}   "
+            f"{mp:5.1f}   "
+            f"{top3_color}{top3:5.1f}%{Style.RESET_ALL}   "
+            f"{win_color}{win:5.1f}%{Style.RESET_ALL}   "
+            f"{dnf_color}{dnf:5.1f}%{Style.RESET_ALL}   "
+            f"{classified_str}"
         )
+

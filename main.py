@@ -24,7 +24,7 @@ Examples:
 import argparse
 
 from f1pred.config import load_config, AppConfig
-from f1pred.util import ensure_dirs, get_logger, init_caches
+from f1pred.util import ensure_dirs, get_logger, init_caches, configure_logging
 from f1pred.predict import run_predictions_for_event
 from f1pred.backtest import run_backtests
 from f1pred.live import live_loop
@@ -46,12 +46,25 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--refresh", type=int, default=None, help="Live refresh interval in seconds")
     p.add_argument("--backtest", action="store_true", help="Run rolling backtests")
     p.add_argument("--no-cache", action="store_true", help="Disable request caching")
+    p.add_argument(
+        "--log-level", type=str, default=None,
+        choices=["debug", "info", "warning", "error"],
+        help="Set logging verbosity (default: from config, or WARNING)"
+    )
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     cfg: AppConfig = load_config(args.config)
+
+    # Configure logging - CLI overrides config
+    log_level = args.log_level.upper() if args.log_level else cfg.app.log_level
+    configure_logging(log_level)
+    
+    # Re-get logger after configuration
+    global logger
+    logger = get_logger(__name__)
 
     # Apply CLI overrides
     if args.refresh is not None:

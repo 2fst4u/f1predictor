@@ -109,3 +109,47 @@ def get_session_classification(season: int, round_no: int, session_name: str):
             return None
     except Exception:
         return None
+
+
+def get_session_weather_status(season: int, round_no: int, session_name: str) -> Optional[dict]:
+    """Get weather conditions for a session including wet/dry status.
+    
+    Returns dict with:
+      - is_wet: True if session had significant rain/wet conditions
+      - rainfall: bool if rain was detected
+      - track_status: 'WET' or 'DRY' based on conditions
+    """
+    if fastf1 is None:
+        return None
+    try:
+        ev = get_event(season, round_no)
+        if ev is None:
+            return None
+        sess = ev.get_session(session_name)
+        sess.load(telemetry=False, laps=True, weather=True, messages=False)
+        
+        result = {"is_wet": False, "rainfall": False, "track_status": "DRY"}
+        
+        # Check weather data for rain
+        weather_df = getattr(sess, "weather_data", None)
+        if weather_df is not None and not weather_df.empty:
+            if "Rainfall" in weather_df.columns:
+                rainfall = weather_df["Rainfall"].any()
+                result["rainfall"] = bool(rainfall)
+                if rainfall:
+                    result["is_wet"] = True
+                    result["track_status"] = "WET"
+        
+        # Check laps for wet/inter compound usage
+        laps = getattr(sess, "laps", None)
+        if laps is not None and not laps.empty and "Compound" in laps.columns:
+            compounds = set(laps["Compound"].dropna().unique())
+            wet_compounds = {"WET", "INTERMEDIATE"}
+            if compounds & wet_compounds:
+                result["is_wet"] = True
+                result["track_status"] = "WET"
+        
+        return result
+    except Exception as e:
+        logger.debug(f"Failed to get weather status: {e}")
+        return None

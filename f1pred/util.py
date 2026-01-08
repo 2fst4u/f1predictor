@@ -18,12 +18,25 @@ def ensure_dirs(*paths: str) -> None:
         Path(p).mkdir(parents=True, exist_ok=True)
 
 
-def get_logger(name: str) -> logging.Logger:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    )
+def get_logger(name: str, level: str = "WARNING") -> logging.Logger:
+    """Get a logger with the specified level. Call configure_logging() first to set global level."""
     return logging.getLogger(name)
+
+
+def configure_logging(level: str = "WARNING") -> None:
+    """Configure root logging level. Should be called once at startup."""
+    level_map = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+    }
+    log_level = level_map.get(level.upper(), logging.WARNING)
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        force=True,  # Override any existing configuration
+    )
 
 
 def init_caches(cfg, disable_cache: bool = False) -> None:

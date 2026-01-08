@@ -14,6 +14,7 @@ class AppSettings:
     random_seed: int
     timezone: str
     live_refresh_seconds: int
+    log_level: str = "WARNING"
 
 
 @dataclass
