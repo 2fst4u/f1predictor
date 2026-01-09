@@ -1,10 +1,7 @@
-from f1pred.report import HTML_TEMPLATE
-from jinja2 import Template
+from f1pred.report import generate_report
 import re
 
 def test_team_logo_logic():
-    template = Template(HTML_TEMPLATE)
-    
     test_teams = [
         "Oracle Red Bull Racing",
         "Red Bull",
@@ -20,7 +17,7 @@ def test_team_logo_logic():
         "MoneyGram Haas F1 Team",
         "Stake F1 Team Kick Sauber"
     ]
-    
+
     # Mock data structure matching what the template expects
     sessions_data = [{
         "session_title": "Test Session",
@@ -38,46 +35,38 @@ def test_team_logo_logic():
             } for team_name in test_teams
         ]
     }]
-    
-    html = template.render(
+
+    html = generate_report(
         title="Test Report",
         subtitle="Logo Verification",
         sessions=sessions_data,
         generated_at="2025-01-01",
         model_version="test"
     )
-    
+
     # Check if logos are present for each team
     print("Verifying team logos in generated HTML...")
     failed = False
     for team in test_teams:
         # We look for the img tag with the specific team name in alt attribute
         # <img class="team-logo" src="..." alt="Oracle Red Bull Racing" ...>
-        # The regex looks for: src="http..." ... alt="TEAM_NAME"
-        # Note: In the template, src comes before alt.
-        
-        # Simple check: find the substring for the team rows
-        # We can search for the specific team name and check if there's an img tag preceding it with a valid src
-        
-        # Or parse the HTML? Regex is probably fine for this verification.
         # Pattern: <img class="team-logo" src="([^"]+)" alt="{team}"
-        
+
         pattern = f'<img class="team-logo" src="([^"]+)" alt="{re.escape(team)}"'
         match = re.search(pattern, html)
-        
+
         if match:
             url = match.group(1)
-            print(f"[PASS] {team} -> {url[:50]}...")
+            # print(f"[PASS] {team} -> {url[:50]}...")
         else:
             print(f"[FAIL] {team} -> No logo found")
             failed = True
-            
+
     if failed:
         print("\nSome logo checks failed!")
-        exit(1)
+        assert False, "Logo checks failed"
     else:
         print("\nAll logo checks passed!")
-        exit(0)
 
 if __name__ == "__main__":
     test_team_logo_logic()
