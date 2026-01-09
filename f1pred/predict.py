@@ -674,9 +674,9 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
         
         if has_valid_weather:
             w_parts = []
-            # Color temp: blue if cold (<15°C), red if hot (>30°C), white otherwise
+            # Color temp: cyan if cold (<15°C) for better readability, red if hot (>30°C), white otherwise
             if t < 15:
-                temp_color = Fore.BLUE
+                temp_color = Fore.CYAN
             elif t > 30:
                 temp_color = Fore.RED
             else:
@@ -825,3 +825,5 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
                 f"{classified_str}"
             )
 
+    # Print legend explaining abbreviations
+    print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, Δ=Grid Delta{Style.RESET_ALL}")
