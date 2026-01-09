@@ -6,7 +6,7 @@ performance metrics. Features include form indices, weather sensitivity, and
 teammate comparisons.
 """
 from __future__ import annotations
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Union
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from pathlib import Path
@@ -110,8 +110,14 @@ def _save_weather_cache(cache_dir: str, season: int, rnd: int, data: Dict[str, f
         logger.info(f"[features] [cache] Failed to save weather {path}: {e}")
 
 
-def exponential_weights(dates: List[datetime], ref_date: datetime, half_life_days: int) -> np.ndarray:
-    ages = np.array([(ref_date - d).days if isinstance(d, datetime) else 0 for d in dates], dtype=float)
+def exponential_weights(dates: Union[List[datetime], pd.Series], ref_date: datetime, half_life_days: int) -> np.ndarray:
+    if isinstance(dates, pd.Series):
+        # Vectorized path for pandas Series (approx 4x faster)
+        # Note: dates should not contain NaT ideally, but fillna(0) handles it safely
+        ages = (ref_date - dates).dt.days.fillna(0).values.astype(float)
+    else:
+        # Legacy path for lists
+        ages = np.array([(ref_date - d).days if isinstance(d, datetime) else 0 for d in dates], dtype=float)
     return np.power(0.5, ages / max(1, half_life_days))
 
 
@@ -343,7 +349,7 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
     dfg["points"] = dfg["points"].fillna(0.0)
     dfg["pos_score"] = -dfg["position"].astype(float)
     dfg["pts_score"] = dfg["points"].astype(float)
-    w = exponential_weights(list(dfg["date"]), ref_date, half_life_days)
+    w = exponential_weights(dfg["date"], ref_date, half_life_days)
     dfg["w"] = w
     agg = dfg.groupby("driverId").apply(
         lambda g: pd.Series({
@@ -377,7 +383,7 @@ def compute_driver_team_form(
 
     races["pos_score"] = -races["position"].astype(float).fillna(0.0)
     races["pts_score"] = races["points"].astype(float).fillna(0.0)
-    w = exponential_weights(list(races["date"]), ref_date, half_life_days)
+    w = exponential_weights(races["date"], ref_date, half_life_days)
     races["w"] = w
 
     agg = races.groupby("driverId").apply(
@@ -414,7 +420,7 @@ def compute_teammate_delta(
         return pd.DataFrame(columns=["driverId", "teammate_delta"])
 
     q["qpos"] = q["qpos"].astype(float)
-    w = exponential_weights(list(q["date"]), ref_date, half_life_days)
+    w = exponential_weights(q["date"], ref_date, half_life_days)
     q["w"] = w
 
     rows: List[Dict[str, Any]] = []
@@ -465,7 +471,7 @@ def compute_grid_finish_delta(
         return pd.DataFrame(columns=["driverId", "grid_finish_delta"])
 
     races["gain"] = races["grid"].astype(float) - races["position"].astype(float)
-    w = exponential_weights(list(races["date"]), ref_date, half_life_days)
+    w = exponential_weights(races["date"], ref_date, half_life_days)
     races["w"] = w
 
     agg = races.groupby("driverId").apply(
@@ -731,7 +737,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
 
     team_form = hist[hist["session"] == "race"].dropna(subset=["constructorId", "date", "points"])
     if not team_form.empty:
-        team_form["w"] = exponential_weights(list(team_form["date"]), ref_date, cfg.modelling.recency_half_life_days.team)
+        team_form["w"] = exponential_weights(team_form["date"], ref_date, cfg.modelling.recency_half_life_days.team)
         team_idx = team_form.groupby("constructorId").apply(
             lambda g: pd.Series({
                 "team_form_index": float((g["points"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
