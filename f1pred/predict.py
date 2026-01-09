@@ -276,7 +276,7 @@ def _run_single_prediction(
     dnf_prob = np.zeros(X.shape[0], dtype=float)
     if sess in ("race", "sprint"):
         try:
-            dnf_prob = estimate_dnf_probabilities(hist, X, cfg=cfg)
+            dnf_prob = estimate_dnf_probabilities(hist, X, cfg=cfg, event_weather=meta.get("weather"))
         except Exception:
             dnf_prob[:] = 0.12
     
@@ -538,7 +538,8 @@ def run_predictions_for_event(
                     dnf_prob = estimate_dnf_probabilities(
                         hist,
                         X,
-                        cfg=cfg
+                        cfg=cfg,
+                        event_weather=meta.get("weather"),
                     )
                 except Exception as e:
                     logger.info(f"[predict] DNF estimation failed; using default 0.12: {e}")
@@ -698,17 +699,29 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
             
             print(f"Weather: {' | '.join(w_parts)}")
         else:
-            # Weather data unavailable - show when it will be available
+            # Weather data has NaN values - show when it will be available
             if event_date:
                 now = datetime.now(timezone.utc)
                 days_until = (event_date - now).days
-                forecast_available_in = max(0, days_until - 7)  # Forecasts typically 7 days ahead
+                forecast_available_in = max(0, days_until - 16)  # Open-Meteo forecasts ~16 days ahead
                 if forecast_available_in > 0:
                     print(f"{Style.DIM}Weather: Unknown (forecast available in ~{forecast_available_in} days){Style.RESET_ALL}")
                 else:
                     print(f"{Style.DIM}Weather: Unknown{Style.RESET_ALL}")
             else:
                 print(f"{Style.DIM}Weather: Unknown{Style.RESET_ALL}")
+    else:
+        # No weather data at all (empty dict or None) - race is beyond forecast horizon
+        if event_date:
+            now = datetime.now(timezone.utc)
+            days_until = (event_date - now).days
+            forecast_available_in = max(0, days_until - 16)  # Open-Meteo forecasts ~16 days ahead
+            if forecast_available_in > 0:
+                print(f"{Style.DIM}Weather: Unknown (forecast available in ~{forecast_available_in} days){Style.RESET_ALL}")
+            else:
+                print(f"{Style.DIM}Weather: Unknown{Style.RESET_ALL}")
+        else:
+            print(f"{Style.DIM}Weather: Unknown{Style.RESET_ALL}")
     
     # Calculate column widths for alignment
     max_name = max(len((r.get("name") or "")[:22]) for _, r in df.iterrows()) if not df.empty else 18

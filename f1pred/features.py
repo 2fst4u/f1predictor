@@ -121,7 +121,7 @@ def _empty_feature_frame() -> pd.DataFrame:
         "driver_team_form_index", "team_tenure_events",
         "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain",
         "weather_effect",
-        "wet_skill", "cold_skill", "wind_skill", "pressure_skill",
+        "temp_skill", "rain_skill", "wind_skill", "pressure_skill",
         "teammate_delta", "grid_finish_delta",
         "session_type", "is_race", "is_qualifying", "is_sprint"
     ])
@@ -776,10 +776,21 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
             "driverId", "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain"
         ])
 
-    weather_df = pd.DataFrame({
-        "driverId": roster["driverId"] if not roster.empty else [],
-        "wet_skill": 0.0, "cold_skill": 0.0, "wind_skill": 0.0, "pressure_skill": 0.0
-    })
+    # Build weather skill scores from beta values
+    # The beta values ARE the skills - they represent correlation between
+    # driver performance and weather conditions (positive = better in that condition)
+    if not beta_df.empty and not roster.empty:
+        weather_df = roster[["driverId"]].merge(beta_df, on="driverId", how="left")
+        weather_df["temp_skill"] = weather_df["weather_beta_temp"].fillna(0.0)
+        weather_df["rain_skill"] = weather_df["weather_beta_rain"].fillna(0.0)
+        weather_df["wind_skill"] = weather_df["weather_beta_wind"].fillna(0.0)
+        weather_df["pressure_skill"] = weather_df["weather_beta_pressure"].fillna(0.0)
+        weather_df = weather_df[["driverId", "temp_skill", "rain_skill", "wind_skill", "pressure_skill"]]
+    else:
+        weather_df = pd.DataFrame({
+            "driverId": roster["driverId"] if not roster.empty else [],
+            "temp_skill": 0.0, "rain_skill": 0.0, "wind_skill": 0.0, "pressure_skill": 0.0
+        })
 
     # Merge features
     X = _empty_feature_frame()
@@ -829,8 +840,8 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
             "weather_beta_pressure": 0.0, 
             "weather_beta_wind": 0.0, 
             "weather_beta_rain": 0.0,
-            "wet_skill": 0.0, 
-            "cold_skill": 0.0, 
+            "temp_skill": 0.0, 
+            "rain_skill": 0.0, 
             "wind_skill": 0.0, 
             "pressure_skill": 0.0,
             # Deltas: assume neutral behavior

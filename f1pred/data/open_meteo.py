@@ -179,11 +179,10 @@ class OpenMeteoClient:
         mask = (weather_df["time"] >= s_start) & (weather_df["time"] <= s_end)
         subset = weather_df.loc[mask]
         if subset.empty:
-            try:
-                nearest = weather_df.iloc[(weather_df["time"] - s_start).abs().argsort()[:3]]
-                subset = nearest
-            except Exception:
-                subset = weather_df.head(3)
+            # No data covers the session window - return empty rather than using stale data
+            # This happens when race date is beyond forecast horizon (~16 days)
+            logger.info(f"OpenMeteoClient: No weather data covers session window {s_start} - {s_end}")
+            return {}
 
         def _mean(col: str, default=None):
             return float(subset[col].mean()) if col in subset.columns and not subset[col].isna().all() else (default if default is not None else float("nan"))

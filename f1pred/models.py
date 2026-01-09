@@ -4,7 +4,7 @@ This module provides pace prediction and DNF probability estimation using
 gradient boosting models. Supports LightGBM, XGBoost, or sklearn fallback.
 """
 from __future__ import annotations
-from typing import Tuple, Any, List, Optional
+from typing import Tuple, Any, List, Optional, Dict
 import warnings
 import numpy as np
 import pandas as pd
@@ -255,9 +255,16 @@ def estimate_dnf_probabilities(
     clip_min: float = 0.02,
     clip_max: float = 0.30,
     cfg: Any = None,
+    event_weather: Optional[Dict[str, float]] = None,
+    hist_weather: Optional[Dict[Tuple[int, int], Dict[str, float]]] = None,
 ) -> np.ndarray:
     """
     Estimate per-driver DNF probabilities using Beta-smoothed empirical base rates.
+    
+    Weather-aware: calculates separate DNF rates for wet vs dry conditions and uses
+    the appropriate category based on the forecast for the current session.
+    Falls back to overall rates when weather-specific data is insufficient.
+    
     Arguments allow overrides, but cfg takes precedence if provided.
     """
     if cfg:
@@ -275,20 +282,58 @@ def estimate_dnf_probabilities(
     if races.empty or current_X is None or current_X.empty:
         return np.full(len(current_X) if current_X is not None else 0, 0.08, dtype=float)
 
+    # Detect DNF status
     status = races["status"].astype(str).str.lower()
     dnf = (~races["position"].notna()) | status.str.contains(
         "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
     )
     races["dnf"] = dnf.astype(int)
 
-    drv_counts = races.groupby("driverId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
+    # Determine if current session is wet (rain > 1mm threshold)
+    WET_THRESHOLD = 1.0  # mm of rain
+    current_is_wet = False
+    if event_weather:
+        rain_sum = event_weather.get("rain_sum", 0.0)
+        if rain_sum is not None and not (rain_sum != rain_sum):  # NaN check
+            current_is_wet = float(rain_sum) > WET_THRESHOLD
+
+    # Tag historical races as wet/dry if historical weather is available
+    races["is_wet"] = False
+    if hist_weather:
+        for idx, row in races.iterrows():
+            try:
+                key = (int(row["season"]), int(row["round"]))
+                w = hist_weather.get(key, {})
+                if w:
+                    rain = w.get("rain_sum", 0.0)
+                    if rain is not None and not (rain != rain):  # NaN check
+                        races.at[idx, "is_wet"] = float(rain) > WET_THRESHOLD
+            except Exception:
+                continue
+
+    # Filter to matching weather category
+    weather_races = races[races["is_wet"] == current_is_wet]
+    
+    # Minimum samples required to use weather-specific rates
+    MIN_WEATHER_SAMPLES = 10
+    
+    # Use weather-filtered data if enough samples, otherwise fall back to all races
+    if len(weather_races) >= MIN_WEATHER_SAMPLES:
+        calc_races = weather_races
+    else:
+        calc_races = races  # Fall back to global rates
+
+    # Calculate driver-level DNF rates
+    drv_counts = calc_races.groupby("driverId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
     drv_counts["p"] = (drv_counts["k"] + alpha) / (drv_counts["n"] + alpha + beta)
 
-    team_counts = races.groupby("constructorId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
+    # Calculate team-level DNF rates
+    team_counts = calc_races.groupby("constructorId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
     team_counts["p"] = (team_counts["k"] + alpha) / (team_counts["n"] + alpha + beta)
 
-    global_k = races["dnf"].sum()
-    global_n = races.shape[0]
+    # Global fallback rate
+    global_k = calc_races["dnf"].sum()
+    global_n = calc_races.shape[0]
     global_p = (global_k + alpha) / (global_n + alpha + beta)
 
     drv_map = drv_counts["p"].to_dict()
