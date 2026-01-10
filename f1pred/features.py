@@ -423,34 +423,31 @@ def compute_teammate_delta(
     w = exponential_weights(q["date"], ref_date, half_life_days)
     q["w"] = w
 
-    rows: List[Dict[str, Any]] = []
-    grp = q.groupby(["season", "round", "constructorId"])
-    for (_, _, _), g in grp:
-        if g.shape[0] < 2:
-            continue
-        team_avg = g["qpos"].mean()
-        for _, r in g.iterrows():
-            rows.append(
-                {
-                    "driverId": r["driverId"],
-                    "delta": team_avg - float(r["qpos"]),
-                    "w": r["w"],
-                }
-            )
+    # Count drivers per team-race group
+    q["team_count"] = q.groupby(["season", "round", "constructorId"])["driverId"].transform("count")
 
-    if not rows:
+    # Filter for groups with at least 2 drivers
+    valid_q = q[q["team_count"] >= 2].copy()
+
+    if valid_q.empty:
         return pd.DataFrame(columns=["driverId", "teammate_delta"])
 
-    df = pd.DataFrame(rows)
-    agg = df.groupby("driverId").apply(
-        lambda g: pd.Series(
-            {
-                "teammate_delta": float((g["delta"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
-            }
-        ),
-        include_groups=False,
-    ).reset_index()
-    return agg
+    # Calculate team average qpos for each group
+    valid_q["team_avg"] = valid_q.groupby(["season", "round", "constructorId"])["qpos"].transform("mean")
+
+    # Calculate delta
+    valid_q["delta"] = valid_q["team_avg"] - valid_q["qpos"]
+
+    # Weighted aggregation
+    valid_q["weighted_delta"] = valid_q["delta"] * valid_q["w"]
+
+    # Group by driver and sum weighted delta and weights
+    agg = valid_q.groupby("driverId")[["weighted_delta", "w"]].sum().reset_index()
+
+    # Calculate final metric
+    agg["teammate_delta"] = agg["weighted_delta"] / agg["w"].replace(0, 1e-6)
+
+    return agg[["driverId", "teammate_delta"]]
 
 
 def compute_grid_finish_delta(
