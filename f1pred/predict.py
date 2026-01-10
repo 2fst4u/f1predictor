@@ -748,7 +748,7 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
             f"{'Δ':>4}   "
             f"{'Avg':>5}   "
             f"{'Top3':>6}   "
-            f"{win_label:>6}   "
+            f"{win_label:>12}   "
             f"{'DNF':>6}   "
             f"{'Pos':>3}{Style.RESET_ALL}"
         )
@@ -759,7 +759,7 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
             f"{'Team':<{max_team+2}}   "
             f"{'Avg':>5}   "
             f"{'Top3':>6}   "
-            f"{win_label:>6}   "
+            f"{win_label:>12}   "
             f"{'DNF':>6}   "
             f"{'Pos':>3}{Style.RESET_ALL}"
         )
@@ -767,9 +767,9 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
     
     # Horizontal separator
     if has_grid:
-        sep_width = 3 + 3 + max_name + 3 + max_team + 2 + 3 + 4 + 3 + 4 + 3 + 5 + 3 + 6 + 3 + 6 + 3 + 6 + 3 + 3
+        sep_width = 3 + 3 + max_name + 3 + max_team + 2 + 3 + 4 + 3 + 4 + 3 + 5 + 3 + 6 + 3 + 12 + 3 + 6 + 3 + 3
     else:
-        sep_width = 3 + 3 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 6 + 3 + 6 + 3 + 6 + 3 + 3
+        sep_width = 3 + 3 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 6 + 3 + 12 + 3 + 6 + 3 + 3
     print(f"{Style.DIM}{'─' * sep_width}{Style.RESET_ALL}")
     
     for _, r in df.iterrows():
@@ -781,6 +781,10 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
         win = float(r["p_win"]) * 100
         dnf = float(r["p_dnf"]) * 100
         
+        # Visual bar for win probability
+        win_blocks = int((win / 100.0) * 5)
+        win_bar = "█" * win_blocks + "·" * (5 - win_blocks)
+
         # Color coding for probabilities
         win_color = Fore.GREEN if win > 25 else Fore.WHITE
         dnf_color = Fore.RED if dnf > 15 else Fore.WHITE
@@ -822,7 +826,7 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
                 f"{delta_str}  "
                 f"{mp:5.1f}   "
                 f"{top3_color}{top3:5.1f}%{Style.RESET_ALL}   "
-                f"{win_color}{win:5.1f}%{Style.RESET_ALL}   "
+                f"{win_color}{win:5.1f}% {win_bar}{Style.RESET_ALL}   "
                 f"{dnf_color}{dnf:5.1f}%{Style.RESET_ALL}   "
                 f"{classified_str}"
             )
@@ -833,7 +837,7 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
                 f"{Style.DIM}[{team:<{max_team}}]{Style.RESET_ALL}   "
                 f"{mp:5.1f}   "
                 f"{top3_color}{top3:5.1f}%{Style.RESET_ALL}   "
-                f"{win_color}{win:5.1f}%{Style.RESET_ALL}   "
+                f"{win_color}{win:5.1f}% {win_bar}{Style.RESET_ALL}   "
                 f"{dnf_color}{dnf:5.1f}%{Style.RESET_ALL}   "
                 f"{classified_str}"
             )
