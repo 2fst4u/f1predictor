@@ -351,13 +351,10 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
     dfg["pts_score"] = dfg["points"].astype(float)
     w = exponential_weights(dfg["date"], ref_date, half_life_days)
     dfg["w"] = w
-    agg = dfg.groupby("driverId").apply(
-        lambda g: pd.Series({
-            "form_index": float((g["pos_score"] * g["w"]).sum() + (g["pts_score"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
-        }),
-        include_groups=False
-    ).reset_index()
-    return agg
+    dfg["weighted_val"] = (dfg["pos_score"] + dfg["pts_score"]) * dfg["w"]
+    sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
+    sums["form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
+    return sums[["driverId", "form_index"]]
 
 
 def compute_driver_team_form(
@@ -386,14 +383,18 @@ def compute_driver_team_form(
     w = exponential_weights(races["date"], ref_date, half_life_days)
     races["w"] = w
 
-    agg = races.groupby("driverId").apply(
-        lambda g: pd.Series({
-            "driver_team_form_index": float((g["pos_score"] * g["w"]).sum() + (g["pts_score"] * g["w"]).sum()) / max(1e-6, g["w"].sum()),
-            "team_tenure_events": int(g.shape[0])
-        }),
-        include_groups=False
+    races["weighted_val"] = (races["pos_score"] + races["pts_score"]) * races["w"]
+
+    # We need both the weighted sum/sum of weights AND the count of rows
+    agg = races.groupby("driverId").agg(
+        weighted_val_sum=("weighted_val", "sum"),
+        w_sum=("w", "sum"),
+        team_tenure_events=("driverId", "count")
     ).reset_index()
-    return agg
+
+    agg["driver_team_form_index"] = agg["weighted_val_sum"] / agg["w_sum"].clip(lower=1e-6)
+
+    return agg[["driverId", "driver_team_form_index", "team_tenure_events"]]
 
 
 def compute_teammate_delta(
@@ -471,15 +472,10 @@ def compute_grid_finish_delta(
     w = exponential_weights(races["date"], ref_date, half_life_days)
     races["w"] = w
 
-    agg = races.groupby("driverId").apply(
-        lambda g: pd.Series(
-            {
-                "grid_finish_delta": float((g["gain"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
-            }
-        ),
-        include_groups=False,
-    ).reset_index()
-    return agg
+    races["weighted_gain"] = races["gain"] * races["w"]
+    sums = races.groupby("driverId")[["weighted_gain", "w"]].sum().reset_index()
+    sums["grid_finish_delta"] = sums["weighted_gain"] / sums["w"].clip(lower=1e-6)
+    return sums[["driverId", "grid_finish_delta"]]
 
 
 def _aggregate_weather(om: OpenMeteoClient, lat: float, lon: float, event_dt: datetime) -> Dict[str, float]:
@@ -735,12 +731,11 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
     team_form = hist[hist["session"] == "race"].dropna(subset=["constructorId", "date", "points"])
     if not team_form.empty:
         team_form["w"] = exponential_weights(team_form["date"], ref_date, cfg.modelling.recency_half_life_days.team)
-        team_idx = team_form.groupby("constructorId").apply(
-            lambda g: pd.Series({
-                "team_form_index": float((g["points"] * g["w"]).sum()) / max(1e-6, g["w"].sum())
-            }),
-            include_groups=False
-        ).reset_index()
+        team_form["weighted_points"] = team_form["points"] * team_form["w"]
+
+        sums = team_form.groupby("constructorId")[["weighted_points", "w"]].sum().reset_index()
+        sums["team_form_index"] = sums["weighted_points"] / sums["w"].clip(lower=1e-6)
+        team_idx = sums[["constructorId", "team_form_index"]]
     else:
         team_idx = pd.DataFrame(columns=["constructorId", "team_form_index"])
 
