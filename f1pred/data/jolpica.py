@@ -109,15 +109,39 @@ class JolpicaClient:
 
         return data
 
+    # Input validation
+
+    def _validate_season(self, season: str) -> str:
+        """Ensure season is a valid year or 'current'."""
+        s = str(season).strip()
+        if s == "current":
+            return s
+        if not s.isdigit() or len(s) != 4:
+            raise ValueError(f"Invalid season: {season}")
+        return s
+
+    def _validate_round(self, rnd: str) -> str:
+        """Ensure round is a valid number or 'last'/'next'."""
+        r = str(rnd).strip()
+        if r in ("last", "next"):
+            return r
+        if not r.isdigit():
+            raise ValueError(f"Invalid round: {rnd}")
+        return r
+
     # Schedules and events
 
     def get_season_schedule(self, season: str) -> List[Dict[str, Any]]:
+        season = self._validate_season(season)
         js = self._get(f"{season}.json", params={"limit": 1000})
         mr = self._extract_mrdata(js)
         return mr.get("RaceTable", {}).get("Races", []) or []
 
     def get_event(self, season: str, rnd: str) -> Optional[Dict[str, Any]]:
         try:
+            # We don't validate round here strictly because we iterate over schedule,
+            # but validating season is important.
+            season = self._validate_season(season)
             races = self.get_season_schedule(season)
             for r in races:
                 if str(r.get("round")) == str(rnd):
@@ -143,18 +167,24 @@ class JolpicaClient:
     # Round-level results
 
     def get_race_results(self, season: str, rnd: str) -> List[Dict[str, Any]]:
+        season = self._validate_season(season)
+        rnd = self._validate_round(rnd)
         js = self._get(f"{season}/{rnd}/results.json", params={"limit": 1000})
         mr = self._extract_mrdata(js)
         races = mr.get("RaceTable", {}).get("Races", [])
         return (races[0].get("Results", []) if races else []) or []
 
     def get_qualifying_results(self, season: str, rnd: str) -> List[Dict[str, Any]]:
+        season = self._validate_season(season)
+        rnd = self._validate_round(rnd)
         js = self._get(f"{season}/{rnd}/qualifying.json", params={"limit": 1000})
         mr = self._extract_mrdata(js)
         races = mr.get("RaceTable", {}).get("Races", [])
         return (races[0].get("QualifyingResults", []) if races else []) or []
 
     def get_sprint_results(self, season: str, rnd: str) -> List[Dict[str, Any]]:
+        season = self._validate_season(season)
+        rnd = self._validate_round(rnd)
         js = self._get(f"{season}/{rnd}/sprint.json", params={"limit": 1000})
         mr = self._extract_mrdata(js)
         races = mr.get("RaceTable", {}).get("Races", [])
@@ -163,16 +193,19 @@ class JolpicaClient:
     # Drivers/constructors/standings
 
     def get_drivers_for_season(self, season: str) -> List[Dict[str, Any]]:
+        season = self._validate_season(season)
         js = self._get(f"{season}/drivers.json", params={"limit": 1000})
         mr = self._extract_mrdata(js)
         return mr.get("DriverTable", {}).get("Drivers", []) or []
 
     def get_constructors_for_season(self, season: str) -> List[Dict[str, Any]]:
+        season = self._validate_season(season)
         js = self._get(f"{season}/constructors.json", params={"limit": 1000})
         mr = self._extract_mrdata(js)
         return mr.get("ConstructorTable", {}).get("Constructors", []) or []
 
     def get_standings(self, season: str) -> Dict[str, Any]:
+        season = self._validate_season(season)
         js = self._get(f"{season}/driverStandings.json", params={"limit": 1000})
         mr = self._extract_mrdata(js)
         return mr.get("StandingsTable", {}) or {}
@@ -181,6 +214,7 @@ class JolpicaClient:
 
     def get_season_race_results(self, season: str) -> List[Dict[str, Any]]:
         """All race results for a season across all rounds (paginated)."""
+        season = self._validate_season(season)
         all_races: Dict[str, Dict[str, Any]] = {}  # round -> race dict
         offset = 0
         limit = 100  # API-enforced limit
@@ -210,6 +244,7 @@ class JolpicaClient:
 
     def get_season_qualifying_results(self, season: str) -> List[Dict[str, Any]]:
         """All qualifying results for a season across all rounds (paginated)."""
+        season = self._validate_season(season)
         all_races: Dict[str, Dict[str, Any]] = {}
         offset = 0
         limit = 100
@@ -237,6 +272,7 @@ class JolpicaClient:
 
     def get_season_sprint_results(self, season: str) -> List[Dict[str, Any]]:
         """All sprint results for a season across all rounds (paginated)."""
+        season = self._validate_season(season)
         all_races: Dict[str, Dict[str, Any]] = {}
         offset = 0
         limit = 100
