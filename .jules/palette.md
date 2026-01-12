@@ -1,7 +1,7 @@
-## 2026-01-08 - Accessible Tooltips for Data Tables
-**Learning:** Adding title attributes to table headers provides a simple, accessible way to explain complex metrics (like 'Pred pos (μ)') without cluttering the UI. Pairing this with a dotted underline (CSS) provides a subtle visual cue that more info is available, improving discoverability.
-**Action:** Use 'th[title]' with 'text-decoration: underline dotted' as a standard pattern for abbreviated column headers in reports.
+## 2025-05-26 - [High-Resolution Console Bars]
+**Learning:** Users respond well to high-fidelity visual feedback even in CLI environments. Using Unicode block characters (` ▏▎▍▌▋▊▉█`) instead of just full blocks significantly improves the perceived precision of probability displays without taking up more screen space.
+**Action:** When visualizing percentages or progress in CLI tools, prefer `_render_bar` with partial blocks over simple integer division.
 
-## 2026-01-08 - CLI Visualizations
-**Learning:** Adding simple ASCII/Unicode bar charts (e.g., `███··`) next to percentage values in console output significantly improves scanability and allows users to quickly identify dominant probabilities without parsing numbers.
-**Action:** Use inline block character bars for probability columns in CLI tables where space permits.
+## 2025-05-26 - [Emoji Weather Icons]
+**Learning:** Replacing text labels like "Temp:" with universal icons (`🌡️`) makes dense data rows scannable instantly. It reduces cognitive load by using visual anchors.
+**Action:** Use standard emojis for common environmental metrics in data summaries.

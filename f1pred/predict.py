@@ -656,6 +656,37 @@ def run_predictions_for_event(
         }
 
 
+def _render_bar(percentage: float, width: int = 5) -> str:
+    """Render a high-resolution progress bar using block characters.
+
+    Uses Unicode blocks (▏▎▍▌▋▊▉█) for 8x granularity per character slot.
+    """
+    blocks = " ▏▎▍▌▋▊▉█"
+    full_value = (percentage / 100.0) * width
+    full_chars = int(full_value)
+    remainder = full_value - full_chars
+
+    # Select partial block (8 levels)
+    partial_idx = int(remainder * 8)
+    partial_char = blocks[partial_idx] if partial_idx > 0 else ""
+
+    # If partial char is empty, fill with space/dot if needed for alignment?
+    # Actually let's just stick to the requested format but with better resolution.
+    # The original format used "·" for empty space.
+
+    # Build the bar
+    bar = "█" * full_chars
+    if full_chars < width:
+        bar += partial_char
+
+    # Fill remaining space with middle dots or spaces
+    remaining_len = width - len(bar)
+    if remaining_len > 0:
+        bar += "·" * remaining_len
+
+    return bar[:width]  # Ensure exact width
+
+
 def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Optional[Dict[str, float]] = None, is_wet: bool = False, event_date: Optional[datetime] = None) -> None:
     title = _session_title(sess)
     print(f"\n{Fore.YELLOW}{Style.BRIGHT}== {title} =={Style.RESET_ALL}")
@@ -682,22 +713,26 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
                 temp_color = Fore.RED
             else:
                 temp_color = Fore.WHITE
-            w_parts.append(f"{temp_color}{t:.0f}°C{Style.RESET_ALL}")
+            w_parts.append(f"{temp_color}🌡️ {t:.0f}°C{Style.RESET_ALL}")
             
             # Color rain: cyan if any rain
             rain_color = Fore.CYAN if r > 0 else Fore.WHITE
-            w_parts.append(f"{rain_color}Rain:{r:.1f}mm{Style.RESET_ALL}")
+            # Hide rain if 0.0 to reduce clutter
+            if r > 0:
+                w_parts.append(f"{rain_color}🌧️ {r:.1f}mm{Style.RESET_ALL}")
+            else:
+                w_parts.append(f"{Style.DIM}☀️ Dry{Style.RESET_ALL}")
             
             if w is not None and not math.isnan(w):
                 # Color wind: yellow if strong (>20km/h)
                 wind_color = Fore.YELLOW if w > 20 else Fore.WHITE
-                w_parts.append(f"{wind_color}Wind:{w:.0f}km/h{Style.RESET_ALL}")
+                w_parts.append(f"{wind_color}💨 {w:.0f}km/h{Style.RESET_ALL}")
             
             # Add wet indicator
             if is_wet:
-                w_parts.append(f"{Fore.CYAN}{Style.BRIGHT}[WET]{Style.RESET_ALL}")
+                w_parts.append(f"{Fore.CYAN}{Style.BRIGHT}☔ [WET]{Style.RESET_ALL}")
             
-            print(f"Weather: {' | '.join(w_parts)}")
+            print(f"Weather: {'  '.join(w_parts)}")
         else:
             # Weather data has NaN values - show when it will be available
             if event_date:
@@ -782,11 +817,8 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
         dnf = float(r["p_dnf"]) * 100
         
         # Visual bar for win/top3 probability
-        win_blocks = int((win / 100.0) * 5)
-        win_bar = "█" * win_blocks + "·" * (5 - win_blocks)
-
-        top3_blocks = int((top3 / 100.0) * 5)
-        top3_bar = "█" * top3_blocks + "·" * (5 - top3_blocks)
+        win_bar = _render_bar(win, width=5)
+        top3_bar = _render_bar(top3, width=5)
 
         # Color coding for probabilities
         win_color = Fore.GREEN if win > 25 else Fore.WHITE
