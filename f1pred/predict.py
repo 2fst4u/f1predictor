@@ -826,7 +826,7 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
                 f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
                 f"{Style.DIM}[{team:<{max_team}}]{Style.RESET_ALL}   "
                 f"{grid_str}   "
-                f"{delta_str}  "
+                f"{delta_str}   "
                 f"{mp:5.1f}   "
                 f"{top3_color}{top3:5.1f}% {top3_bar}{Style.RESET_ALL}   "
                 f"{win_color}{win:5.1f}% {win_bar}{Style.RESET_ALL}   "
