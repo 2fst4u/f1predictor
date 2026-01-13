@@ -552,30 +552,57 @@ def compute_weather_sensitivity(
             "driverId", "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain"
         ]), {}
 
-    betas = []
-    for drv, g in races.groupby("driverId"):
-        if g.shape[0] < 5:
-            betas.append({
-                "driverId": drv,
-                "weather_beta_temp": 0.0,
-                "weather_beta_pressure": 0.0,
-                "weather_beta_wind": 0.0,
-                "weather_beta_rain": 0.0
+    # Vectorized weather sensitivity calculation
+    # Filter drivers with fewer than 5 races (will default to 0.0 later via merge/fillna or explicit init)
+    counts = races.groupby("driverId")["pos_inv_z"].count()
+    valid_drivers = counts[counts >= 5].index
+
+    # Initialize result for ALL drivers (so even those with <5 races get 0.0 rows)
+    all_drivers = races["driverId"].unique()
+    beta_df = pd.DataFrame({
+        "driverId": all_drivers,
+        "weather_beta_temp": 0.0,
+        "weather_beta_pressure": 0.0,
+        "weather_beta_wind": 0.0,
+        "weather_beta_rain": 0.0
+    }).set_index("driverId")
+
+    if len(valid_drivers) > 0:
+        valid_races = races[races["driverId"].isin(valid_drivers)].copy()
+
+        # Ensure float type for correlation
+        target_cols = ["weather_temp", "weather_pressure", "weather_wind", "weather_rain"]
+        cols_to_corr = ["pos_inv_z"] + target_cols
+        for c in cols_to_corr:
+            valid_races[c] = valid_races[c].astype(float)
+
+        # Compute correlations per driver
+        # Result index: (driverId, feature_name), Columns: features
+        corrs = valid_races.groupby("driverId")[cols_to_corr].corr()
+
+        # Extract row corresponding to 'pos_inv_z' for each driver
+        # xs(key, level) slices the MultiIndex
+        try:
+            pos_corrs = corrs.xs("pos_inv_z", level=1)
+
+            # Select relevant columns and rename
+            renamed = pos_corrs[target_cols].rename(columns={
+                "weather_temp": "weather_beta_temp",
+                "weather_pressure": "weather_beta_pressure",
+                "weather_wind": "weather_beta_wind",
+                "weather_rain": "weather_beta_rain"
             })
-            continue
-        def _corr(a, b):
-            a_ = a.astype(float); b_ = b.astype(float)
-            if a_.std() < 1e-6 or b_.std() < 1e-6:
-                return 0.0
-            return float(np.corrcoef(a_, b_)[0, 1])
-        betas.append({
-            "driverId": drv,
-            "weather_beta_temp": _corr(g["pos_inv_z"], g["weather_temp"]),
-            "weather_beta_pressure": _corr(g["pos_inv_z"], g["weather_pressure"]),
-            "weather_beta_wind": _corr(g["pos_inv_z"], g["weather_wind"]),
-            "weather_beta_rain": _corr(g["pos_inv_z"], g["weather_rain"]),
-        })
-    beta_df = pd.DataFrame(betas)
+
+            # Fill NaNs with 0.0 (handles case where std dev is 0, which corr() returns as NaN)
+            renamed = renamed.fillna(0.0)
+
+            # Update the main DataFrame
+            beta_df.update(renamed)
+        except KeyError:
+            # Should not happen if data exists, but safe fallback
+            pass
+
+    beta_df = beta_df.reset_index()
 
     return beta_df, {}
 
