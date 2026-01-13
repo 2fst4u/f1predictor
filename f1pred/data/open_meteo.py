@@ -88,6 +88,13 @@ class OpenMeteoClient:
         if not _valid_lat_lon(lat, lon):
             logger.info(f"OpenMeteoClient.get_forecast: invalid coordinates lat={lat}, lon={lon}")
             return pd.DataFrame()
+
+        # Basic timezone validation (allow UTC, auto, or Region/City)
+        tz = str(tz or "UTC").strip()
+        if not all(c.isalnum() or c in "/-_+" for c in tz):
+            logger.warning(f"OpenMeteoClient: invalid timezone '{tz}', falling back to UTC")
+            tz = "UTC"
+
         # Forecast API: exclude surface_pressure; use relative window to stay within horizon
         past_days, forecast_days = self._compute_past_forecast_days(start, end)
         params = {
@@ -101,7 +108,7 @@ class OpenMeteoClient:
             ],
             "past_days": past_days,
             "forecast_days": forecast_days,
-            "timezone": tz or "UTC",
+            "timezone": tz,
             "temperature_unit": self.temperature_unit,
             "windspeed_unit": self.windspeed_unit,
             "precipitation_unit": self.precipitation_unit,

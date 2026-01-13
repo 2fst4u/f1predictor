@@ -15,6 +15,27 @@ class OpenF1Client:
         self.enabled = enabled
         self.session = session_with_retries()
 
+    def _validate_season(self, season: Any) -> int:
+        """Ensure season is a valid year."""
+        try:
+            s = int(str(season).strip())
+            # Basic range check - F1 started in 1950, and we don't expect season 3000 yet
+            if s < 1950 or s > 2100:
+                raise ValueError
+            return s
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid season: {season}")
+
+    def _validate_round(self, rnd: Any) -> int:
+        """Ensure round is a valid positive integer."""
+        try:
+            r = int(str(rnd).strip())
+            if r < 1:
+                raise ValueError
+            return r
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid round: {rnd}")
+
     def _get(self, endpoint: str, params: Dict[str, Any], use_cache: bool = True) -> List[Dict[str, Any]]:
         if not self.enabled:
             return []
@@ -41,7 +62,10 @@ class OpenF1Client:
         OpenF1 doesn't have a 'round' parameter - we need to fetch all meetings
         for the year and match by index (meetings are returned in date order).
         """
-        meetings = self._get("meetings", {"year": season}, use_cache=use_cache)
+        season_val = self._validate_season(season)
+        round_val = self._validate_round(round_no)
+
+        meetings = self._get("meetings", {"year": season_val}, use_cache=use_cache)
         if not meetings:
             return None
         
@@ -52,8 +76,8 @@ class OpenF1Client:
             pass
         
         # Round is 1-indexed, list is 0-indexed
-        if 1 <= round_no <= len(meetings):
-            return meetings[round_no - 1].get("meeting_key")
+        if 1 <= round_val <= len(meetings):
+            return meetings[round_val - 1].get("meeting_key")
         return None
 
     def find_session(self, season: int, round_no: int, session_name: str, use_cache: bool = True) -> Optional[int]:
@@ -69,6 +93,7 @@ class OpenF1Client:
         
         try:
             # Step 1: Get meeting_key for this round
+            # Note: _get_meeting_key handles validation of season and round_no
             meeting_key = self._get_meeting_key(season, round_no, use_cache=use_cache)
             if not meeting_key:
                 return None
