@@ -5,3 +5,7 @@
 ## 2026-01-08 - CLI Visualizations
 **Learning:** Adding simple ASCII/Unicode bar charts (e.g., `███··`) next to percentage values in console output significantly improves scanability and allows users to quickly identify dominant probabilities without parsing numbers.
 **Action:** Use inline block character bars for probability columns in CLI tables where space permits.
+
+## 2026-01-08 - Visual Scanning in CLI
+**Learning:** Replacing text labels like "Rain:" with familiar emojis (🌧️, ☀️, 🌡️) reduces cognitive load and allows users to parse weather conditions faster in dense CLI outputs.
+**Action:** Use standard weather emojis in CLI summaries instead of text labels.

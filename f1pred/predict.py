@@ -682,16 +682,21 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
                 temp_color = Fore.RED
             else:
                 temp_color = Fore.WHITE
-            w_parts.append(f"{temp_color}{t:.0f}°C{Style.RESET_ALL}")
+            w_parts.append(f"{temp_color}🌡️ {t:.0f}°C{Style.RESET_ALL}")
             
             # Color rain: cyan if any rain
-            rain_color = Fore.CYAN if r > 0 else Fore.WHITE
-            w_parts.append(f"{rain_color}Rain:{r:.1f}mm{Style.RESET_ALL}")
+            if r > 0:
+                rain_color = Fore.CYAN
+                rain_icon = "🌧️"
+            else:
+                rain_color = Fore.WHITE
+                rain_icon = "☀️"
+            w_parts.append(f"{rain_color}{rain_icon} {r:.1f}mm{Style.RESET_ALL}")
             
             if w is not None and not math.isnan(w):
                 # Color wind: yellow if strong (>20km/h)
                 wind_color = Fore.YELLOW if w > 20 else Fore.WHITE
-                w_parts.append(f"{wind_color}Wind:{w:.0f}km/h{Style.RESET_ALL}")
+                w_parts.append(f"{wind_color}💨 {w:.0f}km/h{Style.RESET_ALL}")
             
             # Add wet indicator
             if is_wet:
