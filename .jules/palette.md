@@ -7,5 +7,5 @@
 **Action:** Use inline block character bars for probability columns in CLI tables where space permits.
 
 ## 2026-01-08 - Visual Scanning in CLI
-**Learning:** Replacing text labels like "Rain:" with familiar emojis (🌧️, ☀️, 🌡️) reduces cognitive load and allows users to parse weather conditions faster in dense CLI outputs.
-**Action:** Use standard weather emojis in CLI summaries instead of text labels.
+**Learning:** Adding emojis (🌧️, ☀️, 🌡️) alongside text labels (e.g., "Rain:", "Wind:") reduces cognitive load and allows users to parse weather conditions faster in dense CLI outputs, without losing the clarity of explicit labels.
+**Action:** Use standard weather emojis to augment text labels in CLI summaries.
