@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from colorama import Fore, Style
 
-from .util import get_logger, ensure_dirs, StatusSpinner
+from .util import get_logger, ensure_dirs, StatusSpinner, sanitize_for_console
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.openf1 import OpenF1Client
@@ -810,8 +810,8 @@ def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Option
     
     for _, r in df.iterrows():
         pos = int(r["predicted_position"])
-        name = (r.get("name") or "")[:max_name]
-        team = (r.get("constructorName") or "")[:max_team]
+        name = sanitize_for_console(r.get("name") or "")[:max_name]
+        team = sanitize_for_console(r.get("constructorName") or "")[:max_team]
         mp = float(r["mean_pos"])
         top3 = float(r["p_top3"]) * 100
         win = float(r["p_win"]) * 100

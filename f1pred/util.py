@@ -1,5 +1,6 @@
 import logging
 import json
+import re
 import sys
 import threading
 import time
@@ -172,13 +173,22 @@ def safe_float(v, default=None):
         return default
 
 
+def sanitize_for_console(text: str) -> str:
+    """
+    Remove ANSI escape codes from text to prevent terminal injection.
+    """
+    # 7-bit C1 ANSI sequences
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', str(text))
+
+
 class StatusSpinner:
     """
     Context manager that displays a spinning animation during long-running blocking operations.
     Suppress INFO logs while spinning to prevent visual clutter, but allows WARNING/ERROR.
     """
     def __init__(self, message: str = "Processing...", delay: float = 0.1):
-        self.message = message
+        self.message = sanitize_for_console(message)
         self.delay = delay
         self.spinner = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         self.running = False
