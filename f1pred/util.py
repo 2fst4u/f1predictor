@@ -1,5 +1,9 @@
 import logging
 import json
+import sys
+import threading
+import time
+import itertools
 from typing import Any, Dict, Optional
 from pathlib import Path
 from datetime import timedelta
@@ -8,7 +12,7 @@ import requests
 import requests_cache
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from colorama import init as colorama_init
+from colorama import init as colorama_init, Fore, Style
 
 colorama_init(autoreset=True)
 
@@ -166,3 +170,54 @@ def safe_float(v, default=None):
         return float(v)
     except Exception:
         return default
+
+
+class StatusSpinner:
+    """
+    Context manager that displays a spinning animation during long-running blocking operations.
+    Suppress INFO logs while spinning to prevent visual clutter, but allows WARNING/ERROR.
+    """
+    def __init__(self, message: str = "Processing...", delay: float = 0.1):
+        self.message = message
+        self.delay = delay
+        self.spinner = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+        self.running = False
+        self.thread = None
+        self._previous_log_level = logging.INFO
+        self.logger = logging.getLogger()  # Root logger
+
+    def spin(self):
+        while self.running:
+            sys.stdout.write(f"\r{Fore.CYAN}{next(self.spinner)}{Style.RESET_ALL} {self.message}")
+            sys.stdout.flush()
+            time.sleep(self.delay)
+            # Clear line for next frame
+            sys.stdout.write("\b" * (len(self.message) + 2 + 10))
+
+    def __enter__(self):
+        # Suppress INFO logs during spinner
+        self._previous_log_level = self.logger.getEffectiveLevel()
+        # Only raise level if it was lower than WARNING (e.g. INFO or DEBUG)
+        if self._previous_log_level < logging.WARNING:
+            self.logger.setLevel(logging.WARNING)
+
+        self.running = True
+        self.thread = threading.Thread(target=self.spin)
+        self.thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        self.running = False
+        if self.thread:
+            self.thread.join()
+
+        # Restore logging level
+        self.logger.setLevel(self._previous_log_level)
+
+        # Clear line and print final status. Clear the full line to ensure no debris.
+        sys.stdout.write("\r" + " " * (len(self.message) + 20) + "\r")
+        sys.stdout.flush()
+        if exc_type:
+            print(f"{Fore.RED}✖{Style.RESET_ALL} {self.message} (Failed)")
+        else:
+            print(f"{Fore.GREEN}✔{Style.RESET_ALL} {self.message}")
