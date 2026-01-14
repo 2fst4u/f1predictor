@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from colorama import Fore, Style
 
-from .util import get_logger, ensure_dirs
+from .util import get_logger, ensure_dirs, StatusSpinner
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.openf1 import OpenF1Client
@@ -392,169 +392,170 @@ def run_predictions_for_event(
 
     for sess in sessions:
         try:
-            logger.info(f"Building features for {event_title} - {sess}")
             ref_date = event_date
+            
+            # Wrap heavy operations in a spinner
+            with StatusSpinner(f"Predicting {event_title} - {sess}..."):
+                # Convert accumulator to DataFrame for injection
+                extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
 
-            # Convert accumulator to DataFrame for injection
-            extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
-            
-            X, meta, roster = build_session_features(jc, om, of1, season_i, round_i, sess, ref_date, cfg, extra_history=extra_hist_df)
-            if (
-                X is None
-                or roster is None
-                or (hasattr(X, "empty") and X.empty)
-                or (hasattr(roster, "empty") and roster.empty)
-            ):
-                logger.info(f"[predict] No features/roster available for {sess}; skipping")
-                continue
+                X, meta, roster = build_session_features(jc, om, of1, season_i, round_i, sess, ref_date, cfg, extra_history=extra_hist_df)
+                if (
+                    X is None
+                    or roster is None
+                    or (hasattr(X, "empty") and X.empty)
+                    or (hasattr(roster, "empty") and roster.empty)
+                ):
+                    logger.info(f"[predict] No features/roster available for {sess}; skipping")
+                    continue
 
-            # Universal Grid Feature logic (Race<-Quali, Sprint<-SprintQuali)
-            # Map target session -> precursor session that determines grid
-            grid_precursor_map = {
-                "race": "qualifying",
-                "sprint": "sprint_qualifying",
-            }
-            
-            has_grid_concept = sess in grid_precursor_map
-            
-            grid_source = "actual"
-            if has_grid_concept and "grid" in X.columns:
-                if X["grid"].isna().any():
-                    precursor = grid_precursor_map[sess]
-                    logger.info(f"[predict] Grid not available for {sess} - looking for {precursor} results")
-                    
-                    # 1. Check if precursor was already run in this loop (internal consistency)
-                    precursor_results = [p for p in accumulated_history if p["session"] == precursor]
-                    
-                    if precursor_results:
-                        logger.info(f"[predict] Using {precursor} results from current run as grid")
-                        # precursor_results is list of dicts: need map driverId -> position
-                        # 'position' in accumulated_history typically maps to the finish position
-                        # 'accumulated_history' rows should have 'driverId' and 'position'
+                # Universal Grid Feature logic (Race<-Quali, Sprint<-SprintQuali)
+                # Map target session -> precursor session that determines grid
+                grid_precursor_map = {
+                    "race": "qualifying",
+                    "sprint": "sprint_qualifying",
+                }
+
+                has_grid_concept = sess in grid_precursor_map
+
+                grid_source = "actual"
+                if has_grid_concept and "grid" in X.columns:
+                    if X["grid"].isna().any():
+                        precursor = grid_precursor_map[sess]
+                        logger.info(f"[predict] Grid not available for {sess} - looking for {precursor} results")
                         
-                        grid_map = {r["driverId"]: int(r["position"]) for r in precursor_results}
-                        X["grid"] = X["driverId"].map(grid_map)
-                        grid_source = f"predicted (from {precursor} in loop)"
+                        # 1. Check if precursor was already run in this loop (internal consistency)
+                        precursor_results = [p for p in accumulated_history if p["session"] == precursor]
                         
-                    else:
-                        # 2. Run simulation if not in loop
-                        logger.info(f"[predict] {precursor} not in current loop - running simulation to estimate grid")
-                        # Note: _run_single_prediction does NOT see accumulated_history currently, 
-                        # but it's a cold start anyway if not in loop.
-                        qual_ranked = _run_single_prediction(
-                            jc, om, of1, season_i, round_i, precursor, ref_date, cfg
-                        )
-                        if qual_ranked is not None and not qual_ranked.empty:
-                            grid_map = dict(zip(
-                                qual_ranked["driverId"],
-                                qual_ranked["predicted_position"]
-                            ))
+                        if precursor_results:
+                            logger.info(f"[predict] Using {precursor} results from current run as grid")
+                            # precursor_results is list of dicts: need map driverId -> position
+                            # 'position' in accumulated_history typically maps to the finish position
+                            # 'accumulated_history' rows should have 'driverId' and 'position'
+
+                            grid_map = {r["driverId"]: int(r["position"]) for r in precursor_results}
                             X["grid"] = X["driverId"].map(grid_map)
-                            grid_source = f"predicted (from simulated {precursor})"
+                            grid_source = f"predicted (from {precursor} in loop)"
                             
-                            # Optional: append this simulation to history? 
-                            # Maybe complex to convert format. Rely on simple map for now.
                         else:
-                            # 3. Fallback
-                            if "form_index" in X.columns:
-                                X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
-                                grid_source = "estimated (from form index)"
+                            # 2. Run simulation if not in loop
+                            logger.info(f"[predict] {precursor} not in current loop - running simulation to estimate grid")
+                            # Note: _run_single_prediction does NOT see accumulated_history currently,
+                            # but it's a cold start anyway if not in loop.
+                            qual_ranked = _run_single_prediction(
+                                jc, om, of1, season_i, round_i, precursor, ref_date, cfg
+                            )
+                            if qual_ranked is not None and not qual_ranked.empty:
+                                grid_map = dict(zip(
+                                    qual_ranked["driverId"],
+                                    qual_ranked["predicted_position"]
+                                ))
+                                X["grid"] = X["driverId"].map(grid_map)
+                                grid_source = f"predicted (from simulated {precursor})"
+
+                                # Optional: append this simulation to history?
+                                # Maybe complex to convert format. Rely on simple map for now.
                             else:
-                                X["grid"] = np.arange(1, len(X) + 1)
-                                grid_source = "default (no data)"
-                else:
-                    logger.info(f"[predict] Using actual grid for {sess}")
+                                # 3. Fallback
+                                if "form_index" in X.columns:
+                                    X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
+                                    grid_source = "estimated (from form index)"
+                                else:
+                                    X["grid"] = np.arange(1, len(X) + 1)
+                                    grid_source = "default (no data)"
+                    else:
+                        logger.info(f"[predict] Using actual grid for {sess}")
 
-            # Train pace model
-            pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
+                # Train pace model
+                pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
 
-            # Standardize GBM pace (z-score) but preserve variance
-            # Note: We do NOT apply pace_scale compression here - that destroys signal
-            try:
-                mu = float(np.mean(pace_hat))
-                sd = float(np.std(pace_hat))
-                if not np.isfinite(sd) or sd < 1e-6:
-                    logger.warning("[predict] Pace predictions have very low variance (std=%.6f)", sd)
-                    sd = 1.0
-                pace_hat = (pace_hat - mu) / sd
-                # Log variance for debugging
-                logger.info("[predict] GBM pace standardized: mean=%.4f, std=%.4f", mu, sd)
-            except Exception as e:
-                logger.warning("[predict] Pace standardization failed: %s; using raw GBM pace", e)
-
-            # Historical results for this roster
-            roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
-            hist = collect_historical_results(
-                jc,
-                season=season_i,
-                end_before=ref_date,
-                lookback_years=75,
-                roster_driver_ids=roster_ids,
-            )
-
-            # --- Ensemble skill components (all data-driven) ---
-            elo_pace = bt_pace = mixed_pace = None
-            try:
-                elo_model = EloModel().fit(hist)
-                elo_pace = elo_model.predict(X)
-            except Exception as e:
-                logger.info(f"[predict] Elo model failed: {e}")
-
-            try:
-                bt_model = BradleyTerryModel().fit(hist)
-                bt_pace = bt_model.predict(X)
-            except Exception as e:
-                logger.info(f"[predict] Bradley–Terry model failed: {e}")
-
-            try:
-                mixed_model = MixedEffectsLikeModel().fit(hist)
-                mixed_pace = mixed_model.predict(X)
-            except Exception as e:
-                logger.info(f"[predict] Mixed-effects-like model failed: {e}")
-
-            # Combine GBM pace with ensemble elements
-            try:
-                ens_cfg = EnsembleConfig()  # could later be fed from cfg.modelling.ensemble
-                combined_pace = combine_pace(
-                    gbm_pace=pace_hat,
-                    elo_pace=elo_pace,
-                    bt_pace=bt_pace,
-                    mixed_pace=mixed_pace,
-                    cfg=ens_cfg,
-                )
-                logger.info(
-                    "[predict] Combined pace stats: std=%.4f, range=%.4f",
-                    float(np.std(combined_pace)),
-                    float(np.ptp(combined_pace)),
-                )
-            except Exception as e:
-                logger.info(f"[predict] Ensemble combine failed, falling back to GBM pace: {e}")
-                combined_pace = pace_hat
-
-            # DNF probabilities
-            dnf_prob = np.zeros(X.shape[0], dtype=float)
-            if sess in ("race", "sprint"):
+                # Standardize GBM pace (z-score) but preserve variance
+                # Note: We do NOT apply pace_scale compression here - that destroys signal
                 try:
-                    dnf_prob = estimate_dnf_probabilities(
-                        hist,
-                        X,
-                        cfg=cfg,
-                        event_weather=meta.get("weather"),
+                    mu = float(np.mean(pace_hat))
+                    sd = float(np.std(pace_hat))
+                    if not np.isfinite(sd) or sd < 1e-6:
+                        logger.warning("[predict] Pace predictions have very low variance (std=%.6f)", sd)
+                        sd = 1.0
+                    pace_hat = (pace_hat - mu) / sd
+                    # Log variance for debugging
+                    logger.info("[predict] GBM pace standardized: mean=%.4f, std=%.4f", mu, sd)
+                except Exception as e:
+                    logger.warning("[predict] Pace standardization failed: %s; using raw GBM pace", e)
+
+                # Historical results for this roster
+                roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
+                hist = collect_historical_results(
+                    jc,
+                    season=season_i,
+                    end_before=ref_date,
+                    lookback_years=75,
+                    roster_driver_ids=roster_ids,
+                )
+
+                # --- Ensemble skill components (all data-driven) ---
+                elo_pace = bt_pace = mixed_pace = None
+                try:
+                    elo_model = EloModel().fit(hist)
+                    elo_pace = elo_model.predict(X)
+                except Exception as e:
+                    logger.info(f"[predict] Elo model failed: {e}")
+
+                try:
+                    bt_model = BradleyTerryModel().fit(hist)
+                    bt_pace = bt_model.predict(X)
+                except Exception as e:
+                    logger.info(f"[predict] Bradley–Terry model failed: {e}")
+
+                try:
+                    mixed_model = MixedEffectsLikeModel().fit(hist)
+                    mixed_pace = mixed_model.predict(X)
+                except Exception as e:
+                    logger.info(f"[predict] Mixed-effects-like model failed: {e}")
+
+                # Combine GBM pace with ensemble elements
+                try:
+                    ens_cfg = EnsembleConfig()  # could later be fed from cfg.modelling.ensemble
+                    combined_pace = combine_pace(
+                        gbm_pace=pace_hat,
+                        elo_pace=elo_pace,
+                        bt_pace=bt_pace,
+                        mixed_pace=mixed_pace,
+                        cfg=ens_cfg,
+                    )
+                    logger.info(
+                        "[predict] Combined pace stats: std=%.4f, range=%.4f",
+                        float(np.std(combined_pace)),
+                        float(np.ptp(combined_pace)),
                     )
                 except Exception as e:
-                    logger.info(f"[predict] DNF estimation failed; using default 0.12: {e}")
-                    dnf_prob[:] = 0.12
+                    logger.info(f"[predict] Ensemble combine failed, falling back to GBM pace: {e}")
+                    combined_pace = pace_hat
 
-            # Monte Carlo simulation
-            draws = cfg.modelling.monte_carlo.draws
-            prob_matrix, mean_pos, pairwise = simulate_grid(
-                combined_pace,
-                dnf_prob,
-                draws=draws,
-                noise_factor=cfg.modelling.simulation.noise_factor,
-                min_noise=cfg.modelling.simulation.min_noise,
-                max_penalty_base=cfg.modelling.simulation.max_penalty_base
-            )
+                # DNF probabilities
+                dnf_prob = np.zeros(X.shape[0], dtype=float)
+                if sess in ("race", "sprint"):
+                    try:
+                        dnf_prob = estimate_dnf_probabilities(
+                            hist,
+                            X,
+                            cfg=cfg,
+                            event_weather=meta.get("weather"),
+                        )
+                    except Exception as e:
+                        logger.info(f"[predict] DNF estimation failed; using default 0.12: {e}")
+                        dnf_prob[:] = 0.12
+
+                # Monte Carlo simulation
+                draws = cfg.modelling.monte_carlo.draws
+                prob_matrix, mean_pos, pairwise = simulate_grid(
+                    combined_pace,
+                    dnf_prob,
+                    draws=draws,
+                    noise_factor=cfg.modelling.simulation.noise_factor,
+                    min_noise=cfg.modelling.simulation.min_noise,
+                    max_penalty_base=cfg.modelling.simulation.max_penalty_base
+                )
 
             p_top3 = prob_matrix[:, :3].sum(axis=1)
             p_win = prob_matrix[:, 0]
