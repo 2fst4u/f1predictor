@@ -7,3 +7,8 @@
 **Vulnerability:** The application crashed when the external Jolpica API returned non-JSON responses (e.g., 500 HTML error pages). The HTTP client fallback returned the raw string, which downstream code blindly treated as a dictionary, leading to `AttributeError` and application termination.
 **Learning:** Never assume external APIs will always return the expected data type, even if the status code is 200 (or if 500s are masked). Defensive coding must handle unexpected types (like `str` instead of `dict`) gracefully.
 **Prevention:** Implement strict type checking at the boundary of external data ingestion. Ensure functions like `_extract_mrdata` validate the input type before accessing keys, and return safe default values (like `{}` or `None`) instead of crashing.
+
+## 2026-01-14 - Terminal Escape Injection
+**Vulnerability:** The application printed data from external APIs (driver names, team names) directly to the console. If a compromised API returned ANSI escape codes, it could corrupt terminal output or potentially execute commands in vulnerable terminal emulators (though less common nowadays, it's a valid injection vector).
+**Learning:** Even CLI applications need output sanitization. External data is untrusted, regardless of the display medium (HTML vs Terminal).
+**Prevention:** Sanitize all external strings using a regex to strip ANSI escape codes before printing to the console, specifically in `StatusSpinner` and prediction output tables.
