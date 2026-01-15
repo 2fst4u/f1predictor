@@ -5,7 +5,7 @@ output generation for F1 race predictions.
 """
 from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import os
 
 import numpy as np
@@ -91,6 +91,35 @@ def _session_title(stype: str) -> str:
         "sprint": "Sprint",
         "sprint_qualifying": "Sprint Qualifying",
     }.get(stype, stype)
+
+
+def _get_session_datetime(race_info: Dict[str, Any], sess: str) -> Optional[datetime]:
+    """Extract session datetime from race_info dictionary."""
+    if sess == "race":
+        d, t = race_info.get("date"), race_info.get("time")
+    else:
+        # Map to Ergast keys
+        key = {
+            "practice_1": "FirstPractice", "practice_2": "SecondPractice",
+            "practice_3": "ThirdPractice", "qualifying": "Qualifying",
+            "sprint": "Sprint", "sprint_qualifying": "SprintQualifying"
+        }.get(sess)
+        if not key or key not in race_info: return None
+
+        # Ensure session data is a dict (API might return null/None)
+        s_data = race_info[key]
+        if not isinstance(s_data, dict): return None
+        d, t = s_data.get("date"), s_data.get("time")
+
+    if not d: return None
+    t = t or "00:00:00Z"
+    # Ensure timezone offset exists
+    if not t.endswith("Z") and "+" not in t and "-" not in t[-5:]: t += "+00:00"
+    try:
+        dt = datetime.fromisoformat(f"{d}T{t.replace('Z', '+00:00')}")
+        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    except ValueError:
+        return None
 
 
 def _parse_lap_seconds(v) -> float:
@@ -392,7 +421,9 @@ def run_predictions_for_event(
 
     for sess in sessions:
         try:
-            ref_date = event_date
+            # Resolve specific session datetime if available, otherwise fallback to race event date
+            sess_dt = _get_session_datetime(race_info, sess)
+            ref_date = sess_dt if sess_dt else event_date
             
             # Wrap heavy operations in a spinner
             with StatusSpinner(f"Predicting {event_title} - {sess}..."):
@@ -640,7 +671,15 @@ def run_predictions_for_event(
             except Exception:
                 pass
             
-            print_session_console(ranked, sess, cfg, meta.get("weather"), is_wet=is_wet, event_date=ref_date)
+            print_session_console(
+                ranked,
+                sess,
+                cfg,
+                meta.get("weather"),
+                is_wet=is_wet,
+                event_date=ref_date,
+                session_date=sess_dt
+            )
 
         except Exception as e:
                 logger.info(f"[predict] Session {sess} failed with exception:")
@@ -688,10 +727,50 @@ def _render_bar(percentage: float, width: int = 5) -> str:
     return bar[:width]  # Ensure exact width
 
 
-def print_session_console(df: pd.DataFrame, sess: str, cfg, weather_info: Optional[Dict[str, float]] = None, is_wet: bool = False, event_date: Optional[datetime] = None) -> None:
+def print_session_console(
+    df: pd.DataFrame,
+    sess: str,
+    cfg,
+    weather_info: Optional[Dict[str, float]] = None,
+    is_wet: bool = False,
+    event_date: Optional[datetime] = None,
+    session_date: Optional[datetime] = None
+) -> None:
     title = _session_title(sess)
     print(f"\n{Fore.YELLOW}{Style.BRIGHT}== {title} =={Style.RESET_ALL}")
     
+    # Display session time if available
+    if session_date:
+        now = datetime.now(timezone.utc)
+        diff = session_date - now
+        total_seconds = int(diff.total_seconds())
+
+        # Format nice date: "Sat 14:00 UTC"
+        date_str = session_date.strftime("%a %H:%M UTC")
+
+        if total_seconds > 0:
+            days = total_seconds // 86400
+            hours = (total_seconds % 86400) // 3600
+            minutes = (total_seconds % 3600) // 60
+
+            parts = []
+            if days > 0:
+                parts.append(f"{days}d")
+            if hours > 0:
+                parts.append(f"{hours}h")
+            if minutes > 0:
+                parts.append(f"{minutes}m")
+
+            if not parts:
+                rel_str = "<1m"
+            else:
+                rel_str = " ".join(parts)
+            print(f"{Style.DIM}🕒 {date_str} (Starts in {rel_str}){Style.RESET_ALL}")
+        elif total_seconds > -10800: # Within 3 hours after start
+            print(f"{Style.DIM}🕒 {date_str} (In Progress / Just Finished){Style.RESET_ALL}")
+        else:
+            print(f"{Style.DIM}🕒 {date_str} (Finished){Style.RESET_ALL}")
+
     # Weather display with condition-based coloring
     if weather_info:
         t = weather_info.get("temp_mean")
