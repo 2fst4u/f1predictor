@@ -532,18 +532,24 @@ def compute_weather_sensitivity(
         lambda s: (s - s.mean()) / (s.std() + 1e-6)
     )
 
-    w_rows = []
-    for _, r in races.iterrows():
-        key = (int(r["season"]), int(r["round"]))
-        w = evt_weather.get(key, {}) or {}
-        w_rows.append({
+    # Vectorized weather mapping
+    weather_records = []
+    for (season, rnd), w in evt_weather.items():
+        weather_records.append({
+            "season": season,
+            "round": rnd,
             "weather_temp": w.get("temp_mean"),
             "weather_pressure": w.get("pressure_mean"),
             "weather_wind": w.get("wind_mean"),
             "weather_rain": w.get("rain_sum"),
         })
-    wdf = pd.DataFrame(w_rows, index=races.index)
-    races = pd.concat([races.reset_index(drop=True), wdf.reset_index(drop=True)], axis=1)
+
+    if weather_records:
+        w_lookup = pd.DataFrame(weather_records)
+        races = races.merge(w_lookup, on=["season", "round"], how="left")
+    else:
+        for col in ["weather_temp", "weather_pressure", "weather_wind", "weather_rain"]:
+            races[col] = np.nan
 
     weather_cols = ["weather_temp", "weather_pressure", "weather_wind", "weather_rain"]
     races = races.dropna(subset=weather_cols + ["pos_inv_z"])
