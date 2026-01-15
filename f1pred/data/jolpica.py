@@ -36,10 +36,12 @@ class JolpicaClient:
         """
         ra = headers.get("Retry-After")
         if ra:
+            # Hard cap for Retry-After to prevent DoS via infinite/long sleep (max 5 minutes)
+            MAX_RETRY_AFTER = 300.0
             # Numeric seconds
             try:
                 secs = float(ra)
-                return max(0.0, secs)
+                return min(max(0.0, secs), MAX_RETRY_AFTER)
             except Exception:
                 pass
             # HTTP-date
@@ -47,7 +49,8 @@ class JolpicaClient:
                 dt = parsedate_to_datetime(ra)
                 if dt:
                     now_epoch = time.time()
-                    return max(0.0, dt.timestamp() - now_epoch)
+                    diff = dt.timestamp() - now_epoch
+                    return min(max(0.0, diff), MAX_RETRY_AFTER)
             except Exception:
                 pass
         # Fallback: exponential with jitter

@@ -12,3 +12,8 @@
 **Vulnerability:** The application printed data from external APIs (driver names, team names) directly to the console. If a compromised API returned ANSI escape codes, it could corrupt terminal output or potentially execute commands in vulnerable terminal emulators (though less common nowadays, it's a valid injection vector).
 **Learning:** Even CLI applications need output sanitization. External data is untrusted, regardless of the display medium (HTML vs Terminal).
 **Prevention:** Sanitize all external strings using a regex to strip ANSI escape codes before printing to the console, specifically in `StatusSpinner` and prediction output tables.
+
+## 2026-01-18 - DoS via Unbounded Retry-After Header
+**Vulnerability:** The HTTP client respected the `Retry-After` header from the Jolpica API without any upper bound. A compromised or misconfigured server could return a massive sleep duration (e.g., 100 years), causing the application to hang indefinitely. This is a Denial of Service (DoS) vector via External Service Interaction.
+**Learning:** Never trust control flow instructions from external sources blindly. Even standard headers like `Retry-After` can be weaponized or accidentally malformed to disrupt service availability.
+**Prevention:** Implement hard caps on all wait/sleep durations derived from external input. In this case, `Retry-After` was capped at 300 seconds (5 minutes) to ensure the application remains responsive even if the API demands excessive waits.
