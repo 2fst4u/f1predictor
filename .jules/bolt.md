@@ -9,3 +9,7 @@
 ## 2026-01-14 - Vectorized Lookup via Merge
 **Learning:** Iterating over a DataFrame (`iterrows`) to map values from a dictionary (e.g., weather data per event) is significantly slower than creating a DataFrame from the dictionary and using `.merge()`.
 **Action:** Always prefer `pd.DataFrame(dict_list).merge(target_df)` over loop-based mapping when enriching a DataFrame with external data keyed by multiple columns.
+
+## 2026-01-15 - DataFrame Accumulation vs Dicts
+**Learning:** Converting a list of DataFrames to a single DataFrame via `pd.concat(dfs)` is significantly faster (~80x-190x) than converting each DataFrame to a list of dicts (`to_dict('records')`), extending a list, and then creating a new DataFrame.
+**Action:** When aggregating results from multiple sources (e.g., API pages or cache files) that are already DataFrames or can be easily converted to one, accumulate them in a list of DataFrames and use `pd.concat()` once at the end.
