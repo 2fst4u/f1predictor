@@ -136,23 +136,47 @@ def session_with_retries(
 def http_get_json(session: requests.Session, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 30) -> Any:
     """
     GET a URL and return parsed JSON; falls back safely if the payload isn't valid JSON.
+    Includes protection against large responses (DoS).
+
     Returns:
       - dict/list parsed from JSON when possible
       - raw text string if JSON parsing fails
     Raises:
       - requests.exceptions.HTTPError for non-2xx responses
+      - ValueError if response size exceeds limit
     """
-    resp = session.get(url, params=params, timeout=timeout)
-    resp.raise_for_status()
-    # Try JSON first
-    try:
-        return resp.json()
-    except ValueError:
-        # Fallback: attempt manual parse; else return text
+    MAX_SIZE = 10 * 1024 * 1024  # 10MB limit
+
+    # Use stream=True to inspect headers/size before full download
+    # Note: When using requests-cache, stream=True might still trigger cache logic,
+    # but we manually limit the read size to prevent memory exhaustion.
+    with session.get(url, params=params, timeout=timeout, stream=True) as resp:
+        resp.raise_for_status()
+
+        # Check Content-Length header if present
+        cl = resp.headers.get("Content-Length")
+        if cl and int(cl) > MAX_SIZE:
+             raise ValueError(f"Response too large ({cl} bytes) from {url}")
+
+        # Read content with limit
+        content = bytearray()
+        for chunk in resp.iter_content(chunk_size=8192):
+            content.extend(chunk)
+            if len(content) > MAX_SIZE:
+                 raise ValueError(f"Response too large (> {MAX_SIZE} bytes) from {url}")
+
+        # Manually decode and parse
         try:
-            return json.loads(resp.text)
-        except Exception:
-            return resp.text
+             # Try to use encoding from headers, default to utf-8
+             encoding = resp.encoding or "utf-8"
+             text = content.decode(encoding)
+             return json.loads(text)
+        except (ValueError, UnicodeDecodeError):
+             # Fallback: return raw text (decoded if possible)
+             try:
+                 return content.decode(resp.encoding or "utf-8", errors="replace")
+             except Exception:
+                 return str(content)
 
 
 def clear_http_cache() -> None:
