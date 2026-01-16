@@ -21,3 +21,7 @@
 **Vulnerability:** Unsanitized user input (season/round) was directly embedded in `ValueError` messages in data clients. Malicious input containing newlines could forge log entries when these exceptions were logged.
 **Learning:** Standard validation raising exceptions can still be a vector for Log Injection if the exception message includes the raw input.
 **Prevention:** Always use `repr()` or strict sanitization when including untrusted input in exception messages, even if the input is about to be rejected.
+## 2025-01-16 - DoS Protection for JSON Fetching
+**Vulnerability:** Uncontrolled resource consumption in `http_get_json` where large responses were loaded entirely into memory.
+**Learning:** Even with `requests`, calling `.json()` or `.text` downloads the full body implicitly. Streaming is required to inspect size before download.
+**Prevention:** Use `stream=True` and check `Content-Length` and accumulated chunk sizes against a hard limit (e.g., 10MB) before parsing.
