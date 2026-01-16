@@ -24,7 +24,8 @@ class OpenF1Client:
                 raise ValueError
             return s
         except (ValueError, TypeError):
-            raise ValueError(f"Invalid season: {season}")
+            # Use repr() to prevent log injection from malicious input
+            raise ValueError(f"Invalid season: {repr(season)}")
 
     def _validate_round(self, rnd: Any) -> int:
         """Ensure round is a valid positive integer."""
@@ -34,7 +35,8 @@ class OpenF1Client:
                 raise ValueError
             return r
         except (ValueError, TypeError):
-            raise ValueError(f"Invalid round: {rnd}")
+            # Use repr() to prevent log injection from malicious input
+            raise ValueError(f"Invalid round: {repr(rnd)}")
 
     def _get(self, endpoint: str, params: Dict[str, Any], use_cache: bool = True) -> List[Dict[str, Any]]:
         if not self.enabled:
