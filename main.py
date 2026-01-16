@@ -23,6 +23,9 @@ Examples:
 
 import argparse
 
+from colorama import Fore, Style
+import sys
+
 from f1pred.config import load_config, AppConfig
 from f1pred.util import ensure_dirs, get_logger, init_caches, configure_logging
 from f1pred.predict import run_predictions_for_event
@@ -66,6 +69,18 @@ def main() -> None:
     global logger
     logger = get_logger(__name__)
 
+    # Input validation (UX Improvement)
+    # Fail fast with a friendly message instead of falling back to default/current
+    if args.season and args.season != "current":
+        if not args.season.isdigit() or len(args.season) != 4:
+            print(f"{Fore.RED}✖ Invalid season '{args.season}'.{Style.RESET_ALL} Please use 'current' or a 4-digit year (e.g. 2025).")
+            return
+
+    if args.round and args.round not in ("next", "last"):
+        if not args.round.isdigit():
+            print(f"{Fore.RED}✖ Invalid round '{args.round}'.{Style.RESET_ALL} Please use 'next', 'last', or a round number.")
+            return
+
     # Apply CLI overrides
     if args.refresh is not None:
         cfg.app.live_refresh_seconds = args.refresh
@@ -104,4 +119,9 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nInterrupted by user.")
+        print(f"\n{Fore.YELLOW}✖ Operation cancelled by user.{Style.RESET_ALL}")
+    except Exception as e:
+        # Catch-all for cleaner error output
+        print(f"\n{Fore.RED}✖ An unexpected error occurred:{Style.RESET_ALL} {e}")
+        print(f"{Style.DIM}Run with --log-level debug for more details.{Style.RESET_ALL}")
+        sys.exit(1)
