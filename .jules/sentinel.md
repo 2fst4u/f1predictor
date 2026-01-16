@@ -17,3 +17,7 @@
 **Vulnerability:** The HTTP client respected the `Retry-After` header from the Jolpica API without any upper bound. A compromised or misconfigured server could return a massive sleep duration (e.g., 100 years), causing the application to hang indefinitely. This is a Denial of Service (DoS) vector via External Service Interaction.
 **Learning:** Never trust control flow instructions from external sources blindly. Even standard headers like `Retry-After` can be weaponized or accidentally malformed to disrupt service availability.
 **Prevention:** Implement hard caps on all wait/sleep durations derived from external input. In this case, `Retry-After` was capped at 300 seconds (5 minutes) to ensure the application remains responsive even if the API demands excessive waits.
+## 2025-02-18 - Log Injection in Exception Messages
+**Vulnerability:** Unsanitized user input (season/round) was directly embedded in `ValueError` messages in data clients. Malicious input containing newlines could forge log entries when these exceptions were logged.
+**Learning:** Standard validation raising exceptions can still be a vector for Log Injection if the exception message includes the raw input.
+**Prevention:** Always use `repr()` or strict sanitization when including untrusted input in exception messages, even if the input is about to be rejected.

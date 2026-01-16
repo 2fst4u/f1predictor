@@ -120,7 +120,8 @@ class JolpicaClient:
         if s == "current":
             return s
         if not s.isdigit() or len(s) != 4:
-            raise ValueError(f"Invalid season: {season}")
+            # Use repr() to prevent log injection from malicious input containing newlines
+            raise ValueError(f"Invalid season: {repr(season)}")
         return s
 
     def _validate_round(self, rnd: str) -> str:
@@ -129,7 +130,8 @@ class JolpicaClient:
         if r in ("last", "next"):
             return r
         if not r.isdigit():
-            raise ValueError(f"Invalid round: {rnd}")
+            # Use repr() to prevent log injection from malicious input
+            raise ValueError(f"Invalid round: {repr(rnd)}")
         return r
 
     # Schedules and events
