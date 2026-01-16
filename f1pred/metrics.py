@@ -12,16 +12,30 @@ def accuracy_top_k(pred_order_ids: list, actual_order_ids: list, k: int = 3) -> 
     return len(pred_top & act_top) / float(k)
 
 def brier_pairwise(pairwise_prob: np.ndarray, actual_positions: np.ndarray) -> float:
+    """
+    Calculate the Brier score for pairwise probability predictions.
+
+    Vectorized implementation: O(n^2) using NumPy broadcasting.
+    """
     n = len(actual_positions)
     if n < 2:
         return float("nan")
-    errs = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            y = 1.0 if actual_positions[i] < actual_positions[j] else 0.0
-            p = pairwise_prob[i, j]
-            errs.append((p - y) ** 2)
-    return float(np.mean(errs)) if errs else float("nan")
+
+    # Broadcast actual positions to create a pairwise comparison matrix
+    # Y[i, j] = 1.0 if actual[i] < actual[j] (i finished ahead of j) else 0.0
+    Y = (actual_positions[:, None] < actual_positions[None, :]).astype(float)
+
+    # Squared error for all pairs
+    squared_errors = (pairwise_prob - Y) ** 2
+
+    # Select upper triangle indices (i < j) to count each pair exactly once
+    i_indices, j_indices = np.triu_indices(n, k=1)
+    relevant_errors = squared_errors[i_indices, j_indices]
+
+    if relevant_errors.size == 0:
+        return float("nan")
+
+    return float(np.mean(relevant_errors))
 
 def crps_position(prob_row: np.ndarray, actual_pos: int) -> float:
     N = prob_row.shape[0]

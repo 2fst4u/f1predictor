@@ -9,3 +9,7 @@
 ## 2026-01-14 - Vectorized Lookup via Merge
 **Learning:** Iterating over a DataFrame (`iterrows`) to map values from a dictionary (e.g., weather data per event) is significantly slower than creating a DataFrame from the dictionary and using `.merge()`.
 **Action:** Always prefer `pd.DataFrame(dict_list).merge(target_df)` over loop-based mapping when enriching a DataFrame with external data keyed by multiple columns.
+
+## 2026-01-14 - Vectorized Pairwise Metrics
+**Learning:** Computing pairwise metrics (like Brier score) using nested Python loops (`for i in range(n): for j in range(i+1, n):`) is O(n²) and slow for repeated calls.
+**Action:** Use NumPy broadcasting to create a pairwise comparison matrix (e.g., `Y = val[:, None] < val[None, :]`) and compute differences/errors on the full matrix. Then use `np.triu_indices` to extract the unique pairs (upper triangle) for the final aggregation.
