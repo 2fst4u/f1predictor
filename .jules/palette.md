@@ -1,3 +1,3 @@
-## 2024-05-23 - Session Countdown in CLI
-**Learning:** Adding a simple "Starts in X time" countdown to the CLI header provides immense value for time-sensitive events like races, reducing the need for users to context-switch to check schedules.
-**Action:** When working with time-based event data in CLIs, always look for opportunities to display relative time (countdowns/ago) alongside absolute timestamps.
+## 2025-05-24 - CLI Spinner with Elapsed Time
+**Learning:** Users running long-running CLI tasks (like predictions involving data fetching) benefit significantly from an elapsed time indicator. It reassures them that the process hasn't hung. Using `\033[K` (ANSI clear line) is more robust than calculating backspace length when the line content changes dynamically.
+**Action:** Always include an elapsed time counter in CLI spinners for tasks >2s. Use ANSI escape codes for cleaner line clearing.

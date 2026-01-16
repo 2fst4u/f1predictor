@@ -193,16 +193,19 @@ class StatusSpinner:
         self.spinner = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         self.running = False
         self.thread = None
+        self.start_time = 0.0
         self._previous_log_level = logging.INFO
         self.logger = logging.getLogger()  # Root logger
 
     def spin(self):
         while self.running:
-            sys.stdout.write(f"\r{Fore.CYAN}{next(self.spinner)}{Style.RESET_ALL} {self.message}")
+            elapsed = time.time() - self.start_time
+            timer = f"({elapsed:.1f}s)"
+            # Use ANSI escape code \033[K (or \x1b[K) to clear from cursor to end of line
+            # this avoids artifacts when the timer string grows or shrinks
+            sys.stdout.write(f"\r{Fore.CYAN}{next(self.spinner)}{Style.RESET_ALL} {self.message} {Style.DIM}{timer}{Style.RESET_ALL}\033[K")
             sys.stdout.flush()
             time.sleep(self.delay)
-            # Clear line for next frame
-            sys.stdout.write("\b" * (len(self.message) + 2 + 10))
 
     def __enter__(self):
         # Suppress INFO logs during spinner
@@ -211,6 +214,7 @@ class StatusSpinner:
         if self._previous_log_level < logging.WARNING:
             self.logger.setLevel(logging.WARNING)
 
+        self.start_time = time.time()
         self.running = True
         self.thread = threading.Thread(target=self.spin)
         self.thread.start()
@@ -224,10 +228,15 @@ class StatusSpinner:
         # Restore logging level
         self.logger.setLevel(self._previous_log_level)
 
-        # Clear line and print final status. Clear the full line to ensure no debris.
-        sys.stdout.write("\r" + " " * (len(self.message) + 20) + "\r")
+        elapsed = time.time() - self.start_time
+        time_str = f"({elapsed:.1f}s)"
+
+        # Clear line and print final status.
+        # \033[K clears to end of line, ensuring previous spinner text is gone
+        sys.stdout.write("\r\033[K")
         sys.stdout.flush()
+
         if exc_type:
-            print(f"{Fore.RED}✖{Style.RESET_ALL} {self.message} (Failed)")
+            print(f"{Fore.RED}✖{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL} (Failed)")
         else:
-            print(f"{Fore.GREEN}✔{Style.RESET_ALL} {self.message}")
+            print(f"{Fore.GREEN}✔{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
