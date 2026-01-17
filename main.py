@@ -81,6 +81,14 @@ def main() -> None:
             print(f"{Fore.RED}✖ Invalid round '{args.round}'.{Style.RESET_ALL} Please use 'next', 'last', or a round number.")
             return
 
+    if args.sessions:
+        valid_sessions = set(cfg.modelling.targets.session_types)
+        for s in args.sessions:
+            if s not in valid_sessions:
+                print(f"{Fore.RED}✖ Invalid session '{s}'.{Style.RESET_ALL}")
+                print(f"  Allowed types: {', '.join(sorted(valid_sessions))}")
+                return
+
     # Apply CLI overrides
     if args.refresh is not None:
         cfg.app.live_refresh_seconds = args.refresh
