@@ -118,7 +118,9 @@ def exponential_weights(dates: Union[List[datetime], pd.Series], ref_date: datet
     else:
         # Legacy path for lists
         ages = np.array([(ref_date - d).days if isinstance(d, datetime) else 0 for d in dates], dtype=float)
-    return np.power(0.5, ages / max(1, half_life_days))
+    # Optimization: np.exp2(-x) is significantly faster than np.power(0.5, x)
+    # 0.5^x = (2^-1)^x = 2^-x
+    return np.exp2(-ages / max(1, half_life_days))
 
 
 def _empty_feature_frame() -> pd.DataFrame:
