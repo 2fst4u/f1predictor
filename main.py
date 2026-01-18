@@ -37,7 +37,11 @@ logger = get_logger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="F1 predictive modelling CLI")
+    p = argparse.ArgumentParser(
+        description="F1 predictive modelling CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__
+    )
     p.add_argument("--config", type=str, default="config.yaml")
     p.add_argument("--season", type=str, default=None)
     p.add_argument("--round", type=str, default="next")
