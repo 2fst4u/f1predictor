@@ -317,7 +317,7 @@ def _run_single_prediction(
         noise_factor=cfg.modelling.simulation.noise_factor,
         min_noise=cfg.modelling.simulation.min_noise,
         max_penalty_base=cfg.modelling.simulation.max_penalty_base,
-        compute_pairwise=False
+        # compute_pairwise defaults to True
     )
     
     p_top3 = prob_matrix[:, :3].sum(axis=1)
@@ -581,7 +581,7 @@ def run_predictions_for_event(
                     noise_factor=cfg.modelling.simulation.noise_factor,
                     min_noise=cfg.modelling.simulation.min_noise,
                     max_penalty_base=cfg.modelling.simulation.max_penalty_base,
-                    compute_pairwise=False
+                    # compute_pairwise defaults to True, which we want for results
                 )
 
                 # Analytical probabilities (Plackett-Luce)
@@ -622,6 +622,14 @@ def run_predictions_for_event(
             else:
                 ranked["actual_position"] = np.nan
                 ranked["delta"] = np.nan
+
+            # Store structured results for backtesting/return
+            session_results[sess] = {
+                "ranked": ranked,
+                "prob_matrix": prob_matrix,
+                "pairwise": pairwise,
+                "meta": meta,
+            }
 
             for _, row in ranked.iterrows():
                 # Add to flat list for reporting/backtesting

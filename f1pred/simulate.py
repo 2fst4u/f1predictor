@@ -91,14 +91,15 @@ def simulate_grid(
 
     if compute_pairwise:
         # Compute ranks: ranks[d, i] is the position (0..n-1) of driver i in draw d
-        ranks = np.empty((draws, n), dtype=int)
+        # Optimization: use int16 to reduce memory bandwidth during broadcasting (N <= 32767)
+        ranks = np.empty((draws, n), dtype=np.int16)
 
         # Create row indices: [[0], [1], ..., [draws-1]]
         row_indices = np.arange(draws)[:, None]
 
         # Use advanced indexing to invert the permutation
         # If order[d, p] = driver_idx, then ranks[d, driver_idx] = p
-        ranks[row_indices, order] = np.arange(n)
+        ranks[row_indices, order] = np.arange(n, dtype=np.int16)
 
         # Pairwise comparison via broadcasting
         # r_i shape: (draws, n, 1)
@@ -107,6 +108,7 @@ def simulate_grid(
         r_j = ranks[:, None, :]
 
         # Sum boolean comparisons across draws
+        # Using smaller integer types allows faster vectorized comparison
         pairwise = np.sum(r_i < r_j, axis=0, dtype=float)
 
         # Pairwise probability matrix
