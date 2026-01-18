@@ -27,7 +27,7 @@ from colorama import Fore, Style
 import sys
 
 from f1pred.config import load_config, AppConfig
-from f1pred.util import ensure_dirs, get_logger, init_caches, configure_logging
+from f1pred.util import ensure_dirs, get_logger, init_caches, configure_logging, sanitize_for_console
 from f1pred.predict import run_predictions_for_event
 from f1pred.backtest import run_backtests
 from f1pred.live import live_loop
@@ -77,19 +77,25 @@ def main() -> None:
     # Fail fast with a friendly message instead of falling back to default/current
     if args.season and args.season != "current":
         if not args.season.isdigit() or len(args.season) != 4:
-            print(f"{Fore.RED}✖ Invalid season '{args.season}'.{Style.RESET_ALL} Please use 'current' or a 4-digit year (e.g. 2025).")
+            # Sentinel: Sanitize user input before printing to console
+            safe_season = sanitize_for_console(args.season)
+            print(f"{Fore.RED}✖ Invalid season '{safe_season}'.{Style.RESET_ALL} Please use 'current' or a 4-digit year (e.g. 2025).")
             return
 
     if args.round and args.round not in ("next", "last"):
         if not args.round.isdigit():
-            print(f"{Fore.RED}✖ Invalid round '{args.round}'.{Style.RESET_ALL} Please use 'next', 'last', or a round number.")
+            # Sentinel: Sanitize user input before printing to console
+            safe_round = sanitize_for_console(args.round)
+            print(f"{Fore.RED}✖ Invalid round '{safe_round}'.{Style.RESET_ALL} Please use 'next', 'last', or a round number.")
             return
 
     if args.sessions:
         valid_sessions = set(cfg.modelling.targets.session_types)
         for s in args.sessions:
             if s not in valid_sessions:
-                print(f"{Fore.RED}✖ Invalid session '{s}'.{Style.RESET_ALL}")
+                # Sentinel: Sanitize user input before printing to console
+                safe_s = sanitize_for_console(s)
+                print(f"{Fore.RED}✖ Invalid session '{safe_s}'.{Style.RESET_ALL}")
                 print(f"  Allowed types: {', '.join(sorted(valid_sessions))}")
                 return
 
