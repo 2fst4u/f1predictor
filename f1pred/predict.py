@@ -316,7 +316,8 @@ def _run_single_prediction(
         draws=draws,
         noise_factor=cfg.modelling.simulation.noise_factor,
         min_noise=cfg.modelling.simulation.min_noise,
-        max_penalty_base=cfg.modelling.simulation.max_penalty_base
+        max_penalty_base=cfg.modelling.simulation.max_penalty_base,
+        compute_pairwise=False
     )
     
     p_top3 = prob_matrix[:, :3].sum(axis=1)
@@ -579,7 +580,8 @@ def run_predictions_for_event(
                     draws=draws,
                     noise_factor=cfg.modelling.simulation.noise_factor,
                     min_noise=cfg.modelling.simulation.min_noise,
-                    max_penalty_base=cfg.modelling.simulation.max_penalty_base
+                    max_penalty_base=cfg.modelling.simulation.max_penalty_base,
+                    compute_pairwise=False
                 )
 
                 # Analytical probabilities (Plackett-Luce)

@@ -13,3 +13,7 @@
 ## 2026-01-14 - Vectorized Pairwise Metrics
 **Learning:** Computing pairwise metrics (like Brier score) using nested Python loops (`for i in range(n): for j in range(i+1, n):`) is O(n²) and slow for repeated calls.
 **Action:** Use NumPy broadcasting to create a pairwise comparison matrix (e.g., `Y = val[:, None] < val[None, :]`) and compute differences/errors on the full matrix. Then use `np.triu_indices` to extract the unique pairs (upper triangle) for the final aggregation.
+
+## 2026-01-14 - Conditional Expensive Computations
+**Learning:** Even optimized vectorized O(N²) operations (like pairwise matrices in Monte Carlo simulations) incur measurable overhead (~30% of function time).
+**Action:** Use a flag (e.g., `compute_pairwise=False`) to skip expensive auxiliary calculations when their results are not consumed by the caller.

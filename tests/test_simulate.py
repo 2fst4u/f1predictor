@@ -63,3 +63,19 @@ def test_simulate_grid_dnf_affects_results():
 
     # Driver with high DNF prob should have worse mean position
     assert mean_pos_high[0] > mean_pos_low[0]
+
+
+def test_simulate_grid_no_pairwise():
+    """Test that we can skip pairwise computation."""
+    n_drivers = 20
+    pace_index = np.random.randn(n_drivers)
+    dnf_prob = np.full(n_drivers, 0.1)
+
+    # Compute WITHOUT pairwise
+    prob_matrix, mean_pos, pairwise = simulate_grid(pace_index, dnf_prob, draws=1000, compute_pairwise=False)
+
+    assert prob_matrix.shape == (n_drivers, n_drivers)
+    assert len(mean_pos) == n_drivers
+
+    # Pairwise should be empty (since we returned empty array)
+    assert pairwise.size == 0
