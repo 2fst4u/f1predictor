@@ -31,6 +31,8 @@ __all__ = [
     "compute_form_indices",
     "compute_teammate_delta",
     "compute_grid_finish_delta",
+    "compute_circuit_proficiency",
+    "compute_qualifying_form",
     "exponential_weights",
 ]
 
@@ -175,6 +177,7 @@ def _parse_races_block(races: List[Dict[str, Any]], session_label: str, cutoff: 
         if dt >= cutoff:
             continue
         circuit = r.get("Circuit", {}).get("circuitName")
+        circuit_id = r.get("Circuit", {}).get("circuitId")
         loc = r.get("Circuit", {}).get("Location", {})
         lat = loc.get("lat")
         lon = loc.get("long")
@@ -190,6 +193,7 @@ def _parse_races_block(races: List[Dict[str, Any]], session_label: str, cutoff: 
                     "session": "race",
                     "date": dt,
                     "circuit": circuit,
+                    "circuitId": circuit_id,
                     "lat": float(lat) if lat else None,
                     "lon": float(lon) if lon else None,
                     "driverId": drv.get("driverId"),
@@ -213,6 +217,7 @@ def _parse_races_block(races: List[Dict[str, Any]], session_label: str, cutoff: 
                     "session": "qualifying",
                     "date": dt,
                     "circuit": circuit,
+                    "circuitId": circuit_id,
                     "lat": float(lat) if lat else None,
                     "lon": float(lon) if lon else None,
                     "driverId": drv.get("driverId"),
@@ -235,6 +240,7 @@ def _parse_races_block(races: List[Dict[str, Any]], session_label: str, cutoff: 
                     "session": "sprint",
                     "date": dt,
                     "circuit": circuit,
+                    "circuitId": circuit_id,
                     "lat": float(lat) if lat else None,
                     "lon": float(lon) if lon else None,
                     "driverId": drv.get("driverId"),
@@ -357,6 +363,87 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
     sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
     sums["form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
     return sums[["driverId", "form_index"]]
+
+
+def compute_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days: int) -> pd.DataFrame:
+    """Recency-weighted qualifying performance index."""
+    if df.empty:
+        return pd.DataFrame(columns=["driverId", "qualifying_form_index"])
+
+    # Use qualifying results
+    dfg = df[df["session"] == "qualifying"].copy()
+    # Also include Sprint Shootout/Qualifying if present and mapped appropriately
+    # (assuming they are labelled as 'qualifying' or handled similarly)
+
+    if "qpos" not in dfg.columns:
+        return pd.DataFrame(columns=["driverId", "qualifying_form_index"])
+
+    dfg = dfg.dropna(subset=["driverId", "qpos", "date"])
+
+    # Simple score: negative position (higher is better)
+    dfg["pos_score"] = -dfg["qpos"].astype(float)
+
+    w = exponential_weights(dfg["date"], ref_date, half_life_days)
+    dfg["w"] = w
+    dfg["weighted_val"] = dfg["pos_score"] * dfg["w"]
+
+    sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
+    sums["qualifying_form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
+    return sums[["driverId", "qualifying_form_index"]]
+
+
+def compute_circuit_proficiency(df: pd.DataFrame, circuit_id: str, ref_date: datetime) -> pd.DataFrame:
+    """Historical performance at this specific circuit."""
+    if df.empty or not circuit_id:
+        return pd.DataFrame(columns=["driverId", "circuit_avg_pos", "circuit_dnf_rate", "circuit_experience"])
+
+    # Filter for this circuit
+    # circuitId comes from API; ensure historical data has it
+    if "circuitId" not in df.columns:
+        return pd.DataFrame(columns=["driverId", "circuit_avg_pos", "circuit_dnf_rate", "circuit_experience"])
+
+    # Look at Race results only for now
+    mask = (df["circuitId"] == circuit_id) & (df["session"] == "race") & (df["date"] < ref_date)
+    hist_c = df[mask].copy()
+
+    if hist_c.empty:
+        return pd.DataFrame(columns=["driverId", "circuit_avg_pos", "circuit_dnf_rate", "circuit_experience"])
+
+    hist_c = hist_c.dropna(subset=["driverId"])
+
+    # Calculate metrics
+    # Position: mean finishing position (exclude DNFs for pure pace, or include for reliability?)
+    # Let's exclude DNFs for "avg_pos" to represent pace potential when finishing
+    finishes = hist_c[hist_c["position"].notna()].copy()
+
+    # 1. Experience (starts)
+    starts = hist_c.groupby("driverId").size().rename("circuit_experience")
+
+    # 2. Average Finish Position (only classified finishes)
+    avg_pos = finishes.groupby("driverId")["position"].mean().rename("circuit_avg_pos")
+
+    # 3. DNF Rate
+    # Identify DNF: position is NaN or status implies DNF
+    # Note: hist["position"] is usually populated for classified finishers.
+    # We can infer DNF if position is NaN or status is not 'Finished'/'...Lap...'
+    status_str = hist_c["status"].astype(str).str.lower()
+    dnf_mask = (~hist_c["position"].notna()) | status_str.str.contains(
+        "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
+    )
+    hist_c["is_dnf"] = dnf_mask.astype(int)
+    dnf_rate = hist_c.groupby("driverId")["is_dnf"].mean().rename("circuit_dnf_rate")
+
+    # Merge
+    metrics = pd.concat([starts, avg_pos, dnf_rate], axis=1).reset_index()
+
+    # Fill NaNs
+    # If no finishes, avg_pos is NaN -> fill with neutral/bad value (e.g. 15.0)
+    # If no starts, handled by outer merge later (fill 0)
+    metrics["circuit_avg_pos"] = metrics["circuit_avg_pos"].fillna(15.0)
+    metrics["circuit_dnf_rate"] = metrics["circuit_dnf_rate"].fillna(0.0)
+    metrics["circuit_experience"] = metrics["circuit_experience"].fillna(0)
+
+    return metrics
 
 
 def compute_driver_team_form(
@@ -825,6 +912,23 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
             "temp_skill": 0.0, "rain_skill": 0.0, "wind_skill": 0.0, "pressure_skill": 0.0
         })
 
+    # Circuit Proficiency
+    circuit_id = race_info.get("Circuit", {}).get("circuitId")
+    try:
+        circ_prof = compute_circuit_proficiency(hist, circuit_id, ref_date)
+        logger.info(f"[features] Circuit proficiency computed for {len(circ_prof)} drivers at {circuit_id}")
+    except Exception as e:
+        logger.info(f"[features] Circuit proficiency failed: {e}")
+        circ_prof = pd.DataFrame(columns=["driverId", "circuit_avg_pos", "circuit_dnf_rate", "circuit_experience"])
+
+    # Qualifying Form
+    try:
+        qual_form = compute_qualifying_form(hist, ref_date, cfg.modelling.recency_half_life_days.base)
+        logger.info(f"[features] Qualifying form computed for {len(qual_form)} drivers")
+    except Exception as e:
+        logger.info(f"[features] Qualifying form failed: {e}")
+        qual_form = pd.DataFrame(columns=["driverId", "qualifying_form_index"])
+
     # Merge features
     X = _empty_feature_frame()
     if not roster.empty:
@@ -835,12 +939,14 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
             X["constructorId"] = None
 
         X = X.merge(form, on="driverId", how="left")
+        X = X.merge(qual_form, on="driverId", how="left")
         X = X.merge(team_idx, on="constructorId", how="left")
         X = X.merge(drv_team_form, on="driverId", how="left")
         X = X.merge(beta_df, on="driverId", how="left")
         X = X.merge(weather_df, on="driverId", how="left")
         X = X.merge(tm_delta, on="driverId", how="left")
         X = X.merge(gf_delta, on="driverId", how="left")
+        X = X.merge(circ_prof, on="driverId", how="left")
         
         # Merge grid position (will be NaN if not yet available)
         if not grid_df.empty:
@@ -854,6 +960,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
         # For form index (score where higher = better, e.g. -1.0 > -20.0), a rookie should get a NEUTRAL score (median).
         # This allows their car performance (team features) to determine their initial predicted position.
         neutral_form = form["form_index"].median() if not form.empty else -10.0
+        neutral_qual_form = qual_form["qualifying_form_index"].median() if not qual_form.empty else -10.0
         neutral_team_form = team_idx["team_form_index"].median() if not team_idx.empty else -10.0
         neutral_drv_team_form = drv_team_form["driver_team_form_index"].median() if not drv_team_form.empty else -10.0
         
@@ -863,8 +970,16 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
         # Grid finish delta: similarly, assume average racecraft
         neutral_gf_delta = gf_delta["grid_finish_delta"].median() if not gf_delta.empty else 0.0
         
+        # Circuit proficiency defaults
+        # If no experience, assume neutral performance (or slightly below average due to lack of track knowledge?)
+        # Let's use the median of experienced drivers to be fair, or maybe slightly worse.
+        # 15.0 is a reasonable conservative guess for avg_pos if unknown
+        neutral_circ_avg_pos = circ_prof["circuit_avg_pos"].median() if not circ_prof.empty else 15.0
+        neutral_circ_dnf = circ_prof["circuit_dnf_rate"].mean() if not circ_prof.empty else 0.1
+
         defaults = {
             "form_index": neutral_form,
+            "qualifying_form_index": neutral_qual_form,
             "team_form_index": neutral_team_form,
             "driver_team_form_index": neutral_drv_team_form,
             "team_tenure_events": 0.0,
@@ -880,6 +995,10 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
             # Deltas: assume neutral behavior
             "teammate_delta": neutral_teammate_delta,
             "grid_finish_delta": neutral_gf_delta,
+            # Circuit proficiency
+            "circuit_avg_pos": neutral_circ_avg_pos,
+            "circuit_dnf_rate": neutral_circ_dnf,
+            "circuit_experience": 0.0,
         }
         
         for col, default_val in defaults.items():
