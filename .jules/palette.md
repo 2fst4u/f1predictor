@@ -5,3 +5,11 @@
 ## 2025-05-24 - CLI Input Validation
 **Learning:** For CLI tools, strict input validation with friendly error messages is better than silent fallback to default values, especially for explicit arguments. Silent fallbacks can confuse users who think they are getting results for their specific (invalid) input.
 **Action:** Validate CLI arguments early and provide specific, actionable error messages with color coding (Red for errors) to guide the user.
+
+## 2025-05-24 - CLI Visual Hierarchy with Dimming
+**Learning:** In CLI applications, using `Style.DIM` for "empty" or inactive parts of a visualization (like the remaining part of a progress bar) creates a cleaner visual hierarchy than using full-brightness characters or spaces. It allows the active data to pop without losing the context of the scale.
+**Action:** Use `Style.DIM` for background elements, empty state markers, and secondary information in console output to reduce visual clutter.
+
+## 2025-05-24 - Rich CLI Help Discovery
+**Learning:** Users often don't read `README.md` but will try `--help`. Standard `argparse` help is often too dry. Exposing docstring examples via `argparse.RawDescriptionHelpFormatter` and `epilog=__doc__` significantly improves feature discovery right in the terminal.
+**Action:** Always configure `argparse` to show usage examples from the module docstring.

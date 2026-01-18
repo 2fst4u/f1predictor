@@ -699,10 +699,12 @@ def run_predictions_for_event(
         }
 
 
-def _render_bar(percentage: float, width: int = 5) -> str:
+def _render_bar_parts(percentage: float, width: int = 5) -> Tuple[str, str]:
     """Render a high-resolution progress bar using block characters.
 
-    Uses Unicode blocks (▏▎▍▌▋▊▉█) for 8x granularity per character slot.
+    Returns (filled_part, empty_part).
+    filled_part contains solid blocks and the partial block.
+    empty_part contains filler characters.
     """
     blocks = " ▏▎▍▌▋▊▉█"
     full_value = (percentage / 100.0) * width
@@ -713,21 +715,18 @@ def _render_bar(percentage: float, width: int = 5) -> str:
     partial_idx = int(remainder * 8)
     partial_char = blocks[partial_idx] if partial_idx > 0 else ""
 
-    # If partial char is empty, fill with space/dot if needed for alignment?
-    # Actually let's just stick to the requested format but with better resolution.
-    # The original format used "·" for empty space.
-
-    # Build the bar
-    bar = "█" * full_chars
+    # Build the filled part
+    filled = "█" * full_chars
     if full_chars < width:
-        bar += partial_char
+        filled += partial_char
 
-    # Fill remaining space with middle dots or spaces
-    remaining_len = width - len(bar)
-    if remaining_len > 0:
-        bar += "·" * remaining_len
+    # Calculate empty space length
+    current_len = len(filled)
+    remaining_len = width - current_len
 
-    return bar[:width]  # Ensure exact width
+    empty = "·" * remaining_len
+
+    return filled, empty
 
 
 def print_session_console(
@@ -900,8 +899,12 @@ def print_session_console(
         dnf = float(r["p_dnf"]) * 100
         
         # Visual bar for win/top3 probability
-        win_bar = _render_bar(win, width=5)
-        top3_bar = _render_bar(top3, width=5)
+        win_filled, win_empty = _render_bar_parts(win, width=5)
+        top3_filled, top3_empty = _render_bar_parts(top3, width=5)
+
+        # Construct bars with dim empty part
+        win_bar = f"{win_filled}{Style.RESET_ALL}{Style.DIM}{win_empty}{Style.RESET_ALL}"
+        top3_bar = f"{top3_filled}{Style.RESET_ALL}{Style.DIM}{top3_empty}{Style.RESET_ALL}"
 
         # Color coding for probabilities
         win_color = Fore.GREEN if win > 25 else Fore.WHITE
