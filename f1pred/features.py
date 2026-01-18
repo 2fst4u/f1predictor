@@ -21,7 +21,6 @@ pd.set_option("future.no_silent_downcasting", True)
 from .util import get_logger
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
-from .data.openf1 import OpenF1Client
 from .data.fastf1_backend import get_event, get_session_times
 from .roster import derive_roster  # single source of truth for roster
 
@@ -137,10 +136,10 @@ def _empty_feature_frame() -> pd.DataFrame:
     ])
 
 
-def build_roster(jc: JolpicaClient, season: str, rnd: str, event_dt: Optional[datetime], of1: Optional[OpenF1Client] = None) -> pd.DataFrame:
+def build_roster(jc: JolpicaClient, season: str, rnd: str, event_dt: Optional[datetime]) -> pd.DataFrame:
     logger.info(f"[features] Deriving roster for {season} R{rnd}")
     t0 = time.time()
-    entries = derive_roster(jc, season, rnd, event_dt=event_dt, now_dt=datetime.now(timezone.utc), openf1_client=of1)
+    entries = derive_roster(jc, season, rnd, event_dt=event_dt, now_dt=datetime.now(timezone.utc))
     df = pd.DataFrame(entries)
 
     # Standardize essential columns so downstream code never fails
@@ -702,7 +701,7 @@ def compute_weather_sensitivity(
     return beta_df, {}
 
 
-def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional[OpenF1Client],
+def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
                            season: int, rnd: int, session_type: str,
                            ref_date: datetime,
                            cfg, extra_history: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
@@ -783,7 +782,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient, of1: Optional
 
     # Roster
     try:
-        roster = build_roster(jc, str(season), str(rnd), event_dt=start_dt, of1=of1)
+        roster = build_roster(jc, str(season), str(rnd), event_dt=start_dt)
     except Exception as e:
         logger.info(f"[features] Roster derivation failed: {e}")
         roster = pd.DataFrame(columns=["driverId", "constructorId", "name"])

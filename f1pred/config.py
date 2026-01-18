@@ -32,13 +32,6 @@ class Jolpica:
 
 
 @dataclass
-class OpenF1:
-    base_url: str
-    timeout_seconds: int
-    enabled: bool
-
-
-@dataclass
 class FastF1Cfg:
     enabled: bool
 
@@ -59,7 +52,6 @@ class OpenMeteo:
 @dataclass
 class DataSources:
     jolpica: Jolpica
-    openf1: OpenF1
     fastf1: FastF1Cfg
     open_meteo: OpenMeteo
 
@@ -91,8 +83,6 @@ class MonteCarlo:
 
 @dataclass
 class FeaturesCfg:
-    include_openf1_tyres: bool
-    include_openf1_laps: bool
     include_fastf1_fill: bool
     include_circuit_elevation: bool
     include_weather_ensemble: bool
@@ -241,9 +231,6 @@ def load_config(path: str) -> AppConfig:
         if pu not in _ALLOWED_PRECIP_UNITS:
             errors.append(f"data_sources.open_meteo.precipitation_unit must be one of {sorted(_ALLOWED_PRECIP_UNITS)}")
 
-        of1 = _require(ds_in, "openf1", "data_sources")
-        if not _is_http_url(of1.get("base_url", "")):
-            errors.append("data_sources.openf1.base_url must be http(s) URL")
     except KeyError as e:
         errors.append(str(e))
 
@@ -280,7 +267,6 @@ def load_config(path: str) -> AppConfig:
     paths = Paths(**paths_in)
     data_sources = DataSources(
         jolpica=Jolpica(**ds_in["jolpica"]),
-        openf1=OpenF1(**ds_in["openf1"]),
         fastf1=FastF1Cfg(**ds_in["fastf1"]),
         open_meteo=OpenMeteo(**ds_in["open_meteo"]),
     )

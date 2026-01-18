@@ -82,10 +82,6 @@ def init_caches(cfg, disable_cache: bool = False) -> None:
     if getattr(ds.jolpica, "base_url", None):
         urls_expire_after[ds.jolpica.base_url] = default_expire_seconds
 
-    # OpenF1 (historical)
-    if getattr(ds.openf1, "base_url", None):
-        urls_expire_after[ds.openf1.base_url] = default_expire_seconds
-
     backend = cfg.caching.requests_cache.backend
     cache_path = Path(cfg.paths.cache_dir) / "http_cache"
 

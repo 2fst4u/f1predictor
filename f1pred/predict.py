@@ -15,12 +15,12 @@ from colorama import Fore, Style
 from .util import get_logger, ensure_dirs, StatusSpinner, sanitize_for_console
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
-from .data.openf1 import OpenF1Client
 from .data.fastf1_backend import init_fastf1, get_session_classification, get_session_weather_status
 from .features import build_session_features, collect_historical_results
 from .models import train_pace_model, estimate_dnf_probabilities
 from .simulate import simulate_grid
 from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace
+from .ranking import plackett_luce_scores
 
 __all__ = [
     "run_predictions_for_event",
@@ -221,7 +221,6 @@ def _filter_sessions_for_round(jc: JolpicaClient, season_i: int, round_i: int, r
 def _run_single_prediction(
     jc: JolpicaClient,
     om: OpenMeteoClient,
-    of1: OpenF1Client,
     season_i: int,
     round_i: int,
     sess: str,
@@ -242,7 +241,7 @@ def _run_single_prediction(
         roster = X_override.copy()
         meta = {}
     else:
-        X, meta, roster = build_session_features(jc, om, of1, season_i, round_i, sess, ref_date, cfg)
+        X, meta, roster = build_session_features(jc, om, season_i, round_i, sess, ref_date, cfg)
     
     if X is None or roster is None or X.empty or roster.empty:
         return None
@@ -370,11 +369,6 @@ def run_predictions_for_event(
         windspeed_unit=cfg.data_sources.open_meteo.windspeed_unit,
         precipitation_unit=cfg.data_sources.open_meteo.precipitation_unit,
     )
-    of1 = OpenF1Client(
-        cfg.data_sources.openf1.base_url,
-        cfg.data_sources.openf1.timeout_seconds,
-        cfg.data_sources.openf1.enabled,
-    )
 
     # Resolve event
     season_i, round_i, race_info = resolve_event(jc, season, rnd)
@@ -430,7 +424,7 @@ def run_predictions_for_event(
                 # Convert accumulator to DataFrame for injection
                 extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
 
-                X, meta, roster = build_session_features(jc, om, of1, season_i, round_i, sess, ref_date, cfg, extra_history=extra_hist_df)
+                X, meta, roster = build_session_features(jc, om, season_i, round_i, sess, ref_date, cfg, extra_history=extra_hist_df)
                 if (
                     X is None
                     or roster is None
@@ -474,7 +468,7 @@ def run_predictions_for_event(
                             # Note: _run_single_prediction does NOT see accumulated_history currently,
                             # but it's a cold start anyway if not in loop.
                             qual_ranked = _run_single_prediction(
-                                jc, om, of1, season_i, round_i, precursor, ref_date, cfg
+                                jc, om, season_i, round_i, precursor, ref_date, cfg
                             )
                             if qual_ranked is not None and not qual_ranked.empty:
                                 grid_map = dict(zip(
@@ -588,8 +582,17 @@ def run_predictions_for_event(
                     max_penalty_base=cfg.modelling.simulation.max_penalty_base
                 )
 
+                # Analytical probabilities (Plackett-Luce)
+                # combined_pace is lower-is-better, so we negate it for higher-is-better scores
+                analytical_p_win = plackett_luce_scores(-combined_pace, temperature=1.0)
+
             p_top3 = prob_matrix[:, :3].sum(axis=1)
-            p_win = prob_matrix[:, 0]
+            sim_p_win = prob_matrix[:, 0]
+
+            # Blend simulation win prob with analytical win prob (50/50)
+            # This makes the final probability more robust to simulation variance
+            p_win = 0.5 * sim_p_win + 0.5 * analytical_p_win
+
             order = np.argsort(mean_pos)
             ranked = X.iloc[order].reset_index(drop=True)
             ranked["mean_pos"] = mean_pos[order]

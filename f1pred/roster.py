@@ -137,46 +137,6 @@ def _roster_from_round(jc: JolpicaClient, season: str, rnd: str) -> List[Dict]:
     return []
 
 
-
-def _roster_from_openf1(of1: Optional[Any], season: int, rnd: int) -> List[Dict]:
-    """Attempt to fetch roster from OpenF1 API."""
-    if of1 is None or not of1.enabled:
-        return []
-    
-    # Try to find a relevant session (Practice 1 is usually first with entry list)
-    # If we are verifying a future race, we want ANY session with data.
-    # Force fresh check (no cache) to pick up late changes.
-    session_key = of1.find_session(season, rnd, "Practice 1", use_cache=False)
-    if not session_key:
-        session_key = of1.find_session(season, rnd, "Qualifying", use_cache=False)
-    
-    if not session_key:
-        return []
-
-    try:
-        drivers = of1.get_drivers(session_key, use_cache=False)
-        if drivers.empty:
-            return []
-        
-        roster = []
-        for _, d in drivers.iterrows():
-            # OpenF1 fields: driver_number, full_name, team_name, etc.
-            roster.append({
-                "driverId": d.get("name_acronym", "")[:3].lower(), # Fallback ID
-                "code": d.get("name_acronym"),
-                "givenName": d.get("first_name"),
-                "familyName": d.get("last_name"),
-                "permanentNumber": str(d.get("driver_number")),
-                "constructorId": d.get("team_name", "").lower().replace(" ", "_"),
-                "constructorName": d.get("team_name"),
-            })
-        logger.info(f"[roster] Fetched {len(roster)} drivers from OpenF1")
-        return roster
-    except Exception as e:
-        logger.warning(f"[roster] OpenF1 fetch failed: {e}")
-        return []
-
-
 def _roster_from_fastf1(season: int, rnd: int) -> List[Dict]:
     """Attempt to fetch roster from FastF1 (live timing)."""
     try:
@@ -224,13 +184,11 @@ def derive_roster(
     rnd: str,
     event_dt: Optional[datetime] = None,
     now_dt: Optional[datetime] = None,
-    openf1_client: Optional[Any] = None 
 ) -> List[Dict]:
     """
     Derive roster using a prioritized cascade:
-    1. OpenF1 (Session Entry List) - Best for verified entry lists slightly ahead of time.
-    2. FastF1 (Live Timing) - Good for active weekends.
-    3. Jolpica/Ergast (Results) - Reliable historical fallback.
+    1. FastF1 (Live Timing) - Good for active weekends.
+    2. Jolpica/Ergast (Results) - Reliable historical fallback.
     """
     # Normalise times
     if now_dt is None:
@@ -241,24 +199,18 @@ def derive_roster(
     s_int = int(season)
     r_int = int(rnd)
 
-    # 1. OPTION A: OpenF1 (If available)
-    # We check this even for future events if they are close enough to have an entry list
-    roster = _roster_from_openf1(openf1_client, s_int, r_int)
-    if roster:
-        return roster
-
-    # 2. OPTION B: Jolpica known results for this round
+    # 1. OPTION A: Jolpica known results for this round
     # Check this BEFORE FastF1 because FastF1 may return test session data (e.g., post-season tests)
     same = _same_round_known_roster(jc, season, rnd)
     if same:
         return same
 
-    # 3. OPTION C: FastF1 (live timing, good for active weekends before results are posted)
+    # 2. OPTION B: FastF1 (live timing, good for active weekends before results are posted)
     roster = _roster_from_fastf1(s_int, r_int)
     if roster:
         return roster
 
-    # 4. OPTION D: Previous completed event (fallback for future events)
+    # 3. OPTION C: Previous completed event (fallback for future events)
     try:
         prev = _previous_completed_event_global(jc, s_int, r_int)
     except Exception:

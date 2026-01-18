@@ -18,10 +18,6 @@ data_sources:
     timeout_seconds: 30
     rate_limit_sleep: 0.5
     enabled: true
-  openf1:
-    base_url: "https://api.openf1.org/v1"
-    timeout_seconds: 30
-    enabled: false  # API service outage (502) - fixed code ready when API recovers
   fastf1:
     enabled: true
   open_meteo:
@@ -53,8 +49,6 @@ modelling:
   monte_carlo:
     draws: 5000
   features:
-    include_openf1_tyres: true
-    include_openf1_laps: true
     include_fastf1_fill: true
     include_circuit_elevation: true
     include_weather_ensemble: true
