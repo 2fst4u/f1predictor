@@ -13,3 +13,7 @@
 ## 2025-05-24 - Rich CLI Help Discovery
 **Learning:** Users often don't read `README.md` but will try `--help`. Standard `argparse` help is often too dry. Exposing docstring examples via `argparse.RawDescriptionHelpFormatter` and `epilog=__doc__` significantly improves feature discovery right in the terminal.
 **Action:** Always configure `argparse` to show usage examples from the module docstring.
+
+## 2025-05-25 - CLI Accessibility for Light Themes
+**Learning:** Hardcoding `Fore.WHITE` in CLI applications renders text invisible on terminals with light backgrounds (Light Mode). This is a critical accessibility failure.
+**Action:** Use `Fore.RESET` (or `Style.RESET_ALL`) instead of `Fore.WHITE` to respect the user's terminal theme and ensure text contrast.
