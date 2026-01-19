@@ -804,11 +804,11 @@ def print_session_console(
             elif t > 30:
                 temp_color = Fore.RED
             else:
-                temp_color = Fore.WHITE
+                temp_color = Fore.RESET
             w_parts.append(f"{temp_color}🌡️ {t:.0f}°C{Style.RESET_ALL}")
             
             # Color rain: cyan if any rain
-            rain_color = Fore.CYAN if r > 0 else Fore.WHITE
+            rain_color = Fore.CYAN if r > 0 else Fore.RESET
             # Hide rain if 0.0 to reduce clutter
             if r > 0:
                 w_parts.append(f"{rain_color}🌧️ {r:.1f}mm{Style.RESET_ALL}")
@@ -817,7 +817,7 @@ def print_session_console(
             
             if w is not None and not math.isnan(w):
                 # Color wind: yellow if strong (>20km/h)
-                wind_color = Fore.YELLOW if w > 20 else Fore.WHITE
+                wind_color = Fore.YELLOW if w > 20 else Fore.RESET
                 w_parts.append(f"{wind_color}💨 {w:.0f}km/h{Style.RESET_ALL}")
             
             # Add wet indicator
@@ -917,9 +917,9 @@ def print_session_console(
         top3_bar = f"{top3_filled}{Style.RESET_ALL}{Style.DIM}{top3_empty}{Style.RESET_ALL}"
 
         # Color coding for probabilities
-        win_color = Fore.GREEN if win > 25 else Fore.WHITE
-        dnf_color = Fore.RED if dnf > 15 else Fore.WHITE
-        top3_color = Fore.GREEN if top3 > 75 else Fore.WHITE
+        win_color = Fore.GREEN if win > 25 else Fore.RESET
+        dnf_color = Fore.RED if dnf > 15 else Fore.RESET
+        top3_color = Fore.GREEN if top3 > 75 else Fore.RESET
         
         # Grid position and delta for race sessions
         grid_str = ""
