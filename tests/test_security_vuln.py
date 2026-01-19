@@ -1,8 +1,10 @@
 import pytest
 import time
+from datetime import datetime
 from unittest.mock import patch, MagicMock
 from f1pred.util import sanitize_for_console, StatusSpinner
 from f1pred.data.jolpica import JolpicaClient
+from f1pred.data.open_meteo import OpenMeteoClient
 
 def test_sanitize_for_console_removes_ansi_codes():
     # Input with ANSI codes (red text)
@@ -64,3 +66,38 @@ def test_jolpica_retry_after_dos_prevention():
     # But since I can't verify failure in this environment easily (I just want to implement the fix),
     # I will assert the SAFE behavior I want to see.
     assert val_bad <= MAX_ALLOWED_SLEEP, f"Retry-After value {val_bad} exceeded safety cap of {MAX_ALLOWED_SLEEP}"
+
+def test_open_meteo_timezone_validation():
+    """Test that OpenMeteoClient validates timezone input preventing potential injection or errors."""
+    client = OpenMeteoClient(
+        forecast_url="http://mock",
+        historical_weather_url="http://mock-hist",
+        historical_forecast_url="http://mock-hist-forecast",
+        elevation_url="http://mock-elev",
+        geocoding_url="http://mock-geo",
+    )
+
+    start = datetime(2023, 1, 1)
+    end = datetime(2023, 1, 2)
+    bad_tz = "Europe/London\nnewline" # potentially malicious input
+
+    with patch("f1pred.data.open_meteo.http_get_json") as mock_get:
+        mock_get.return_value = {}
+
+        # Test get_historical_weather
+        client.get_historical_weather(0, 0, start, end, tz=bad_tz)
+        args, kwargs = mock_get.call_args
+        params = kwargs.get('params', {})
+        assert params.get('timezone') == "UTC", "Should fallback to UTC for invalid timezone"
+
+        # Test get_historical_forecast
+        client.get_historical_forecast(0, 0, start, end, tz=bad_tz)
+        args, kwargs = mock_get.call_args
+        params = kwargs.get('params', {})
+        assert params.get('timezone') == "UTC", "Should fallback to UTC for invalid timezone"
+
+        # Test valid timezone
+        client.get_historical_weather(0, 0, start, end, tz="Europe/London")
+        args, kwargs = mock_get.call_args
+        params = kwargs.get('params', {})
+        assert params.get('timezone') == "Europe/London", "Should accept valid timezone"
