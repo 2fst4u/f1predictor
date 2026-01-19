@@ -53,6 +53,19 @@ class OpenMeteoClient:
         return safe_float(elev, None)
 
     @staticmethod
+    def _validate_timezone(tz: str) -> str:
+        """Ensure timezone string contains only safe characters."""
+        # Basic timezone validation (allow UTC, auto, or Region/City)
+        tz = str(tz or "UTC").strip()
+        if not all(c.isalnum() or c in "/-_+" for c in tz):
+            # Using logger.warning here might be too noisy if called frequently with bad data,
+            # but for now we want to know if validation fails.
+            # Using repr() to prevent log injection from malicious input
+            logger.warning(f"OpenMeteoClient: invalid timezone {repr(tz)}, falling back to UTC")
+            return "UTC"
+        return tz
+
+    @staticmethod
     def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
         """Convert list/tuple values to CSV strings for Open‑Meteo (e.g. hourly=a,b,c)."""
         norm = {}
@@ -89,11 +102,7 @@ class OpenMeteoClient:
             logger.info(f"OpenMeteoClient.get_forecast: invalid coordinates lat={lat}, lon={lon}")
             return pd.DataFrame()
 
-        # Basic timezone validation (allow UTC, auto, or Region/City)
-        tz = str(tz or "UTC").strip()
-        if not all(c.isalnum() or c in "/-_+" for c in tz):
-            logger.warning(f"OpenMeteoClient: invalid timezone '{tz}', falling back to UTC")
-            tz = "UTC"
+        tz = self._validate_timezone(tz)
 
         # Forecast API: exclude surface_pressure; use relative window to stay within horizon
         past_days, forecast_days = self._compute_past_forecast_days(start, end)
@@ -132,6 +141,9 @@ class OpenMeteoClient:
         if not _valid_lat_lon(lat, lon):
             logger.info(f"OpenMeteoClient.get_historical_weather: invalid coordinates lat={lat}, lon={lon}")
             return pd.DataFrame()
+
+        tz = self._validate_timezone(tz)
+
         # ERA5 supports surface_pressure and explicit dates
         params = {
             "latitude": lat,
@@ -155,6 +167,9 @@ class OpenMeteoClient:
         if not _valid_lat_lon(lat, lon):
             logger.info(f"OpenMeteoClient.get_historical_forecast: invalid coordinates lat={lat}, lon={lon}")
             return pd.DataFrame()
+
+        tz = self._validate_timezone(tz)
+
         # Historical Forecast mirrors Forecast variables; no surface_pressure
         params = {
             "latitude": lat,
@@ -166,7 +181,7 @@ class OpenMeteoClient:
             ],
             "start_date": start.date().isoformat(),
             "end_date": end.date().isoformat(),
-            "timezone": tz or "UTC",
+            "timezone": tz,
             "temperature_unit": self.temperature_unit,
             "windspeed_unit": self.windspeed_unit,
             "precipitation_unit": self.precipitation_unit,
