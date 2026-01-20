@@ -195,11 +195,19 @@ def safe_float(v, default=None):
 
 def sanitize_for_console(text: str) -> str:
     """
-    Remove ANSI escape codes from text to prevent terminal injection.
+    Remove ANSI escape codes and control characters from text to prevent terminal injection
+    and log forging/spoofing.
     """
     # 7-bit C1 ANSI sequences
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return ansi_escape.sub('', str(text))
+    text = ansi_escape.sub('', str(text))
+
+    # Replace newlines/tabs with space to preserve readability but prevent structure break
+    text = re.sub(r'[\r\n\t\v\f]', ' ', text)
+
+    # Remove remaining control characters (C0: \x00-\x1F, DEL: \x7F, C1: \x80-\x9F)
+    control_chars = re.compile(r'[\x00-\x1f\x7f-\x9f]')
+    return control_chars.sub('', text)
 
 
 class StatusSpinner:
