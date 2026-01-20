@@ -317,7 +317,7 @@ def _run_single_prediction(
         noise_factor=cfg.modelling.simulation.noise_factor,
         min_noise=cfg.modelling.simulation.min_noise,
         max_penalty_base=cfg.modelling.simulation.max_penalty_base,
-        # compute_pairwise defaults to True
+        compute_pairwise=False,
     )
     
     p_top3 = prob_matrix[:, :3].sum(axis=1)
@@ -581,7 +581,7 @@ def run_predictions_for_event(
                     noise_factor=cfg.modelling.simulation.noise_factor,
                     min_noise=cfg.modelling.simulation.min_noise,
                     max_penalty_base=cfg.modelling.simulation.max_penalty_base,
-                    # compute_pairwise defaults to True, which we want for results
+                    compute_pairwise=return_results,
                 )
 
                 # Analytical probabilities (Plackett-Luce)
