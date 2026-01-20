@@ -739,6 +739,21 @@ def _render_bar_parts(percentage: float, width: int = 5) -> Tuple[str, str]:
     return filled, empty
 
 
+def _get_prob_color(value: float, is_dnf: bool = False) -> str:
+    """Return color code based on probability value (0-100)."""
+    if is_dnf:
+        # Lower is better for DNF
+        if value < 5: return Fore.GREEN
+        if value < 15: return Fore.YELLOW
+        return Fore.RED
+
+    # Higher is better for Win/Top3
+    if value < 10: return Style.DIM
+    if value < 40: return Fore.CYAN
+    if value < 70: return Fore.GREEN
+    return Fore.YELLOW
+
+
 def print_session_console(
     df: pd.DataFrame,
     sess: str,
@@ -869,6 +884,7 @@ def print_session_console(
     if has_grid:
         header = (
             f"{Style.DIM}{'#':>3}   "
+            f"{'Code':<4}  "
             f"{'Driver':<{max_name}}   "
             f"{'Team':<{max_team+2}}   "
             f"{'Grid':>4}   "
@@ -876,50 +892,60 @@ def print_session_console(
             f"{'Avg':>5}   "
             f"{'Top3':>12}   "
             f"{win_label:>12}   "
-            f"{'DNF':>6}   "
+            f"{'DNF':>12}   "
             f"{'Pos':>3}{Style.RESET_ALL}"
         )
     else:
         header = (
             f"{Style.DIM}{'#':>3}   "
+            f"{'Code':<4}  "
             f"{'Driver':<{max_name}}   "
             f"{'Team':<{max_team+2}}   "
             f"{'Avg':>5}   "
             f"{'Top3':>12}   "
             f"{win_label:>12}   "
-            f"{'DNF':>6}   "
+            f"{'DNF':>12}   "
             f"{'Pos':>3}{Style.RESET_ALL}"
         )
     print(header)
     
     # Horizontal separator
+    # 3(#) + 3(sp) + 4(Code) + 2(sp) + max_name + 3(sp) + max_team+2 + 3(sp)
+    # + [4(Grid) + 3(sp) + 4(Delta) + 3(sp)]
+    # + 5(Avg) + 3(sp) + 12(Top3) + 3(sp) + 12(Win) + 3(sp) + 12(DNF) + 3(sp) + 3(Pos)
+    base_width = 3 + 3 + 4 + 2 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 12 + 3 + 12 + 3 + 12 + 3 + 3
     if has_grid:
-        sep_width = 3 + 3 + max_name + 3 + max_team + 2 + 3 + 4 + 3 + 4 + 3 + 5 + 3 + 12 + 3 + 12 + 3 + 6 + 3 + 3
+        sep_width = base_width + 4 + 3 + 4 + 3
     else:
-        sep_width = 3 + 3 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 12 + 3 + 12 + 3 + 6 + 3 + 3
+        sep_width = base_width
     print(f"{Style.DIM}{'─' * sep_width}{Style.RESET_ALL}")
     
     for _, r in df.iterrows():
         pos = int(r["predicted_position"])
         name = sanitize_for_console(r.get("name") or "")[:max_name]
+        code = sanitize_for_console(r.get("code") or "")[:3].upper()
+        if not code: code = "???"
+
         team = sanitize_for_console(r.get("constructorName") or "")[:max_team]
         mp = float(r["mean_pos"])
         top3 = float(r["p_top3"]) * 100
         win = float(r["p_win"]) * 100
         dnf = float(r["p_dnf"]) * 100
         
-        # Visual bar for win/top3 probability
+        # Visual bar for probabilities
         win_filled, win_empty = _render_bar_parts(win, width=5)
         top3_filled, top3_empty = _render_bar_parts(top3, width=5)
+        dnf_filled, dnf_empty = _render_bar_parts(dnf, width=5)
 
         # Construct bars with dim empty part
         win_bar = f"{win_filled}{Style.RESET_ALL}{Style.DIM}{win_empty}{Style.RESET_ALL}"
         top3_bar = f"{top3_filled}{Style.RESET_ALL}{Style.DIM}{top3_empty}{Style.RESET_ALL}"
+        dnf_bar = f"{dnf_filled}{Style.RESET_ALL}{Style.DIM}{dnf_empty}{Style.RESET_ALL}"
 
-        # Color coding for probabilities
-        win_color = Fore.GREEN if win > 25 else Fore.RESET
-        dnf_color = Fore.RED if dnf > 15 else Fore.RESET
-        top3_color = Fore.GREEN if top3 > 75 else Fore.RESET
+        # Color coding for probabilities using helper
+        win_color = _get_prob_color(win, is_dnf=False)
+        top3_color = _get_prob_color(top3, is_dnf=False)
+        dnf_color = _get_prob_color(dnf, is_dnf=True)
         
         # Grid position and delta for race sessions
         grid_str = ""
@@ -947,31 +973,25 @@ def print_session_console(
         else:
             classified_str = f"{Style.DIM}{'--':>3}{Style.RESET_ALL}"
         
-        # Left-aligned columns with good padding
+        # Print row
+        row_str = (
+            f"{Fore.YELLOW}{pos:>3}.{Style.RESET_ALL}  "
+            f"{Style.BRIGHT}{code:<4}{Style.RESET_ALL}  "
+            f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
+            f"{Style.DIM}[{team:<{max_team}}]{Style.RESET_ALL}   "
+        )
+
         if has_grid:
-            print(
-                f"{Fore.YELLOW}{pos:>3}.{Style.RESET_ALL}  "
-                f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
-                f"{Style.DIM}[{team:<{max_team}}]{Style.RESET_ALL}   "
-                f"{grid_str}   "
-                f"{delta_str}   "
-                f"{mp:5.1f}   "
-                f"{top3_color}{top3:5.1f}% {top3_bar}{Style.RESET_ALL}   "
-                f"{win_color}{win:5.1f}% {win_bar}{Style.RESET_ALL}   "
-                f"{dnf_color}{dnf:5.1f}%{Style.RESET_ALL}   "
-                f"{classified_str}"
-            )
-        else:
-            print(
-                f"{Fore.YELLOW}{pos:>3}.{Style.RESET_ALL}  "
-                f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
-                f"{Style.DIM}[{team:<{max_team}}]{Style.RESET_ALL}   "
-                f"{mp:5.1f}   "
-                f"{top3_color}{top3:5.1f}% {top3_bar}{Style.RESET_ALL}   "
-                f"{win_color}{win:5.1f}% {win_bar}{Style.RESET_ALL}   "
-                f"{dnf_color}{dnf:5.1f}%{Style.RESET_ALL}   "
-                f"{classified_str}"
-            )
+            row_str += f"{grid_str}   {delta_str}   "
+
+        row_str += (
+            f"{mp:5.1f}   "
+            f"{top3_color}{top3:5.1f}% {top3_bar}{Style.RESET_ALL}   "
+            f"{win_color}{win:5.1f}% {win_bar}{Style.RESET_ALL}   "
+            f"{dnf_color}{dnf:5.1f}% {dnf_bar}{Style.RESET_ALL}   "
+            f"{classified_str}"
+        )
+        print(row_str)
 
     # Print legend explaining abbreviations
     print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, Δ=Grid Delta{Style.RESET_ALL}")
