@@ -218,7 +218,7 @@ class StatusSpinner:
     def __init__(self, message: str = "Processing...", delay: float = 0.1):
         self.message = sanitize_for_console(message)
         self.delay = delay
-        self.spinner = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+        self.spinner = itertools.cycle(["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"])
         self.running = False
         self.thread = None
         self.start_time = 0.0

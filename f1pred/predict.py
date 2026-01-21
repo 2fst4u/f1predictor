@@ -375,6 +375,11 @@ def run_predictions_for_event(
     season_i, round_i, race_info = resolve_event(jc, season, rnd)
     event_title = f"{race_info.get('raceName') or 'Event'} {season_i} (Round {round_i})"
 
+    # Extract circuit info if available
+    circuit_name = None
+    if "Circuit" in race_info and isinstance(race_info["Circuit"], dict):
+        circuit_name = race_info["Circuit"].get("circuitName")
+
     # Event datetime (UTC)
     date_str = race_info.get("date") or datetime.now(timezone.utc).date().isoformat()
     time_str = race_info.get("time")
@@ -691,7 +696,8 @@ def run_predictions_for_event(
                 meta.get("weather"),
                 is_wet=is_wet,
                 event_date=ref_date,
-                session_date=sess_dt
+                session_date=sess_dt,
+                circuit_name=circuit_name
             )
 
         except Exception as e:
@@ -762,10 +768,15 @@ def print_session_console(
     weather_info: Optional[Dict[str, float]] = None,
     is_wet: bool = False,
     event_date: Optional[datetime] = None,
-    session_date: Optional[datetime] = None
+    session_date: Optional[datetime] = None,
+    circuit_name: Optional[str] = None
 ) -> None:
     title = _session_title(sess)
-    print(f"\n{Fore.YELLOW}{Style.BRIGHT}== {title} =={Style.RESET_ALL}")
+    header_line = f"\n{Fore.YELLOW}{Style.BRIGHT}== {title}"
+    if circuit_name:
+        header_line += f" | {circuit_name}"
+    header_line += f" =={Style.RESET_ALL}"
+    print(header_line)
     
     # Display session time if available
     if session_date:
