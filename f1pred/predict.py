@@ -696,9 +696,10 @@ def run_predictions_for_event(
 
         except Exception as e:
                 logger.info(f"[predict] Session {sess} failed with exception:")
-                logger.info(f"{type(e).__name__}: {e}")
+                # Sentinel: Sanitize exception message to prevent log injection
+                logger.info(f"{type(e).__name__}: {sanitize_for_console(str(e))}")
                 import traceback
-                logger.info(traceback.format_exc())
+                logger.debug(traceback.format_exc())
                 continue
 
     if return_results:

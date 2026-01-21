@@ -140,6 +140,8 @@ if __name__ == "__main__":
         print(f"\n{Fore.YELLOW}✖ Operation cancelled by user.{Style.RESET_ALL}")
     except Exception as e:
         # Catch-all for cleaner error output
-        print(f"\n{Fore.RED}✖ An unexpected error occurred:{Style.RESET_ALL} {e}")
+        # Sentinel: Sanitize exception message to prevent log injection/terminal spoofing
+        safe_msg = sanitize_for_console(str(e))
+        print(f"\n{Fore.RED}✖ An unexpected error occurred:{Style.RESET_ALL} {safe_msg}")
         print(f"{Style.DIM}Run with --log-level debug for more details.{Style.RESET_ALL}")
         sys.exit(1)
