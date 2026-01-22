@@ -40,7 +40,7 @@ class OpenMeteoClient:
 
     def get_elevation(self, lat: float, lon: float) -> Optional[float]:
         if not _valid_lat_lon(lat, lon):
-            logger.info(f"OpenMeteoClient.get_elevation: invalid coordinates lat={lat}, lon={lon}")
+            logger.info(f"OpenMeteoClient.get_elevation: invalid coordinates lat={repr(lat)}, lon={repr(lon)}")
             return None
         js = http_get_json(self.session, self.elevation_url,
                            params={"latitude": lat, "longitude": lon},
@@ -99,7 +99,7 @@ class OpenMeteoClient:
 
     def get_forecast(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "UTC") -> pd.DataFrame:
         if not _valid_lat_lon(lat, lon):
-            logger.info(f"OpenMeteoClient.get_forecast: invalid coordinates lat={lat}, lon={lon}")
+            logger.info(f"OpenMeteoClient.get_forecast: invalid coordinates lat={repr(lat)}, lon={repr(lon)}")
             return pd.DataFrame()
 
         tz = self._validate_timezone(tz)
@@ -139,7 +139,7 @@ class OpenMeteoClient:
 
     def get_historical_weather(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "auto") -> pd.DataFrame:
         if not _valid_lat_lon(lat, lon):
-            logger.info(f"OpenMeteoClient.get_historical_weather: invalid coordinates lat={lat}, lon={lon}")
+            logger.info(f"OpenMeteoClient.get_historical_weather: invalid coordinates lat={repr(lat)}, lon={repr(lon)}")
             return pd.DataFrame()
 
         tz = self._validate_timezone(tz)
@@ -165,7 +165,7 @@ class OpenMeteoClient:
 
     def get_historical_forecast(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "UTC") -> pd.DataFrame:
         if not _valid_lat_lon(lat, lon):
-            logger.info(f"OpenMeteoClient.get_historical_forecast: invalid coordinates lat={lat}, lon={lon}")
+            logger.info(f"OpenMeteoClient.get_historical_forecast: invalid coordinates lat={repr(lat)}, lon={repr(lon)}")
             return pd.DataFrame()
 
         tz = self._validate_timezone(tz)
