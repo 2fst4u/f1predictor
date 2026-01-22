@@ -225,6 +225,10 @@ class StatusSpinner:
         self._previous_log_level = logging.INFO
         self.logger = logging.getLogger()  # Root logger
 
+    def update(self, message: str) -> None:
+        """Update the spinner message dynamically."""
+        self.message = sanitize_for_console(message)
+
     def spin(self):
         while self.running:
             elapsed = time.time() - self.start_time
