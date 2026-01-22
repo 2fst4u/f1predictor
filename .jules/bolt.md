@@ -21,3 +21,7 @@
 ## 2026-01-14 - Memory Bandwidth in Broadcasting
 **Learning:** When broadcasting comparisons for large arrays (e.g. `(Draws, N, 1) < (Draws, 1, N)`), using smaller integer types (e.g. `int16` vs default `int64`) for the source data can significantly reduce memory bandwidth and improve performance (~30% speedup), even if the result is the same boolean mask.
 **Action:** Cast integer arrays to the smallest sufficient type (e.g. `astype(np.int16)`) before performing heavy broadcasting operations.
+
+## 2025-02-18 - Caching > Micro-Optimization
+**Learning:** Sometimes the best optimization isn't vectorization but caching. `EloModel.fit` was O(N²) and took ~0.7s per session. Vectorizing the inner loop only saved ~0.05s due to Python overhead in the outer loop (groupby). Caching the fitted model across sessions (since history is identical for an event) saved ~3.5s per event.
+**Action:** Always check if a heavy computation is repeated with identical inputs before trying to optimize the computation itself.
