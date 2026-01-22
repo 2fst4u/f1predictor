@@ -419,6 +419,9 @@ def run_predictions_for_event(
     # Accumulate results from sessions within this run to feed into subsequent sessions
     accumulated_history: List[Dict[str, Any]] = []
 
+    # Cache for ensemble models to avoid re-fitting on identical history/roster
+    ensemble_cache: Dict[Tuple[str, ...], Tuple[Optional[EloModel], Optional[BradleyTerryModel], Optional[MixedEffectsLikeModel]]] = {}
+
     for sess in sessions:
         try:
             # Resolve specific session datetime if available, otherwise fallback to race event date
@@ -526,23 +529,48 @@ def run_predictions_for_event(
 
                 # --- Ensemble skill components (all data-driven) ---
                 elo_pace = bt_pace = mixed_pace = None
-                try:
-                    elo_model = EloModel().fit(hist)
-                    elo_pace = elo_model.predict(X)
-                except Exception as e:
-                    logger.info(f"[predict] Elo model failed: {e}")
+                elo_model = bt_model = mixed_model = None
 
-                try:
-                    bt_model = BradleyTerryModel().fit(hist)
-                    bt_pace = bt_model.predict(X)
-                except Exception as e:
-                    logger.info(f"[predict] Bradley–Terry model failed: {e}")
+                roster_key = tuple(sorted(roster_ids))
+                if roster_key in ensemble_cache:
+                    logger.debug(f"[predict] Using cached ensemble models for roster size {len(roster_ids)}")
+                    elo_model, bt_model, mixed_model = ensemble_cache[roster_key]
+                else:
+                    try:
+                        elo_model = EloModel().fit(hist)
+                    except Exception as e:
+                        logger.info(f"[predict] Elo model fit failed: {e}")
 
-                try:
-                    mixed_model = MixedEffectsLikeModel().fit(hist)
-                    mixed_pace = mixed_model.predict(X)
-                except Exception as e:
-                    logger.info(f"[predict] Mixed-effects-like model failed: {e}")
+                    try:
+                        bt_model = BradleyTerryModel().fit(hist)
+                    except Exception as e:
+                        logger.info(f"[predict] Bradley–Terry model fit failed: {e}")
+
+                    try:
+                        mixed_model = MixedEffectsLikeModel().fit(hist)
+                    except Exception as e:
+                        logger.info(f"[predict] Mixed-effects-like model fit failed: {e}")
+
+                    ensemble_cache[roster_key] = (elo_model, bt_model, mixed_model)
+
+                # Predict using models (new X each session)
+                if elo_model:
+                    try:
+                        elo_pace = elo_model.predict(X)
+                    except Exception as e:
+                        logger.info(f"[predict] Elo predict failed: {e}")
+
+                if bt_model:
+                    try:
+                        bt_pace = bt_model.predict(X)
+                    except Exception as e:
+                        logger.info(f"[predict] BT predict failed: {e}")
+
+                if mixed_model:
+                    try:
+                        mixed_pace = mixed_model.predict(X)
+                    except Exception as e:
+                        logger.info(f"[predict] Mixed predict failed: {e}")
 
                 # Combine GBM pace with ensemble elements
                 try:
