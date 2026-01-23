@@ -224,10 +224,15 @@ class StatusSpinner:
         self.start_time = 0.0
         self._previous_log_level = logging.INFO
         self.logger = logging.getLogger()  # Root logger
+        self.status = "success"
 
     def update(self, message: str) -> None:
         """Update the spinner message dynamically."""
         self.message = sanitize_for_console(message)
+
+    def set_status(self, status: str) -> None:
+        """Set the completion status (e.g. 'success', 'skipped')."""
+        self.status = status
 
     def spin(self):
         while self.running:
@@ -270,5 +275,7 @@ class StatusSpinner:
 
         if exc_type:
             print(f"{Fore.RED}✖{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL} (Failed)")
+        elif self.status == "skipped":
+            print(f"{Fore.YELLOW}⚠{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
         else:
             print(f"{Fore.GREEN}✔{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
