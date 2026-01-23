@@ -17,3 +17,7 @@
 ## 2025-05-25 - CLI Accessibility for Light Themes
 **Learning:** Hardcoding `Fore.WHITE` in CLI applications renders text invisible on terminals with light backgrounds (Light Mode). This is a critical accessibility failure.
 **Action:** Use `Fore.RESET` (or `Style.RESET_ALL`) instead of `Fore.WHITE` to respect the user's terminal theme and ensure text contrast.
+
+## 2025-05-25 - CLI Spinner State Clarity
+**Learning:** When a step in a CLI process is skipped (e.g., due to missing data), simply hiding it or showing a generic "Success" checkmark is misleading. Users need to distinguish between "Success", "Failure", and "Skipped/Warning" to trust the output.
+**Action:** Implement a distinct "Skipped" state (e.g., Yellow `⚠`) in status spinners to provide accurate feedback without interrupting the flow.

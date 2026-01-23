@@ -441,7 +441,10 @@ def run_predictions_for_event(
                     or (hasattr(X, "empty") and X.empty)
                     or (hasattr(roster, "empty") and roster.empty)
                 ):
-                    logger.info(f"[predict] No features/roster available for {sess}; skipping")
+                    msg = f"Skipping {sess} (no data)"
+                    spinner.update(msg)
+                    spinner.set_status("skipped")
+                    logger.info(f"[predict] {msg}")
                     continue
 
                 # Universal Grid Feature logic (Race<-Quali, Sprint<-SprintQuali)
