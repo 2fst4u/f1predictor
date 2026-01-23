@@ -25,3 +25,8 @@
 **Vulnerability:** Uncontrolled resource consumption in `http_get_json` where large responses were loaded entirely into memory.
 **Learning:** Even with `requests`, calling `.json()` or `.text` downloads the full body implicitly. Streaming is required to inspect size before download.
 **Prevention:** Use `stream=True` and check `Content-Length` and accumulated chunk sizes against a hard limit (e.g., 10MB) before parsing.
+
+## 2025-02-19 - Terminal Escape Injection in Circuit Name
+**Vulnerability:** The `circuit_name` retrieved from the external Jolpica API was printed directly to the console in the prediction header without sanitization. A malicious or compromised API response containing ANSI escape codes could inject color codes or potentially execute terminal commands (Terminal Spoofing).
+**Learning:** Even when most fields (drivers, teams) are sanitized, "metadata" fields like circuit names or event titles must also be treated as untrusted input when displaying to a terminal.
+**Prevention:** Applied `sanitize_for_console` to the `circuit_name` variable in `print_session_console`. All external string data destined for stdout must pass through this sanitizer.

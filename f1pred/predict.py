@@ -810,7 +810,7 @@ def print_session_console(
     title = _session_title(sess)
     header_line = f"\n{Fore.YELLOW}{Style.BRIGHT}== {title}"
     if circuit_name:
-        header_line += f" | {circuit_name}"
+        header_line += f" | {sanitize_for_console(circuit_name)}"
     header_line += f" =={Style.RESET_ALL}"
     print(header_line)
     
