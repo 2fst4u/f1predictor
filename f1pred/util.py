@@ -23,9 +23,38 @@ def ensure_dirs(*paths: str) -> None:
         Path(p).mkdir(parents=True, exist_ok=True)
 
 
+def sanitize_for_console(text: str) -> str:
+    """
+    Remove ANSI escape codes and control characters from text to prevent terminal injection
+    and log forging/spoofing.
+    """
+    # 7-bit C1 ANSI sequences
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    text = ansi_escape.sub('', str(text))
+
+    # Replace newlines/tabs with space to preserve readability but prevent structure break
+    text = re.sub(r'[\r\n\t\v\f]', ' ', text)
+
+    # Remove remaining control characters (C0: \x00-\x1F, DEL: \x7F, C1: \x80-\x9F)
+    control_chars = re.compile(r'[\x00-\x1f\x7f-\x9f]')
+    return control_chars.sub('', text)
+
+
 def get_logger(name: str, level: str = "WARNING") -> logging.Logger:
     """Get a logger with the specified level. Call configure_logging() first to set global level."""
     return logging.getLogger(name)
+
+
+class SafeLogFormatter(logging.Formatter):
+    """
+    Log formatter that sanitizes messages to prevent Log Injection.
+    Replaces newlines and control characters with spaces.
+    """
+    def format(self, record: logging.LogRecord) -> str:
+        # Format the message using the standard formatter first (interpolates args)
+        original_msg = super().format(record)
+        # Sanitize the result
+        return sanitize_for_console(original_msg)
 
 
 def configure_logging(level: str = "WARNING") -> None:
@@ -37,9 +66,15 @@ def configure_logging(level: str = "WARNING") -> None:
         "ERROR": logging.ERROR,
     }
     log_level = level_map.get(level.upper(), logging.WARNING)
+
+    # Use SafeLogFormatter to prevent log injection
+    handler = logging.StreamHandler()
+    formatter = SafeLogFormatter(fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    handler.setFormatter(formatter)
+
     logging.basicConfig(
         level=log_level,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        handlers=[handler],
         force=True,  # Override any existing configuration
     )
 
@@ -191,23 +226,6 @@ def safe_float(v, default=None):
         return float(v)
     except Exception:
         return default
-
-
-def sanitize_for_console(text: str) -> str:
-    """
-    Remove ANSI escape codes and control characters from text to prevent terminal injection
-    and log forging/spoofing.
-    """
-    # 7-bit C1 ANSI sequences
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    text = ansi_escape.sub('', str(text))
-
-    # Replace newlines/tabs with space to preserve readability but prevent structure break
-    text = re.sub(r'[\r\n\t\v\f]', ' ', text)
-
-    # Remove remaining control characters (C0: \x00-\x1F, DEL: \x7F, C1: \x80-\x9F)
-    control_chars = re.compile(r'[\x00-\x1f\x7f-\x9f]')
-    return control_chars.sub('', text)
 
 
 class StatusSpinner:
