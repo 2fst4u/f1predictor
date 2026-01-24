@@ -21,3 +21,7 @@
 ## 2025-05-25 - CLI Spinner State Clarity
 **Learning:** When a step in a CLI process is skipped (e.g., due to missing data), simply hiding it or showing a generic "Success" checkmark is misleading. Users need to distinguish between "Success", "Failure", and "Skipped/Warning" to trust the output.
 **Action:** Implement a distinct "Skipped" state (e.g., Yellow `⚠`) in status spinners to provide accurate feedback without interrupting the flow.
+
+## 2026-01-24 - Feature Discovery via Exit Tips
+**Learning:** Users often stick to default commands and miss advanced features like `--live` or `--backtest`. Displaying a random "Pro Tip" at the end of a CLI run significantly improves feature discovery without being intrusive.
+**Action:** Add a contextual or random tip footer to CLI applications to guide users to advanced workflows.
