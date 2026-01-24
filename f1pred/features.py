@@ -38,8 +38,8 @@ __all__ = [
 logger = get_logger(__name__)
 
 # In-process cache to avoid re-building history multiple times in the same run
-# Key: (season, cutoff-date string, sorted roster driver ids)
-_HIST_CACHE: Dict[Tuple[int, str, Tuple[str, ...]], pd.DataFrame] = {}
+# Key: (season, sorted roster driver ids) - Note: end_before is applied on retrieval
+_HIST_CACHE: Dict[Tuple[int, Tuple[str, ...]], pd.DataFrame] = {}
 
 # Cache for historical weather per (season, round) to avoid repeated Open-Meteo calls in the same run
 _WEATHER_EVENT_CACHE: Dict[Tuple[int, int], Dict[str, float]] = {}
@@ -270,15 +270,20 @@ def collect_historical_results(
     cache_dir: Optional[str] = None,
 ) -> pd.DataFrame:
     """Optimized, roster-aware, season-bulk history builder with disk cache."""
-    cutoff_key = end_before.date().isoformat()
     roster_key = tuple(sorted(roster_driver_ids)) if roster_driver_ids else tuple()
-    cache_key = (season, cutoff_key, roster_key)
+    # Cache key excludes end_before to allow reuse across sessions (Friday/Saturday/Sunday)
+    cache_key = (season, roster_key)
+
     if cache_key in _HIST_CACHE:
-        return _HIST_CACHE[cache_key].copy()
+        df_all = _HIST_CACHE[cache_key]
+        return df_all[df_all["date"] < end_before].copy()
+
+    # Use a future cutoff for the build phase to capture all available data for caching
+    build_cutoff = datetime.now(timezone.utc) + timedelta(days=365*2)
 
     rows: List[Dict[str, Any]] = []
     start_year = max(1950, season - lookback_years)
-    logger.info(f"[features] [history] Scanning years {start_year}-{season}, cutoff < {end_before.isoformat()}")
+    logger.info(f"[features] [history] Scanning years {start_year}-{season}, build_cutoff < {build_cutoff.isoformat()}")
 
     roster_set = set(roster_driver_ids or [])
     total_rows = 0
@@ -291,8 +296,8 @@ def collect_historical_results(
         if cache_dir and not is_current_season:
             cached_df = _load_season_cache(cache_dir, yr)
             if cached_df is not None:
-                # Filter by cutoff date
-                cached_df = cached_df[cached_df["date"] < end_before]
+                # Filter by build_cutoff (effectively no-op for historical data, but good for correctness)
+                cached_df = cached_df[cached_df["date"] < build_cutoff]
                 yr_rows = cached_df.to_dict("records")
                 
                 # Check roster match
@@ -321,9 +326,9 @@ def collect_historical_results(
             logger.info(f"[features] [history] {yr}: bulk fetch failed: {e}; skipping year")
             continue
 
-        r_rows = _parse_races_block(races_blk, "race", end_before)
-        q_rows = _parse_races_block(qual_blk, "qualifying", end_before)
-        s_rows = _parse_races_block(sprint_blk, "sprint", end_before)
+        r_rows = _parse_races_block(races_blk, "race", build_cutoff)
+        q_rows = _parse_races_block(qual_blk, "qualifying", build_cutoff)
+        s_rows = _parse_races_block(sprint_blk, "sprint", build_cutoff)
 
         matched = 0
         if roster_set:
@@ -352,11 +357,25 @@ def collect_historical_results(
             break
 
     df = pd.DataFrame(rows)
+
+    # Optimization: Pre-calculate is_dnf to avoid repeated regex operations
+    if not df.empty and "status" in df.columns:
+        status_s = df["status"].astype(str).str.lower()
+        # "position" is NaN for DNF often, or check regex
+        # Using vectorized bitwise OR
+        df["is_dnf"] = ((~df["position"].notna()) | status_s.str.contains(
+            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage",
+            regex=True
+        )).astype(int)
+    elif not df.empty:
+        df["is_dnf"] = 0
+
     _HIST_CACHE[cache_key] = df.copy()
-    alias_key = (season, cutoff_key, tuple())
+    alias_key = (season, tuple())
     if alias_key not in _HIST_CACHE:
         _HIST_CACHE[alias_key] = df.copy()
-    return df
+
+    return df[df["date"] < end_before].copy()
 
 
 def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: int) -> pd.DataFrame:
@@ -436,10 +455,13 @@ def compute_circuit_proficiency(df: pd.DataFrame, circuit_id: str, ref_date: dat
     # Identify DNF: position is NaN or status implies DNF
     # Note: hist["position"] is usually populated for classified finishers.
     # We can infer DNF if position is NaN or status is not 'Finished'/'...Lap...'
-    status_str = hist_c["status"].astype(str).str.lower()
-    dnf_mask = (~hist_c["position"].notna()) | status_str.str.contains(
-        "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
-    )
+    if "is_dnf" in hist_c.columns:
+        dnf_mask = hist_c["is_dnf"].astype(bool)
+    else:
+        status_str = hist_c["status"].astype(str).str.lower()
+        dnf_mask = (~hist_c["position"].notna()) | status_str.str.contains(
+            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
+        )
     hist_c["is_dnf"] = dnf_mask.astype(int)
     dnf_rate = hist_c.groupby("driverId")["is_dnf"].mean().rename("circuit_dnf_rate")
 
