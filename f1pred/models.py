@@ -205,11 +205,14 @@ def train_dnf_hazard_model(X: pd.DataFrame, hist: pd.DataFrame) -> Any:
     if races.empty:
         return None
 
-    status = races["status"].astype(str).str.lower()
-    dnf = (~races["position"].notna()) | status.str.contains(
-        "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
-    )
-    races["dnf"] = dnf.astype(int)
+    if "is_dnf" in races.columns:
+        races["dnf"] = races["is_dnf"].astype(int)
+    else:
+        status = races["status"].astype(str).str.lower()
+        dnf = (~races["position"].notna()) | status.str.contains(
+            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
+        )
+        races["dnf"] = dnf.astype(int)
 
     dnf_rate_driver = races.groupby("driverId")["dnf"].mean().rename("drv_dnf_rate")
     dnf_rate_team = races.groupby("constructorId")["dnf"].mean().rename("team_dnf_rate")
@@ -283,11 +286,14 @@ def estimate_dnf_probabilities(
         return np.full(len(current_X) if current_X is not None else 0, 0.08, dtype=float)
 
     # Detect DNF status
-    status = races["status"].astype(str).str.lower()
-    dnf = (~races["position"].notna()) | status.str.contains(
-        "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
-    )
-    races["dnf"] = dnf.astype(int)
+    if "is_dnf" in races.columns:
+        races["dnf"] = races["is_dnf"].astype(int)
+    else:
+        status = races["status"].astype(str).str.lower()
+        dnf = (~races["position"].notna()) | status.str.contains(
+            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
+        )
+        races["dnf"] = dnf.astype(int)
 
     # Determine if current session is wet (rain > 1mm threshold)
     WET_THRESHOLD = 1.0  # mm of rain
