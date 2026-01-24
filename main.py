@@ -25,6 +25,8 @@ import argparse
 
 from colorama import Fore, Style
 import sys
+import random
+from datetime import datetime
 
 from f1pred.config import load_config, AppConfig
 from f1pred.util import ensure_dirs, get_logger, init_caches, configure_logging, sanitize_for_console
@@ -34,6 +36,20 @@ from f1pred.live import live_loop
 from f1pred.data.fastf1_backend import init_fastf1
 
 logger = get_logger(__name__)
+
+
+def _print_random_tip() -> None:
+    """Display a helpful tip for the user to discover features."""
+    tips = [
+        "Use --live to auto-refresh predictions during the race.",
+        "Validate model accuracy with --backtest.",
+        "Check specific sessions with --sessions qualifying race.",
+        "Use --log-level debug for deeper insights into the prediction model.",
+        "Specify --season and --round to replay historical events.",
+        "See --help for a full list of commands and examples.",
+    ]
+    tip = random.choice(tips)
+    print(f"\n{Style.DIM}💡 Tip: {tip}{Style.RESET_ALL}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -76,10 +92,17 @@ def main() -> None:
     # Input validation (UX Improvement)
     # Fail fast with a friendly message instead of falling back to default/current
     if args.season and args.season != "current":
+        current_year = datetime.now().year
         if not args.season.isdigit() or len(args.season) != 4:
             # Sentinel: Sanitize user input before printing to console
             safe_season = sanitize_for_console(args.season)
-            print(f"{Fore.RED}✖ Invalid season '{safe_season}'.{Style.RESET_ALL} Please use 'current' or a 4-digit year (e.g. 2025).")
+            print(f"{Fore.RED}✖ Invalid season '{safe_season}'.{Style.RESET_ALL} Please use 'current' or a 4-digit year (e.g. {current_year}).")
+            return
+
+        season_year = int(args.season)
+        if season_year < 1950 or season_year > current_year + 1:
+            safe_season = sanitize_for_console(args.season)
+            print(f"{Fore.RED}✖ Invalid season '{safe_season}'.{Style.RESET_ALL} F1 data is available from 1950 to {current_year + 1}.")
             return
 
     if args.round and args.round not in ("next", "last"):
@@ -101,6 +124,9 @@ def main() -> None:
 
     # Apply CLI overrides
     if args.refresh is not None:
+        if args.refresh < 1:
+            print(f"{Fore.RED}✖ Invalid refresh interval.{Style.RESET_ALL} Must be at least 1 second.")
+            return
         cfg.app.live_refresh_seconds = args.refresh
 
     # Ensure dirs and install HTTP cache
@@ -131,6 +157,8 @@ def main() -> None:
         rnd=args.round,
         sessions=sessions,
     )
+
+    _print_random_tip()
 
 
 if __name__ == "__main__":
