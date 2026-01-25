@@ -17,6 +17,9 @@ from colorama import init as colorama_init, Fore, Style
 
 colorama_init(autoreset=True)
 
+HIDE_CURSOR = "\033[?25l"
+SHOW_CURSOR = "\033[?25h"
+
 
 def ensure_dirs(*paths: str) -> None:
     for p in paths:
@@ -249,6 +252,7 @@ class StatusSpinner:
         self._previous_log_level = logging.INFO
         self.logger = logging.getLogger()  # Root logger
         self.status = "success"
+        self.is_tty = sys.stdout.isatty()
 
     def update(self, message: str) -> None:
         """Update the spinner message dynamically."""
@@ -277,8 +281,14 @@ class StatusSpinner:
 
         self.start_time = time.time()
         self.running = True
-        self.thread = threading.Thread(target=self.spin)
-        self.thread.start()
+
+        # Only start animation thread and hide cursor if interactive (TTY)
+        if self.is_tty:
+            sys.stdout.write(HIDE_CURSOR)
+            sys.stdout.flush()
+            self.thread = threading.Thread(target=self.spin)
+            self.thread.start()
+
         return self
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
@@ -292,10 +302,11 @@ class StatusSpinner:
         elapsed = time.time() - self.start_time
         time_str = f"({elapsed:.1f}s)"
 
-        # Clear line and print final status.
-        # \033[K clears to end of line, ensuring previous spinner text is gone
-        sys.stdout.write("\r\033[K")
-        sys.stdout.flush()
+        if self.is_tty:
+            # Restore cursor and clear spinner line
+            sys.stdout.write(SHOW_CURSOR)
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
 
         if exc_type:
             print(f"{Fore.RED}✖{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL} (Failed)")
