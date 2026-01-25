@@ -20,7 +20,13 @@ colorama_init(autoreset=True)
 
 def ensure_dirs(*paths: str) -> None:
     for p in paths:
-        Path(p).mkdir(parents=True, exist_ok=True)
+        path_obj = Path(p)
+        path_obj.mkdir(parents=True, exist_ok=True)
+        try:
+            # Enforce secure permissions (rwx------) to prevent cache poisoning in shared envs
+            path_obj.chmod(0o700)
+        except Exception:
+            pass
 
 
 def sanitize_for_console(text: str) -> str:
