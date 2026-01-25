@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from pathlib import Path
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
@@ -627,19 +628,42 @@ def compute_weather_sensitivity(
     evt_keys = hist_recent[["season", "round", "circuit", "lat", "lon", "date"]].drop_duplicates()
 
     evt_weather: Dict[Tuple[int, int], Dict[str, float]] = {}
+
+    # Parallelize weather fetching for historical events (~100 events for 5 years)
+    # This significantly speeds up cold cache performance
+    tasks = []
+    seen_events = set()
     for _, row in evt_keys.iterrows():
         try:
             lat = float(row.get("lat")) if row.get("lat") is not None else None
             lon = float(row.get("lon")) if row.get("lon") is not None else None
             if lat is None or lon is None:
                 continue
-            season_evt = int(row["season"]); round_evt = int(row["round"])
-            if (season_evt, round_evt) in evt_weather:
+            season_evt = int(row["season"])
+            round_evt = int(row["round"])
+            if (season_evt, round_evt) in seen_events:
                 continue
-            agg = _aggregate_weather(om, lat, lon, row["date"])
-            evt_weather[(season_evt, round_evt)] = agg or {}
+
+            seen_events.add((season_evt, round_evt))
+            tasks.append((season_evt, round_evt, lat, lon, row["date"]))
         except Exception:
             continue
+
+    if tasks:
+        # Use a sensible number of workers for IO-bound tasks
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_key = {
+                executor.submit(_aggregate_weather, om, lat, lon, date): (s, r)
+                for (s, r, lat, lon, date) in tasks
+            }
+
+            for future in as_completed(future_to_key):
+                key = future_to_key[future]
+                try:
+                    agg = future.result()
+                    evt_weather[key] = agg or {}
+                except Exception:
+                    evt_weather[key] = {}
 
     races = hist_recent[hist_recent["session"] == "race"].copy()
     if races.empty:

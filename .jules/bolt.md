@@ -25,3 +25,11 @@
 ## 2025-02-18 - Caching > Micro-Optimization
 **Learning:** Sometimes the best optimization isn't vectorization but caching. `EloModel.fit` was O(N²) and took ~0.7s per session. Vectorizing the inner loop only saved ~0.05s due to Python overhead in the outer loop (groupby). Caching the fitted model across sessions (since history is identical for an event) saved ~3.5s per event.
 **Action:** Always check if a heavy computation is repeated with identical inputs before trying to optimize the computation itself.
+
+## 2026-05-22 - Parallelizing IO-Bound Requests
+**Learning:** Sequential HTTP requests in a loop (even with caching) are a major bottleneck for cold cache scenarios.
+**Action:** Use `concurrent.futures.ThreadPoolExecutor` to parallelize IO-bound tasks like fetching historical weather data, yielding significant speedups (~9x in benchmarks).
+
+## 2026-05-22 - Parallelizing Deduplication Regression
+**Learning:** When moving from immediate sequential processing to batch processing (e.g., collecting tasks for a thread pool), checks against the results cache inside the loop become ineffective because the cache isn't updated until tasks complete.
+**Action:** Use a local `seen` set to track items processed *within* the current batch generation loop to restore deduplication logic.
