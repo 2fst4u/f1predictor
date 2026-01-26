@@ -2,6 +2,8 @@
 import os
 import shutil
 import pytest
+import logging
+from unittest.mock import patch
 from pathlib import Path
 from f1pred.util import ensure_dirs
 
@@ -42,3 +44,43 @@ def test_ensure_dirs_nested(temp_cache_dir):
     # Parent (subdir) permissions are system dependent (mkdir default),
     # but that's acceptable as long as leaf is secure.
     # However, if ensure_dirs is called on parents explicitly, they should be secure.
+
+def test_ensure_dirs_warning_on_failure(temp_cache_dir, caplog):
+    """Verify that ensure_dirs logs a warning if chmod fails."""
+    path_str = str(temp_cache_dir)
+
+    # Mock Path.chmod to raise PermissionError
+    with patch("pathlib.Path.chmod", side_effect=PermissionError("Mock error")):
+        with caplog.at_level(logging.WARNING, logger="f1pred.util"):
+            ensure_dirs(path_str)
+
+    assert "Failed to set secure permissions" in caplog.text
+    assert "Mock error" in caplog.text
+
+def test_features_uses_ensure_dirs(temp_cache_dir):
+    """Verify that feature caching functions utilize ensure_dirs."""
+    from f1pred.features import _save_season_cache, _save_weather_cache
+    import pandas as pd
+
+    # Mock ensure_dirs in features.py
+    with patch("f1pred.features.ensure_dirs") as mock_ensure:
+        # 1. Season cache
+        df = pd.DataFrame({"a": [1]})
+        with patch("pandas.DataFrame.to_parquet"): # Don't actually write
+            _save_season_cache(str(temp_cache_dir), 2025, df)
+
+        assert mock_ensure.called
+        # Check argument ends with 'history'
+        args, _ = mock_ensure.call_args
+        assert args[0].endswith("history")
+
+        mock_ensure.reset_mock()
+
+        # 2. Weather cache
+        data = {"temp": 20.0}
+        with patch("builtins.open"): # Don't open file
+             _save_weather_cache(str(temp_cache_dir), 2025, 1, data)
+
+        assert mock_ensure.called
+        args, _ = mock_ensure.call_args
+        assert args[0].endswith("weather")

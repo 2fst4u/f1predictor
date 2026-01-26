@@ -19,7 +19,7 @@ import pandas as pd
 # Disable pandas warning about silent downcasting on fillna/ffill/bfill
 pd.set_option("future.no_silent_downcasting", True)
 
-from .util import get_logger
+from .util import get_logger, ensure_dirs
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.fastf1_backend import get_event, get_session_times
@@ -69,7 +69,7 @@ def _save_season_cache(cache_dir: str, season: int, df: pd.DataFrame) -> None:
     if df.empty:
         return
     path = _cache_path_for_season(cache_dir, season)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dirs(str(path.parent))
     try:
         df.to_parquet(path, index=False)
         logger.info(f"[features] [cache] Saved {len(df)} rows to {path.name}")
@@ -103,7 +103,7 @@ def _save_weather_cache(cache_dir: str, season: int, rnd: int, data: Dict[str, f
     if not data:
         return
     path = _weather_cache_path(cache_dir, season, rnd)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dirs(str(path.parent))
     try:
         with open(path, "w") as f:
             json.dump(data, f)
