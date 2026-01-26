@@ -777,7 +777,7 @@ def _render_bar_parts(percentage: float, width: int = 5) -> Tuple[str, str]:
     current_len = len(filled)
     remaining_len = width - current_len
 
-    empty = "·" * remaining_len
+    empty = "░" * remaining_len
 
     return filled, empty
 
@@ -938,9 +938,9 @@ def print_session_console(
             f"{'Grid':>4}   "
             f"{'Δ':>4}   "
             f"{'Avg':>5}   "
-            f"{'Top3':>12}   "
-            f"{win_label:>12}   "
-            f"{'DNF':>12}   "
+            f"{'Top3':>14}   "
+            f"{win_label:>14}   "
+            f"{'DNF':>14}   "
             f"{'Pos':>3}{Style.RESET_ALL}"
         )
     else:
@@ -950,9 +950,9 @@ def print_session_console(
             f"{'Driver':<{max_name}}   "
             f"{'Team':<{max_team+2}}   "
             f"{'Avg':>5}   "
-            f"{'Top3':>12}   "
-            f"{win_label:>12}   "
-            f"{'DNF':>12}   "
+            f"{'Top3':>14}   "
+            f"{win_label:>14}   "
+            f"{'DNF':>14}   "
             f"{'Pos':>3}{Style.RESET_ALL}"
         )
     print(header)
@@ -960,8 +960,8 @@ def print_session_console(
     # Horizontal separator
     # 3(#) + 3(sp) + 4(Code) + 2(sp) + max_name + 3(sp) + max_team+2 + 3(sp)
     # + [4(Grid) + 3(sp) + 4(Delta) + 3(sp)]
-    # + 5(Avg) + 3(sp) + 12(Top3) + 3(sp) + 12(Win) + 3(sp) + 12(DNF) + 3(sp) + 3(Pos)
-    base_width = 3 + 3 + 4 + 2 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 12 + 3 + 12 + 3 + 12 + 3 + 3
+    # + 5(Avg) + 3(sp) + 14(Top3) + 3(sp) + 14(Win) + 3(sp) + 14(DNF) + 3(sp) + 3(Pos)
+    base_width = 3 + 3 + 4 + 2 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 14 + 3 + 14 + 3 + 14 + 3 + 3
     if has_grid:
         sep_width = base_width + 4 + 3 + 4 + 3
     else:
@@ -985,10 +985,10 @@ def print_session_console(
         top3_filled, top3_empty = _render_bar_parts(top3, width=5)
         dnf_filled, dnf_empty = _render_bar_parts(dnf, width=5)
 
-        # Construct bars with dim empty part
-        win_bar = f"{win_filled}{Style.RESET_ALL}{Style.DIM}{win_empty}{Style.RESET_ALL}"
-        top3_bar = f"{top3_filled}{Style.RESET_ALL}{Style.DIM}{top3_empty}{Style.RESET_ALL}"
-        dnf_bar = f"{dnf_filled}{Style.RESET_ALL}{Style.DIM}{dnf_empty}{Style.RESET_ALL}"
+        # Construct bars with dim empty part and frames
+        win_bar = f"{Style.DIM}▕{Style.NORMAL}{win_filled}{Style.DIM}{win_empty}▏{Style.RESET_ALL}"
+        top3_bar = f"{Style.DIM}▕{Style.NORMAL}{top3_filled}{Style.DIM}{top3_empty}▏{Style.RESET_ALL}"
+        dnf_bar = f"{Style.DIM}▕{Style.NORMAL}{dnf_filled}{Style.DIM}{dnf_empty}▏{Style.RESET_ALL}"
 
         # Color coding for probabilities using helper
         win_color = _get_prob_color(win, is_dnf=False)
