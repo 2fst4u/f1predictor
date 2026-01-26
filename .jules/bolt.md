@@ -33,3 +33,7 @@
 ## 2026-05-22 - Parallelizing Deduplication Regression
 **Learning:** When moving from immediate sequential processing to batch processing (e.g., collecting tasks for a thread pool), checks against the results cache inside the loop become ineffective because the cache isn't updated until tasks complete.
 **Action:** Use a local `seen` set to track items processed *within* the current batch generation loop to restore deduplication logic.
+
+## 2026-05-23 - Granular Parallelization
+**Learning:** Even when a top-level loop (e.g., iterating years) has dependencies that prevent full parallelization (e.g., early exit based on data), parallelizing independent IO operations *within* the loop body (e.g., race/qual/sprint fetch) still yields significant gains (3x speedup).
+**Action:** Look for clusters of independent IO calls within sequential loops and wrap them in a local `ThreadPoolExecutor`.
