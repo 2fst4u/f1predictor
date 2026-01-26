@@ -22,14 +22,15 @@ SHOW_CURSOR = "\033[?25h"
 
 
 def ensure_dirs(*paths: str) -> None:
+    logger = logging.getLogger(__name__)
     for p in paths:
         path_obj = Path(p)
         path_obj.mkdir(parents=True, exist_ok=True)
         try:
             # Enforce secure permissions (rwx------) to prevent cache poisoning in shared envs
             path_obj.chmod(0o700)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to set secure permissions (0o700) on {p}: {e}. Cache may be insecure.")
 
 
 def sanitize_for_console(text: str) -> str:
