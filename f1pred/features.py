@@ -320,9 +320,15 @@ def collect_historical_results(
 
         # Fetch from API
         try:
-            races_blk = jc.get_season_race_results(str(yr))
-            qual_blk = jc.get_season_qualifying_results(str(yr))
-            sprint_blk = jc.get_season_sprint_results(str(yr))
+            # Parallelize IO-bound requests for this season
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                f_race = executor.submit(jc.get_season_race_results, str(yr))
+                f_qual = executor.submit(jc.get_season_qualifying_results, str(yr))
+                f_sprint = executor.submit(jc.get_season_sprint_results, str(yr))
+
+                races_blk = f_race.result()
+                qual_blk = f_qual.result()
+                sprint_blk = f_sprint.result()
         except Exception as e:
             logger.info(f"[features] [history] {yr}: bulk fetch failed: {e}; skipping year")
             continue
