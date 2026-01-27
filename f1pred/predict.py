@@ -823,6 +823,21 @@ def print_session_console(
         # Format nice date: "Sat 14:00 UTC"
         date_str = session_date.strftime("%a %H:%M UTC")
 
+        # Add Local Time (UX Improvement)
+        try:
+            local_dt = session_date.astimezone()
+            # Check if local timezone is effectively different from UTC display
+            if local_dt.utcoffset() != timedelta(0):
+                tz_name = local_dt.strftime("%Z").strip()
+                if not tz_name:
+                    # Fallback to offset if name is empty
+                    tz_name = local_dt.strftime("%z").strip()
+
+                local_str = f"{local_dt.strftime('%H:%M')} {tz_name}"
+                date_str += f" ({local_str})"
+        except Exception:
+            pass
+
         if total_seconds > 0:
             days = total_seconds // 86400
             hours = (total_seconds % 86400) // 3600
@@ -1042,4 +1057,4 @@ def print_session_console(
         print(row_str)
 
     # Print legend explaining abbreviations
-    print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, Δ=Grid Delta{Style.RESET_ALL}")
+    print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, DNF=Retirement Prob, Δ=Grid Delta{Style.RESET_ALL}")
