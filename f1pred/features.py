@@ -282,7 +282,7 @@ def collect_historical_results(
     # Use a future cutoff for the build phase to capture all available data for caching
     build_cutoff = datetime.now(timezone.utc) + timedelta(days=365*2)
 
-    rows: List[Dict[str, Any]] = []
+    dfs: List[pd.DataFrame] = []
     start_year = max(1950, season - lookback_years)
     logger.info(f"[features] [history] Scanning years {start_year}-{season}, build_cutoff < {build_cutoff.isoformat()}")
 
@@ -299,21 +299,17 @@ def collect_historical_results(
             if cached_df is not None:
                 # Filter by build_cutoff (effectively no-op for historical data, but good for correctness)
                 cached_df = cached_df[cached_df["date"] < build_cutoff]
-                yr_rows = cached_df.to_dict("records")
                 
-                # Check roster match
-                matched = 0
+                # Check roster match (Vectorized)
+                matched = True
                 if roster_set:
-                    for rr in yr_rows:
-                        if rr.get("driverId") in roster_set:
-                            matched = 1
-                            break
+                    matched = cached_df["driverId"].isin(roster_set).any()
                 
-                rows.extend(yr_rows)
-                total_rows += len(yr_rows)
-                logger.info(f"[features] [history] {yr}: loaded {len(yr_rows)} rows from cache")
+                dfs.append(cached_df)
+                total_rows += len(cached_df)
+                logger.info(f"[features] [history] {yr}: loaded {len(cached_df)} rows from cache")
                 
-                if roster_set and matched == 0 and yr < season:
+                if roster_set and not matched and yr < season:
                     logger.info(f"[features] [history] Stopping at {yr}: no results for current roster in this season")
                     break
                 continue
@@ -337,33 +333,34 @@ def collect_historical_results(
         q_rows = _parse_races_block(qual_blk, "qualifying", build_cutoff)
         s_rows = _parse_races_block(sprint_blk, "sprint", build_cutoff)
 
-        matched = 0
-        if roster_set:
-            for block in (r_rows, q_rows, s_rows):
-                for rr in block:
-                    if rr.get("driverId") in roster_set:
-                        matched = 1
-                        break
-                if matched:
-                    break
-
         yr_all_rows = r_rows + q_rows + s_rows
-        rows.extend(yr_all_rows)
-        total_rows += len(yr_all_rows)
+        yr_df = pd.DataFrame(yr_all_rows)
+
+        # Check roster match (Vectorized)
+        matched = True
+        if roster_set and not yr_df.empty:
+            matched = yr_df["driverId"].isin(roster_set).any()
+        elif roster_set:
+            matched = False
+
+        dfs.append(yr_df)
+        total_rows += len(yr_df)
 
         logger.info(
             f"[features] [history] {yr}: race={len(r_rows)} qual={len(q_rows)} sprint={len(s_rows)} rows_total={total_rows}"
         )
 
         # Save completed seasons to disk cache
-        if cache_dir and not is_current_season and yr_all_rows:
-            _save_season_cache(cache_dir, yr, pd.DataFrame(yr_all_rows))
+        if cache_dir and not is_current_season and not yr_df.empty:
+            _save_season_cache(cache_dir, yr, yr_df)
 
-        if roster_set and matched == 0 and yr < season:
+        if roster_set and not matched and yr < season:
             logger.info(f"[features] [history] Stopping at {yr}: no results for current roster in this season")
             break
 
-    df = pd.DataFrame(rows)
+    df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=[
+        "driverId", "position", "date", "session", "constructorId", "points", "status"
+    ])
 
     # Optimization: Pre-calculate is_dnf to avoid repeated regex operations
     if not df.empty and "status" in df.columns:
