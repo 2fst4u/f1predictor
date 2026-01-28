@@ -764,7 +764,8 @@ def compute_weather_sensitivity(
 def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
                            season: int, rnd: int, session_type: str,
                            ref_date: datetime,
-                           cfg, extra_history: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
+                           cfg, extra_history: Optional[pd.DataFrame] = None,
+                           roster_override: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
     logger.info(f"[features] Fetching schedule for {season} R{rnd}")
     t_all = time.time()
 
@@ -841,11 +842,14 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             wagg = {}
 
     # Roster
-    try:
-        roster = build_roster(jc, str(season), str(rnd), event_dt=start_dt)
-    except Exception as e:
-        logger.info(f"[features] Roster derivation failed: {e}")
-        roster = pd.DataFrame(columns=["driverId", "constructorId", "name"])
+    if roster_override is not None:
+        roster = roster_override.copy()
+    else:
+        try:
+            roster = build_roster(jc, str(season), str(rnd), event_dt=start_dt)
+        except Exception as e:
+            logger.info(f"[features] Roster derivation failed: {e}")
+            roster = pd.DataFrame(columns=["driverId", "constructorId", "name"])
 
     # Fetch actual starting grid for this race (if available)
     # Grid comes from race results endpoint - it shows the actual grid after penalties
