@@ -198,11 +198,13 @@ def http_get_json(session: requests.Session, url: str, params: Optional[Dict[str
         cl = resp.headers.get("Content-Length")
         if cl:
             try:
-                if int(cl) > MAX_SIZE:
-                    raise ValueError(f"Response too large ({cl} bytes) from {url}")
+                cl_int = int(cl)
             except ValueError:
                 # Malformed Content-Length; proceed (we enforce limit during read anyway)
-                pass
+                cl_int = 0
+
+            if cl_int > MAX_SIZE:
+                raise ValueError(f"Response too large ({cl} bytes) from {url}")
 
         # Read content with limit
         content = bytearray()
