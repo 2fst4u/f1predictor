@@ -25,3 +25,7 @@
 ## 2026-01-24 - Feature Discovery via Exit Tips
 **Learning:** Users often stick to default commands and miss advanced features like `--live` or `--backtest`. Displaying a random "Pro Tip" at the end of a CLI run significantly improves feature discovery without being intrusive.
 **Action:** Add a contextual or random tip footer to CLI applications to guide users to advanced workflows.
+
+## 2026-02-14 - Rejected: Medal Emojis in CLI Tables
+**Learning:** While emojis can add delight, using them for data fields like "Position" (🥇, 🥈, 🥉) can be controversial. For this user/project, standard numeric formatting is preferred for clarity and consistency.
+**Action:** Avoid replacing numeric rankings with emojis in this project.
