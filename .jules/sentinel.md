@@ -30,3 +30,8 @@
 **Vulnerability:** The `circuit_name` retrieved from the external Jolpica API was printed directly to the console in the prediction header without sanitization. A malicious or compromised API response containing ANSI escape codes could inject color codes or potentially execute terminal commands (Terminal Spoofing).
 **Learning:** Even when most fields (drivers, teams) are sanitized, "metadata" fields like circuit names or event titles must also be treated as untrusted input when displaying to a terminal.
 **Prevention:** Applied `sanitize_for_console` to the `circuit_name` variable in `print_session_console`. All external string data destined for stdout must pass through this sanitizer.
+
+## 2025-02-24 - DoS Protection Bypass in Content-Length Check
+**Vulnerability:** The `Content-Length` check in `http_get_json` intended to prevent downloading large files was ineffective. The `ValueError` raised when the size limit was exceeded was improperly caught by a `try-except` block designed to handle malformed headers, allowing large downloads to proceed.
+**Learning:** Exception handling for validation (like parsing integers) must be narrowly scoped. Catching exceptions too broadly (or catching the exception you just raised) can silently disable security controls.
+**Prevention:** Refactored the `try-except` block to only cover the integer conversion. The size limit check is now performed outside the `try` block to ensure the rejection exception propagates correctly.
