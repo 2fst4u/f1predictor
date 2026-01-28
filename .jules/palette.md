@@ -23,10 +23,9 @@
 **Action:** Implement a distinct "Skipped" state (e.g., Yellow `⚠`) in status spinners to provide accurate feedback without interrupting the flow.
 
 ## 2026-01-24 - Feature Discovery via Exit Tips
-**Learning:** Feature Discovery via Exit Tips
 **Learning:** Users often stick to default commands and miss advanced features like `--live` or `--backtest`. Displaying a random "Pro Tip" at the end of a CLI run significantly improves feature discovery without being intrusive.
 **Action:** Add a contextual or random tip footer to CLI applications to guide users to advanced workflows.
 
-## 2026-02-14 - Delight with Emoji Indicators in CLI Tables
-**Learning:** Replacing top numeric rankings (1, 2, 3) with medal emojis (🥇, 🥈, 🥉) in CLI tables adds a layer of delight and visual hierarchy. Crucially, aligning them requires treating a "space + emoji" combination as a 3-character width cell to match standard integer formatting, ensuring the table remains aligned on monospaced terminals.
-**Action:** Use medal emojis for podium positions in result tables, ensuring proper padding for alignment.
+## 2026-02-14 - Rejected: Medal Emojis in CLI Tables
+**Learning:** While emojis can add delight, using them for data fields like "Position" (🥇, 🥈, 🥉) can be controversial. For this user/project, standard numeric formatting is preferred for clarity and consistency.
+**Action:** Avoid replacing numeric rankings with emojis in this project.

@@ -1032,15 +1032,7 @@ def print_session_console(
         # Actual classification display
         actual_pos = r.get("actual_position")
         if pd.notna(actual_pos):
-            pos_int = int(actual_pos)
-            if pos_int == 1:
-                classified_str = f" 🥇{Style.RESET_ALL}"
-            elif pos_int == 2:
-                classified_str = f" 🥈{Style.RESET_ALL}"
-            elif pos_int == 3:
-                classified_str = f" 🥉{Style.RESET_ALL}"
-            else:
-                classified_str = f"{Fore.CYAN}{Style.BRIGHT}{pos_int:>3d}{Style.RESET_ALL}"
+            classified_str = f"{Fore.CYAN}{Style.BRIGHT}{int(actual_pos):>3d}{Style.RESET_ALL}"
         else:
             classified_str = f"{Style.DIM}{'--':>3}{Style.RESET_ALL}"
         
