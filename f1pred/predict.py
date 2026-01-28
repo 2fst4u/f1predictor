@@ -422,6 +422,9 @@ def run_predictions_for_event(
     # Cache for ensemble models to avoid re-fitting on identical history/roster
     ensemble_cache: Dict[Tuple[str, ...], Tuple[Optional[EloModel], Optional[BradleyTerryModel], Optional[MixedEffectsLikeModel]]] = {}
 
+    # Cache roster across sessions for the same event to avoid re-deriving it
+    cached_roster: Optional[pd.DataFrame] = None
+
     for sess in sessions:
         try:
             # Resolve specific session datetime if available, otherwise fallback to race event date
@@ -434,7 +437,15 @@ def run_predictions_for_event(
                 extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
 
                 spinner.update(f"Predicting {event_title} - {sess}: Building features...")
-                X, meta, roster = build_session_features(jc, om, season_i, round_i, sess, ref_date, cfg, extra_history=extra_hist_df)
+                X, meta, roster = build_session_features(
+                    jc, om, season_i, round_i, sess, ref_date, cfg,
+                    extra_history=extra_hist_df,
+                    roster_override=cached_roster
+                )
+
+                if cached_roster is None and roster is not None and not roster.empty:
+                    cached_roster = roster
+
                 if (
                     X is None
                     or roster is None

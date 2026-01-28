@@ -37,3 +37,7 @@
 ## 2026-05-23 - Granular Parallelization
 **Learning:** Even when a top-level loop (e.g., iterating years) has dependencies that prevent full parallelization (e.g., early exit based on data), parallelizing independent IO operations *within* the loop body (e.g., race/qual/sprint fetch) still yields significant gains (3x speedup).
 **Action:** Look for clusters of independent IO calls within sequential loops and wrap them in a local `ThreadPoolExecutor`.
+
+## 2026-05-24 - Event-Level Caching
+**Learning:** When iterating over sub-components of a larger entity (e.g., sessions in an event), identifying data that is constant across the entity and lifting its retrieval out of the loop prevents redundant I/O and processing.
+**Action:** Identify constant data (like `roster` for an event) and fetch it once, passing it to sub-routines via an optional override argument to bypass redundant calculations.
