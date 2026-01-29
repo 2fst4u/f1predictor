@@ -37,10 +37,19 @@ def sanitize_for_console(text: str) -> str:
     """
     Remove ANSI escape codes and control characters from text to prevent terminal injection
     and log forging/spoofing.
+
+    Also truncates excessively long inputs to prevent Log Flooding and Terminal DoS.
     """
+    s_text = str(text)
+
+    # Truncate to prevent Log Flooding / Resource Exhaustion
+    MAX_LOG_LENGTH = 1024
+    if len(s_text) > MAX_LOG_LENGTH:
+        s_text = s_text[:MAX_LOG_LENGTH] + "...[truncated]"
+
     # 7-bit C1 ANSI sequences
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    text = ansi_escape.sub('', str(text))
+    text = ansi_escape.sub('', s_text)
 
     # Replace newlines/tabs with space to preserve readability but prevent structure break
     text = re.sub(r'[\r\n\t\v\f]', ' ', text)

@@ -129,6 +129,11 @@ class JolpicaClient:
         r = str(rnd).strip()
         if r in ("last", "next"):
             return r
+
+        # Enforce length limit (F1 rounds are rarely > 25, 5 digits is extremely generous)
+        if len(r) > 5:
+            raise ValueError(f"Invalid round (too long): {repr(r[:10])}...")
+
         if not r.isdigit():
             # Use repr() to prevent log injection from malicious input
             raise ValueError(f"Invalid round: {repr(rnd)}")
