@@ -613,12 +613,32 @@ def _aggregate_weather(om: OpenMeteoClient, lat: float, lon: float, event_dt: da
         return {}
 
 
+def _fetch_weather_task(om: OpenMeteoClient, lat: float, lon: float, event_dt: datetime,
+                        season: int, rnd: int, cache_dir: Optional[str]) -> Dict[str, float]:
+    """Fetch weather for a task, checking/saving to disk cache if enabled."""
+    # Check disk cache first if available
+    if cache_dir:
+        cached = _load_weather_cache(cache_dir, season, rnd)
+        if cached is not None:
+            return cached
+
+    # Fetch from API
+    agg = _aggregate_weather(om, lat, lon, event_dt)
+
+    # Save to disk cache if valid
+    if agg and cache_dir:
+        _save_weather_cache(cache_dir, season, rnd, agg)
+
+    return agg
+
+
 def compute_weather_sensitivity(
     om: OpenMeteoClient,
     hist: pd.DataFrame,
     roster: pd.DataFrame,
     ref_date: datetime,
-    recent_years: int = 5
+    recent_years: int = 5,
+    cache_dir: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """Learn per-driver weather sensitivities from recent historical events."""
     if hist.empty or roster.empty:
@@ -648,6 +668,12 @@ def compute_weather_sensitivity(
                 continue
 
             seen_events.add((season_evt, round_evt))
+
+            # Check in-memory cache first
+            if (season_evt, round_evt) in _WEATHER_EVENT_CACHE:
+                evt_weather[(season_evt, round_evt)] = _WEATHER_EVENT_CACHE[(season_evt, round_evt)]
+                continue
+
             tasks.append((season_evt, round_evt, lat, lon, row["date"]))
         except Exception:
             continue
@@ -656,7 +682,7 @@ def compute_weather_sensitivity(
         # Use a sensible number of workers for IO-bound tasks
         with ThreadPoolExecutor(max_workers=10) as executor:
             future_to_key = {
-                executor.submit(_aggregate_weather, om, lat, lon, date): (s, r)
+                executor.submit(_fetch_weather_task, om, lat, lon, date, s, r, cache_dir): (s, r)
                 for (s, r, lat, lon, date) in tasks
             }
 
@@ -665,6 +691,9 @@ def compute_weather_sensitivity(
                 try:
                     agg = future.result()
                     evt_weather[key] = agg or {}
+                    # Update in-memory cache
+                    if agg:
+                        _WEATHER_EVENT_CACHE[key] = agg
                 except Exception:
                     evt_weather[key] = {}
 
@@ -953,7 +982,10 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
 
     # Weather sensitivity per driver
     try:
-        beta_df, _ = compute_weather_sensitivity(om, hist, roster, ref_date=ref_date, recent_years=5)
+        beta_df, _ = compute_weather_sensitivity(
+            om, hist, roster, ref_date=ref_date, recent_years=5,
+            cache_dir=cfg.paths.cache_dir
+        )
     except Exception:
         beta_df = pd.DataFrame(columns=[
             "driverId", "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain"
