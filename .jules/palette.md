@@ -29,3 +29,7 @@
 ## 2026-02-14 - Rejected: Medal Emojis in CLI Tables
 **Learning:** While emojis can add delight, using them for data fields like "Position" (🥇, 🥈, 🥉) can be controversial. For this user/project, standard numeric formatting is preferred for clarity and consistency.
 **Action:** Avoid replacing numeric rankings with emojis in this project.
+
+## 2026-05-24 - CLI Table Column Clarity
+**Learning:** In prediction tables where rows are ranked by prediction (implicit position), a column labeled "Pos" for the *actual/result* position is ambiguous and confusing. Users may confuse the row index with the result column.
+**Action:** Rename result columns to "Actual" or "Result" to clearly distinguish them from the predicted rank (often denoted by `#` or row order). Update legends to explicitly define the column.
