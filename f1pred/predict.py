@@ -967,7 +967,7 @@ def print_session_console(
             f"{'Top3':>14}   "
             f"{win_label:>14}   "
             f"{'DNF':>14}   "
-            f"{'Pos':>3}{Style.RESET_ALL}"
+            f"{'Actual':>6}{Style.RESET_ALL}"
         )
     else:
         header = (
@@ -979,15 +979,15 @@ def print_session_console(
             f"{'Top3':>14}   "
             f"{win_label:>14}   "
             f"{'DNF':>14}   "
-            f"{'Pos':>3}{Style.RESET_ALL}"
+            f"{'Actual':>6}{Style.RESET_ALL}"
         )
     print(header)
     
     # Horizontal separator
     # 3(#) + 3(sp) + 4(Code) + 2(sp) + max_name + 3(sp) + max_team+2 + 3(sp)
     # + [4(Grid) + 3(sp) + 4(Delta) + 3(sp)]
-    # + 5(Avg) + 3(sp) + 14(Top3) + 3(sp) + 14(Win) + 3(sp) + 14(DNF) + 3(sp) + 3(Pos)
-    base_width = 3 + 3 + 4 + 2 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 14 + 3 + 14 + 3 + 14 + 3 + 3
+    # + 5(Avg) + 3(sp) + 14(Top3) + 3(sp) + 14(Win) + 3(sp) + 14(DNF) + 3(sp) + 6(Actual)
+    base_width = 3 + 3 + 4 + 2 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 14 + 3 + 14 + 3 + 14 + 3 + 6
     if has_grid:
         sep_width = base_width + 4 + 3 + 4 + 3
     else:
@@ -1043,9 +1043,9 @@ def print_session_console(
         # Actual classification display
         actual_pos = r.get("actual_position")
         if pd.notna(actual_pos):
-            classified_str = f"{Fore.CYAN}{Style.BRIGHT}{int(actual_pos):>3d}{Style.RESET_ALL}"
+            classified_str = f"{Fore.CYAN}{Style.BRIGHT}{int(actual_pos):>6d}{Style.RESET_ALL}"
         else:
-            classified_str = f"{Style.DIM}{'--':>3}{Style.RESET_ALL}"
+            classified_str = f"{Style.DIM}{'--':>6}{Style.RESET_ALL}"
         
         # Print row
         row_str = (
@@ -1068,4 +1068,4 @@ def print_session_console(
         print(row_str)
 
     # Print legend explaining abbreviations
-    print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, DNF=Retirement Prob, Δ=Grid Delta{Style.RESET_ALL}")
+    print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, DNF=Retirement Prob, Actual=Official Result, Δ=Grid Delta{Style.RESET_ALL}")
