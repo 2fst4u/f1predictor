@@ -57,6 +57,12 @@ class OpenMeteoClient:
         """Ensure timezone string contains only safe characters."""
         # Basic timezone validation (allow UTC, auto, or Region/City)
         tz = str(tz or "UTC").strip()
+
+        # Enforce length limit (standard IANA timezones are typically < 40 chars)
+        if len(tz) > 64:
+             logger.warning(f"OpenMeteoClient: timezone too long, falling back to UTC")
+             return "UTC"
+
         if not all(c.isalnum() or c in "/-_+" for c in tz):
             # Using logger.warning here might be too noisy if called frequently with bad data,
             # but for now we want to know if validation fails.

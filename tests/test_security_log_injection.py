@@ -36,4 +36,7 @@ def test_validate_round_log_injection_prevention():
     msg = str(excinfo.value)
     assert "\n" not in msg
     assert "\\n" in msg
-    assert "1\\nINFO: Fake Log" in msg
+    # The input triggers the length limit check first (max 5 chars)
+    # So we expect the "too long" error message, which also uses repr()
+    assert "Invalid round (too long)" in msg
+    assert "1\\nINFO" in msg
