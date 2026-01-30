@@ -1006,20 +1006,20 @@ def print_session_console(
         win = float(r["p_win"]) * 100
         dnf = float(r["p_dnf"]) * 100
         
+        # Color coding for probabilities using helper
+        win_color = _get_prob_color(win, is_dnf=False)
+        top3_color = _get_prob_color(top3, is_dnf=False)
+        dnf_color = _get_prob_color(dnf, is_dnf=True)
+
         # Visual bar for probabilities
         win_filled, win_empty = _render_bar_parts(win, width=5)
         top3_filled, top3_empty = _render_bar_parts(top3, width=5)
         dnf_filled, dnf_empty = _render_bar_parts(dnf, width=5)
 
-        # Construct bars with dim empty part and frames
-        win_bar = f"{Style.DIM}▕{Style.NORMAL}{win_filled}{Style.DIM}{win_empty}▏{Style.RESET_ALL}"
-        top3_bar = f"{Style.DIM}▕{Style.NORMAL}{top3_filled}{Style.DIM}{top3_empty}▏{Style.RESET_ALL}"
-        dnf_bar = f"{Style.DIM}▕{Style.NORMAL}{dnf_filled}{Style.DIM}{dnf_empty}▏{Style.RESET_ALL}"
-
-        # Color coding for probabilities using helper
-        win_color = _get_prob_color(win, is_dnf=False)
-        top3_color = _get_prob_color(top3, is_dnf=False)
-        dnf_color = _get_prob_color(dnf, is_dnf=True)
+        # Construct bars with colored filled part and dim empty part
+        win_bar = f"{Style.DIM}▕{Style.RESET_ALL}{win_color}{win_filled}{Style.RESET_ALL}{Style.DIM}{win_empty}▏{Style.RESET_ALL}"
+        top3_bar = f"{Style.DIM}▕{Style.RESET_ALL}{top3_color}{top3_filled}{Style.RESET_ALL}{Style.DIM}{top3_empty}▏{Style.RESET_ALL}"
+        dnf_bar = f"{Style.DIM}▕{Style.RESET_ALL}{dnf_color}{dnf_filled}{Style.RESET_ALL}{Style.DIM}{dnf_empty}▏{Style.RESET_ALL}"
         
         # Grid position and delta for race sessions
         grid_str = ""
