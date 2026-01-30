@@ -656,14 +656,16 @@ def compute_weather_sensitivity(
     # This significantly speeds up cold cache performance
     tasks = []
     seen_events = set()
-    for _, row in evt_keys.iterrows():
+    for row in evt_keys.itertuples(index=False):
         try:
-            lat = float(row.get("lat")) if row.get("lat") is not None else None
-            lon = float(row.get("lon")) if row.get("lon") is not None else None
+            r_lat = row.lat
+            r_lon = row.lon
+            lat = float(r_lat) if r_lat is not None else None
+            lon = float(r_lon) if r_lon is not None else None
             if lat is None or lon is None:
                 continue
-            season_evt = int(row["season"])
-            round_evt = int(row["round"])
+            season_evt = int(row.season)
+            round_evt = int(row.round)
             if (season_evt, round_evt) in seen_events:
                 continue
 
@@ -674,7 +676,7 @@ def compute_weather_sensitivity(
                 evt_weather[(season_evt, round_evt)] = _WEATHER_EVENT_CACHE[(season_evt, round_evt)]
                 continue
 
-            tasks.append((season_evt, round_evt, lat, lon, row["date"]))
+            tasks.append((season_evt, round_evt, lat, lon, row.date))
         except Exception:
             continue
 
