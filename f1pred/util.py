@@ -1,5 +1,6 @@
 import logging
 import json
+import os
 import re
 import sys
 import threading
@@ -23,14 +24,21 @@ SHOW_CURSOR = "\033[?25h"
 
 def ensure_dirs(*paths: str) -> None:
     logger = logging.getLogger(__name__)
-    for p in paths:
-        path_obj = Path(p)
-        path_obj.mkdir(parents=True, exist_ok=True)
-        try:
-            # Enforce secure permissions (rwx------) to prevent cache poisoning in shared envs
-            path_obj.chmod(0o700)
-        except Exception as e:
-            logger.warning(f"Failed to set secure permissions (0o700) on {p}: {e}. Cache may be insecure.")
+    # Set umask to 0o077 to ensure created directories have 0o700 permissions atomically.
+    # This prevents a race condition where directories might briefly exist with wider permissions.
+    old_umask = os.umask(0o077)
+    try:
+        for p in paths:
+            path_obj = Path(p)
+            path_obj.mkdir(parents=True, exist_ok=True)
+            # Explicit chmod as a backup in case mkdir ignores umask (rare but possible)
+            # or if the directory already existed with wrong permissions.
+            try:
+                path_obj.chmod(0o700)
+            except Exception as e:
+                logger.warning(f"Failed to set secure permissions (0o700) on {p}: {e}. Cache may be insecure.")
+    finally:
+        os.umask(old_umask)
 
 
 def sanitize_for_console(text: str) -> str:
@@ -140,9 +148,11 @@ def init_caches(cfg, disable_cache: bool = False) -> None:
     cache_path = Path(cfg.paths.cache_dir) / "http_cache"
 
     # Install global cache with per-URL TTLs; cache only GET
+    # Use JSON serializer to prevent insecure deserialization (pickle) vulnerabilities
     requests_cache.install_cache(
         cache_name=str(cache_path),
         backend=backend,
+        serializer="json",
         allowable_methods=("GET",),
         allowable_codes=cfg.caching.requests_cache.allowable_codes,
         stale_if_error=cfg.caching.requests_cache.stale_if_error,

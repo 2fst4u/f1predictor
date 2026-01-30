@@ -35,3 +35,8 @@
 **Vulnerability:** The `Content-Length` check in `http_get_json` intended to prevent downloading large files was ineffective. The `ValueError` raised when the size limit was exceeded was improperly caught by a `try-except` block designed to handle malformed headers, allowing large downloads to proceed.
 **Learning:** Exception handling for validation (like parsing integers) must be narrowly scoped. Catching exceptions too broadly (or catching the exception you just raised) can silently disable security controls.
 **Prevention:** Refactored the `try-except` block to only cover the integer conversion. The size limit check is now performed outside the `try` block to ensure the rejection exception propagates correctly.
+
+## 2026-05-25 - Insecure Deserialization in Cache
+**Vulnerability:** The default `sqlite` backend in `requests-cache` used `pickle` for serialization. If an attacker could modify the cache file (e.g., in a shared environment before permission hardening), they could achieve arbitrary code execution upon deserialization.
+**Learning:** Convenience libraries often default to Python-specific serialization (pickle) which is unsafe for untrusted data. Even with file permissions, this is a dangerous default.
+**Prevention:** Explicitly configured `serializer="json"` in `requests-cache` to enforce safe serialization. Also hardened directory permissions with `umask` to prevent race conditions during cache creation.
