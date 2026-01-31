@@ -26,6 +26,7 @@ import argparse
 from colorama import Fore, Style
 import sys
 import random
+import difflib
 from datetime import datetime
 
 from f1pred.config import load_config, AppConfig
@@ -114,13 +115,38 @@ def main() -> None:
 
     if args.sessions:
         valid_sessions = set(cfg.modelling.targets.session_types)
+        # 🎨 Palette: Map common aliases to canonical names
+        aliases = {
+            "q": "qualifying", "qual": "qualifying", "quali": "qualifying",
+            "r": "race", "gp": "race",
+            "s": "sprint",
+            "sq": "sprint_qualifying", "shootout": "sprint_qualifying", "sprint_quali": "sprint_qualifying"
+        }
+
+        normalized_sessions = []
         for s in args.sessions:
-            if s not in valid_sessions:
-                # Sentinel: Sanitize user input before printing to console
-                safe_s = sanitize_for_console(s)
-                print(f"{Fore.RED}✖ Invalid session '{safe_s}'.{Style.RESET_ALL}")
-                print(f"  Allowed types: {', '.join(sorted(valid_sessions))}")
-                return
+            s_lower = s.lower()
+            if s_lower in valid_sessions:
+                normalized_sessions.append(s_lower)
+                continue
+
+            if s_lower in aliases:
+                normalized_sessions.append(aliases[s_lower])
+                continue
+
+            # Invalid - try to find suggestion
+            # Sentinel: Sanitize user input before printing to console
+            safe_s = sanitize_for_console(s)
+            print(f"{Fore.RED}✖ Invalid session '{safe_s}'.{Style.RESET_ALL}")
+
+            suggestions = difflib.get_close_matches(s_lower, valid_sessions, n=1, cutoff=0.6)
+            if suggestions:
+                print(f"  Did you mean '{suggestions[0]}'?")
+
+            print(f"  Allowed types: {', '.join(sorted(valid_sessions))}")
+            return
+
+        args.sessions = normalized_sessions
 
     # Apply CLI overrides
     if args.refresh is not None:
