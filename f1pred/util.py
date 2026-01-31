@@ -20,6 +20,7 @@ colorama_init(autoreset=True)
 
 HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
+USER_AGENT = "f1predictor/1.1.0"
 
 
 def ensure_dirs(*paths: str) -> None:
@@ -177,6 +178,7 @@ def session_with_retries(
     - Reasonable pool sizes
     """
     s = requests.Session()
+    s.headers["User-Agent"] = USER_AGENT
     retries = Retry(
         total=total,
         connect=connect,
