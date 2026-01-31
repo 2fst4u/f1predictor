@@ -101,6 +101,24 @@ def _previous_completed_event_global(jc: JolpicaClient, season: int, upto_round:
       - If none: move to previous seasons, latest completed round.
     Returns (season, round) or None.
     """
+    # Optimization: Check global "latest" pointer to skip scanning future seasons/rounds
+    try:
+        last_s_str, last_r_str = jc.get_latest_season_and_round()
+        last_s, last_r = int(last_s_str), int(last_r_str)
+
+        # Case 1: Requested season is in the future relative to latest completed event
+        if season > last_s:
+            return last_s_str, last_r_str
+
+        # Case 2: Requested season IS the latest season
+        if season == last_s:
+            # If we want the latest in this season, or if our cutoff is beyond the latest
+            if upto_round is None or upto_round > last_r:
+                return last_s_str, last_r_str
+            # If upto_round <= last_r, we must search backwards as usual (might be gaps?)
+    except Exception as e:
+        logger.info(f"[roster] Optimization failed: {e}; falling back to full scan")
+
     # First, within the same season
     if upto_round is not None:
         prev_in_season = _previous_completed_round_in_season(jc, str(season), str(upto_round))
