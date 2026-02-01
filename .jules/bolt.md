@@ -41,3 +41,7 @@
 ## 2026-05-24 - Event-Level Caching
 **Learning:** When iterating over sub-components of a larger entity (e.g., sessions in an event), identifying data that is constant across the entity and lifting its retrieval out of the loop prevents redundant I/O and processing.
 **Action:** Identify constant data (like `roster` for an event) and fetch it once, passing it to sub-routines via an optional override argument to bypass redundant calculations.
+
+## 2026-05-25 - Numpy Datetime Arithmetic
+**Learning:** Computing date differences (ages) using pandas `.dt.days` accessor on a Series is significantly slower (~6x) than converting to numpy `datetime64[ns]` and performing direct arithmetic, due to pandas overhead.
+**Action:** For heavy date difference calculations, convert inputs to `datetime64[ns]` (e.g., `pd.Timestamp(ref).to_datetime64() - series.values`) and divide by nanoseconds per day/unit.
