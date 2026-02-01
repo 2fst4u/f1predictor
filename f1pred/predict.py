@@ -808,6 +808,36 @@ def _get_prob_color(value: float, is_dnf: bool = False) -> str:
     return Fore.YELLOW
 
 
+def _render_actual_pos(predicted: int, actual: int, width: int = 6) -> str:
+    """Render actual position with accuracy-based color coding and alignment."""
+    diff = abs(predicted - actual)
+
+    # Determine color and symbol
+    if diff == 0:
+        color = Fore.GREEN
+        symbol = "✓"
+    elif diff <= 2:
+        color = Fore.CYAN
+        symbol = ""
+    elif diff <= 5:
+        color = Fore.YELLOW
+        symbol = ""
+    else:
+        # For very poor predictions, use Red to highlight the discrepancy
+        color = Fore.RED
+        symbol = ""
+
+    num_str = str(actual)
+
+    # Calculate padding for right alignment
+    # Note: We assume '✓' takes 1 char width in the terminal.
+    content_len = len(num_str) + len(symbol)
+    padding = max(0, width - content_len)
+    pad_str = " " * padding
+
+    return f"{pad_str}{color}{Style.BRIGHT}{symbol}{num_str}{Style.RESET_ALL}"
+
+
 def print_session_console(
     df: pd.DataFrame,
     sess: str,
@@ -1043,7 +1073,7 @@ def print_session_console(
         # Actual classification display
         actual_pos = r.get("actual_position")
         if pd.notna(actual_pos):
-            classified_str = f"{Fore.CYAN}{Style.BRIGHT}{int(actual_pos):>6d}{Style.RESET_ALL}"
+            classified_str = _render_actual_pos(pos, int(actual_pos))
         else:
             classified_str = f"{Style.DIM}{'--':>6}{Style.RESET_ALL}"
         
