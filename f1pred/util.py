@@ -22,24 +22,28 @@ HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
 USER_AGENT = "f1predictor/1.1.0"
 
+_UMASK_LOCK = threading.Lock()
+
 
 def ensure_dirs(*paths: str) -> None:
     logger = logging.getLogger(__name__)
     # Set umask to 0o077 to ensure created directories have 0o700 permissions atomically.
     # This prevents a race condition where directories might briefly exist with wider permissions.
-    old_umask = os.umask(0o077)
-    try:
-        for p in paths:
-            path_obj = Path(p)
-            path_obj.mkdir(parents=True, exist_ok=True)
-            # Explicit chmod as a backup in case mkdir ignores umask (rare but possible)
-            # or if the directory already existed with wrong permissions.
-            try:
-                path_obj.chmod(0o700)
-            except Exception as e:
-                logger.warning(f"Failed to set secure permissions (0o700) on {p}: {e}. Cache may be insecure.")
-    finally:
-        os.umask(old_umask)
+    # Use a lock to ensure thread safety for the global process umask.
+    with _UMASK_LOCK:
+        old_umask = os.umask(0o077)
+        try:
+            for p in paths:
+                path_obj = Path(p)
+                path_obj.mkdir(parents=True, exist_ok=True)
+                # Explicit chmod as a backup in case mkdir ignores umask (rare but possible)
+                # or if the directory already existed with wrong permissions.
+                try:
+                    path_obj.chmod(0o700)
+                except Exception as e:
+                    logger.warning(f"Failed to set secure permissions (0o700) on {p}: {e}. Cache may be insecure.")
+        finally:
+            os.umask(old_umask)
 
 
 def sanitize_for_console(text: str) -> str:
