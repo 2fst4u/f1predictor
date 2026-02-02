@@ -907,6 +907,8 @@ def print_session_console(
         t = weather_info.get("temp_mean")
         r = weather_info.get("rain_sum")
         w = weather_info.get("wind_mean")
+        h = weather_info.get("humidity_mean")
+        c = weather_info.get("cloud_mean")
         
         # Check if weather data is valid (not NaN)
         import math
@@ -917,6 +919,17 @@ def print_session_console(
         
         if has_valid_weather:
             w_parts = []
+
+            # 1. Cloud Cover (Sky Condition)
+            if c is not None and not math.isnan(c):
+                if c < 20:
+                    w_parts.append(f"{Style.BRIGHT}☀️{Style.RESET_ALL}")
+                elif c < 60:
+                    w_parts.append(f"{Style.BRIGHT}🌤️{Style.RESET_ALL}")
+                else:
+                    w_parts.append(f"{Style.DIM}☁️{Style.RESET_ALL}")
+
+            # 2. Temperature
             # Color temp: cyan if cold (<15°C) for better readability, red if hot (>30°C), white otherwise
             if t < 15:
                 temp_color = Fore.CYAN
@@ -926,20 +939,25 @@ def print_session_console(
                 temp_color = Fore.RESET
             w_parts.append(f"{temp_color}🌡️ {t:.0f}°C{Style.RESET_ALL}")
             
+            # 3. Humidity (New)
+            if h is not None and not math.isnan(h):
+                w_parts.append(f"{Fore.BLUE}💧 {h:.0f}%{Style.RESET_ALL}")
+
+            # 4. Rain
             # Color rain: cyan if any rain
             rain_color = Fore.CYAN if r > 0 else Fore.RESET
-            # Hide rain if 0.0 to reduce clutter
             if r > 0:
                 w_parts.append(f"{rain_color}🌧️ {r:.1f}mm{Style.RESET_ALL}")
             else:
-                w_parts.append(f"{Style.DIM}☀️ Dry{Style.RESET_ALL}")
+                w_parts.append(f"{Style.DIM}Dry{Style.RESET_ALL}")
             
+            # 5. Wind
             if w is not None and not math.isnan(w):
                 # Color wind: yellow if strong (>20km/h)
                 wind_color = Fore.YELLOW if w > 20 else Fore.RESET
                 w_parts.append(f"{wind_color}💨 {w:.0f}km/h{Style.RESET_ALL}")
             
-            # Add wet indicator
+            # 6. Wet Indicator (Official Session Status)
             if is_wet:
                 w_parts.append(f"{Fore.CYAN}{Style.BRIGHT}☔ [WET]{Style.RESET_ALL}")
             
