@@ -259,6 +259,27 @@ def load_config(path: str) -> AppConfig:
     except KeyError as e:
         errors.append(str(e))
 
+    # Security Limits: Resource Exhaustion & DoS Protection
+    # Enforce safe limits on configuration values that affect resource usage
+    try:
+        # Monte Carlo draws: Limit memory usage (DoS)
+        mc_cfg = _require(cfg["modelling"], "monte_carlo", "modelling")
+        if "draws" in mc_cfg:
+            draws = mc_cfg["draws"]
+            if not isinstance(draws, int) or draws < 100 or draws > 100_000:
+                errors.append("modelling.monte_carlo.draws must be between 100 and 100,000 to prevent resource exhaustion")
+
+        # Live Refresh: Limit API call frequency (Abuse Prevention)
+        # Using cfg["app"] is safe here because top-level check passed
+        app_cfg = cfg["app"]
+        if "live_refresh_seconds" in app_cfg:
+            refresh = app_cfg["live_refresh_seconds"]
+            if not isinstance(refresh, int) or refresh < 10:
+                errors.append("app.live_refresh_seconds must be at least 10 seconds to prevent API abuse")
+
+    except KeyError as e:
+        errors.append(str(e))
+
     if errors:
         raise ValueError("Invalid config:\n- " + "\n- ".join(errors))
 
