@@ -110,7 +110,13 @@ def main() -> None:
         if not args.round.isdigit():
             # Sentinel: Sanitize user input before printing to console
             safe_round = sanitize_for_console(args.round)
-            print(f"{Fore.RED}✖ Invalid round '{safe_round}'.{Style.RESET_ALL} Please use 'next', 'last', or a round number.")
+            print(f"{Fore.RED}✖ Invalid round '{safe_round}'.{Style.RESET_ALL}")
+
+            suggestions = difflib.get_close_matches(args.round.lower(), ["next", "last"], n=1, cutoff=0.6)
+            if suggestions:
+                print(f"  Did you mean '{suggestions[0]}'?")
+
+            print("  Please use 'next', 'last', or a round number.")
             return
 
     if args.sessions:

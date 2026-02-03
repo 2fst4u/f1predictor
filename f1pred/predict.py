@@ -818,7 +818,7 @@ def _render_actual_pos(predicted: int, actual: int, width: int = 6) -> str:
         symbol = "✓"
     elif diff <= 2:
         color = Fore.CYAN
-        symbol = ""
+        symbol = "≈"
     elif diff <= 5:
         color = Fore.YELLOW
         symbol = ""
@@ -1116,4 +1116,4 @@ def print_session_console(
         print(row_str)
 
     # Print legend explaining abbreviations
-    print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, DNF=Retirement Prob, Actual=Official Result, Δ=Grid Delta{Style.RESET_ALL}")
+    print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, DNF=Retirement Prob, Actual=Result (✓=Exact, ≈=Close), Δ=Grid Delta{Style.RESET_ALL}")
