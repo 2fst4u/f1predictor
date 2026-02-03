@@ -3,6 +3,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import time
 import random
 from email.utils import parsedate_to_datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from requests import HTTPError
@@ -142,6 +143,52 @@ class JolpicaClient:
             raise ValueError(f"Invalid round: {repr(rnd)}")
         return r
 
+    def _fetch_paginated_parallel(
+        self,
+        path: str,
+        limit: int = 100,
+        max_workers: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch all pages of a resource in parallel.
+
+        Fetches offset=0 first to determine total count, then fetches remaining
+        offsets in parallel using a ThreadPoolExecutor.
+        """
+        # 1. Fetch first page
+        first_js = self._get(path, params={"limit": limit, "offset": 0})
+        mr = self._extract_mrdata(first_js)
+
+        results = [mr]
+
+        # Parse total safely
+        try:
+            total = int(mr.get("total", 0))
+        except (ValueError, TypeError):
+            total = 0
+
+        # 2. Fetch remaining pages if needed
+        if total > limit:
+            offsets = list(range(limit, total, limit))
+            logger.info(f"Fetching {len(offsets)} additional pages for {path} (total={total})")
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks
+                futures = [
+                    (o, executor.submit(self._get, path, params={"limit": limit, "offset": o}))
+                    for o in offsets
+                ]
+
+                # Collect results in order
+                for offset, future in futures:
+                    try:
+                        data = future.result()
+                        results.append(self._extract_mrdata(data))
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch page offset {offset} for {path}: {e}")
+
+        return results
+
     # Schedules and events
 
     def get_season_schedule(self, season: str) -> List[Dict[str, Any]]:
@@ -229,21 +276,11 @@ class JolpicaClient:
         """All race results for a season across all rounds (paginated)."""
         season = self._validate_season(season)
         all_races: Dict[str, Dict[str, Any]] = {}  # round -> race dict
-        offset = 0
-        limit = 100  # API-enforced limit
-        pages_fetched = 0
         
-        while True:
-            if pages_fetched >= self.MAX_PAGINATION_PAGES:
-                logger.warning(f"JolpicaClient: race results pagination limit ({self.MAX_PAGINATION_PAGES}) reached for {season}")
-                break
+        pages = self._fetch_paginated_parallel(f"{season}/results.json")
 
-            js = self._get(f"{season}/results.json", params={"limit": limit, "offset": offset})
-            mr = self._extract_mrdata(js)
+        for mr in pages:
             races = mr.get("RaceTable", {}).get("Races", []) or []
-            pages_fetched += 1
-            
-            # Merge results into existing race dicts (API may split results across pages)
             for r in races:
                 rnd = str(r.get("round"))
                 if rnd not in all_races:
@@ -253,11 +290,6 @@ class JolpicaClient:
                     existing = all_races[rnd].get("Results", []) or []
                     new_results = r.get("Results", []) or []
                     all_races[rnd]["Results"] = existing + new_results
-            
-            total = int(mr.get("total", 0))
-            offset += limit
-            if offset >= total or not races:
-                break
         
         return list(all_races.values())
 
@@ -265,20 +297,11 @@ class JolpicaClient:
         """All qualifying results for a season across all rounds (paginated)."""
         season = self._validate_season(season)
         all_races: Dict[str, Dict[str, Any]] = {}
-        offset = 0
-        limit = 100
-        pages_fetched = 0
         
-        while True:
-            if pages_fetched >= self.MAX_PAGINATION_PAGES:
-                logger.warning(f"JolpicaClient: qualifying results pagination limit ({self.MAX_PAGINATION_PAGES}) reached for {season}")
-                break
+        pages = self._fetch_paginated_parallel(f"{season}/qualifying.json")
 
-            js = self._get(f"{season}/qualifying.json", params={"limit": limit, "offset": offset})
-            mr = self._extract_mrdata(js)
+        for mr in pages:
             races = mr.get("RaceTable", {}).get("Races", []) or []
-            pages_fetched += 1
-            
             for r in races:
                 rnd = str(r.get("round"))
                 if rnd not in all_races:
@@ -287,11 +310,6 @@ class JolpicaClient:
                     existing = all_races[rnd].get("QualifyingResults", []) or []
                     new_results = r.get("QualifyingResults", []) or []
                     all_races[rnd]["QualifyingResults"] = existing + new_results
-            
-            total = int(mr.get("total", 0))
-            offset += limit
-            if offset >= total or not races:
-                break
         
         return list(all_races.values())
 
@@ -299,20 +317,11 @@ class JolpicaClient:
         """All sprint results for a season across all rounds (paginated)."""
         season = self._validate_season(season)
         all_races: Dict[str, Dict[str, Any]] = {}
-        offset = 0
-        limit = 100
-        pages_fetched = 0
         
-        while True:
-            if pages_fetched >= self.MAX_PAGINATION_PAGES:
-                logger.warning(f"JolpicaClient: sprint results pagination limit ({self.MAX_PAGINATION_PAGES}) reached for {season}")
-                break
+        pages = self._fetch_paginated_parallel(f"{season}/sprint.json")
 
-            js = self._get(f"{season}/sprint.json", params={"limit": limit, "offset": offset})
-            mr = self._extract_mrdata(js)
+        for mr in pages:
             races = mr.get("RaceTable", {}).get("Races", []) or []
-            pages_fetched += 1
-            
             for r in races:
                 rnd = str(r.get("round"))
                 if rnd not in all_races:
@@ -321,10 +330,5 @@ class JolpicaClient:
                     existing = all_races[rnd].get("SprintResults", []) or []
                     new_results = r.get("SprintResults", []) or []
                     all_races[rnd]["SprintResults"] = existing + new_results
-            
-            total = int(mr.get("total", 0))
-            offset += limit
-            if offset >= total or not races:
-                break
         
         return list(all_races.values())
