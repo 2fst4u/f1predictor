@@ -21,6 +21,9 @@ class JolpicaClient:
     - Exponential backoff with Retry-After support for HTTP 429.
     """
 
+    # Sentinel: Limit pagination to prevent DoS via infinite loops or huge datasets
+    MAX_PAGINATION_PAGES = 20
+
     def __init__(self, base_url: str, timeout: int = 30, rate_limit_sleep: float = 0.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
