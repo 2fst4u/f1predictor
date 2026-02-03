@@ -20,6 +20,9 @@ class JolpicaClient:
     - Exponential backoff with Retry-After support for HTTP 429.
     """
 
+    # Sentinel: Limit pagination to prevent DoS via infinite loops or huge datasets
+    MAX_PAGINATION_PAGES = 20
+
     def __init__(self, base_url: str, timeout: int = 30, rate_limit_sleep: float = 0.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -228,11 +231,17 @@ class JolpicaClient:
         all_races: Dict[str, Dict[str, Any]] = {}  # round -> race dict
         offset = 0
         limit = 100  # API-enforced limit
+        pages_fetched = 0
         
         while True:
+            if pages_fetched >= self.MAX_PAGINATION_PAGES:
+                logger.warning(f"JolpicaClient: race results pagination limit ({self.MAX_PAGINATION_PAGES}) reached for {season}")
+                break
+
             js = self._get(f"{season}/results.json", params={"limit": limit, "offset": offset})
             mr = self._extract_mrdata(js)
             races = mr.get("RaceTable", {}).get("Races", []) or []
+            pages_fetched += 1
             
             # Merge results into existing race dicts (API may split results across pages)
             for r in races:
@@ -258,11 +267,17 @@ class JolpicaClient:
         all_races: Dict[str, Dict[str, Any]] = {}
         offset = 0
         limit = 100
+        pages_fetched = 0
         
         while True:
+            if pages_fetched >= self.MAX_PAGINATION_PAGES:
+                logger.warning(f"JolpicaClient: qualifying results pagination limit ({self.MAX_PAGINATION_PAGES}) reached for {season}")
+                break
+
             js = self._get(f"{season}/qualifying.json", params={"limit": limit, "offset": offset})
             mr = self._extract_mrdata(js)
             races = mr.get("RaceTable", {}).get("Races", []) or []
+            pages_fetched += 1
             
             for r in races:
                 rnd = str(r.get("round"))
@@ -286,11 +301,17 @@ class JolpicaClient:
         all_races: Dict[str, Dict[str, Any]] = {}
         offset = 0
         limit = 100
+        pages_fetched = 0
         
         while True:
+            if pages_fetched >= self.MAX_PAGINATION_PAGES:
+                logger.warning(f"JolpicaClient: sprint results pagination limit ({self.MAX_PAGINATION_PAGES}) reached for {season}")
+                break
+
             js = self._get(f"{season}/sprint.json", params={"limit": limit, "offset": offset})
             mr = self._extract_mrdata(js)
             races = mr.get("RaceTable", {}).get("Races", []) or []
+            pages_fetched += 1
             
             for r in races:
                 rnd = str(r.get("round"))
