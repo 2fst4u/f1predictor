@@ -45,3 +45,11 @@
 ## 2026-05-25 - Numpy Datetime Arithmetic
 **Learning:** Computing date differences (ages) using pandas `.dt.days` accessor on a Series is significantly slower (~6x) than converting to numpy `datetime64[ns]` and performing direct arithmetic, due to pandas overhead.
 **Action:** For heavy date difference calculations, convert inputs to `datetime64[ns]` (e.g., `pd.Timestamp(ref).to_datetime64() - series.values`) and divide by nanoseconds per day/unit.
+
+## 2026-05-26 - Redundant Data Fetching & Leakage Fix
+**Learning:** `build_session_features` and `run_predictions_for_event` were both fetching historical results separately, with inconsistent `end_before` timestamps (`+1s` vs exact). The `+1s` could potentially leak the current event's result during backtesting if timestamps matched exactly.
+**Action:** Consolidate data fetching into `build_session_features`, return the data for reuse, and enforce strict `end_before` (exclusive) to prevent leakage and improve performance (eliminating ~0.5s-2s of redundant work per session).
+
+## 2026-05-26 - Pagination DoS Protection Regression
+**Learning:** The parallel pagination implementation `_fetch_paginated_parallel` lacked the `MAX_PAGINATION_PAGES` check present in the synchronous version, exposing the application to DoS via infinite or massive pagination.
+**Action:** Always re-implement security constraints (like loop bounds) when optimizing loops or parallelizing operations.

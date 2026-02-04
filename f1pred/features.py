@@ -825,7 +825,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
                            season: int, rnd: int, session_type: str,
                            ref_date: datetime,
                            cfg, extra_history: Optional[pd.DataFrame] = None,
-                           roster_override: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
+                           roster_override: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame, pd.DataFrame]:
     logger.info(f"[features] Fetching schedule for {season} R{rnd}")
     t_all = time.time()
 
@@ -840,7 +840,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
                 "lat": None, "lon": None, "session_start": ref_date, "session_end": ref_date + timedelta(hours=2),
                 "weather": {}
             }
-            return _empty_feature_frame(), meta, pd.DataFrame(columns=["driverId", "constructorId", "name"])
+            return _empty_feature_frame(), meta, pd.DataFrame(columns=["driverId", "constructorId", "name"]), pd.DataFrame()
         race_info = sched_row[0]
         cir = race_info.get("Circuit", {})
         loc = cir.get("Location", {})
@@ -853,7 +853,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             "lat": None, "lon": None, "session_start": ref_date, "session_end": ref_date + timedelta(hours=2),
             "weather": {}
         }
-        return _empty_feature_frame(), meta, pd.DataFrame(columns=["driverId", "constructorId", "name"])
+        return _empty_feature_frame(), meta, pd.DataFrame(columns=["driverId", "constructorId", "name"]), pd.DataFrame()
 
     # Session timing (FastF1 attempt, then default)
     start_dt = ref_date
@@ -942,7 +942,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
     t3 = time.time()
     try:
         roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
-        hist = collect_historical_results(jc, season=season, end_before=ref_date + timedelta(seconds=1),
+        hist = collect_historical_results(jc, season=season, end_before=ref_date,
                                           lookback_years=75, roster_driver_ids=roster_ids,
                                           cache_dir=cfg.paths.cache_dir)
         
@@ -1173,4 +1173,4 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         "session_end": end_dt,
         "weather": wagg,
     }
-    return X, meta, roster
+    return X, meta, roster, hist

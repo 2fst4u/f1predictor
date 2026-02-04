@@ -169,6 +169,12 @@ class JolpicaClient:
 
         # 2. Fetch remaining pages if needed
         if total > limit:
+            # Enforce max pages limit for safety
+            max_items = limit * self.MAX_PAGINATION_PAGES
+            if total > max_items:
+                logger.warning(f"Pagination limit reached for {path}: total={total}, capping at {max_items}")
+                total = max_items
+
             offsets = list(range(limit, total, limit))
             logger.info(f"Fetching {len(offsets)} additional pages for {path} (total={total})")
 

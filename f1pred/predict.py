@@ -236,12 +236,13 @@ def _run_single_prediction(
     from .features import build_session_features, collect_historical_results
     
     # Build features (or use override)
+    hist = None
     if X_override is not None:
         X = X_override.copy()
         roster = X_override.copy()
         meta = {}
     else:
-        X, meta, roster = build_session_features(jc, om, season_i, round_i, sess, ref_date, cfg)
+        X, meta, roster, hist = build_session_features(jc, om, season_i, round_i, sess, ref_date, cfg)
     
     if X is None or roster is None or X.empty or roster.empty:
         return None
@@ -260,14 +261,15 @@ def _run_single_prediction(
         pass
     
     # Historical results for ensemble models
-    roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
-    hist = collect_historical_results(
-        jc,
-        season=season_i,
-        end_before=ref_date,
-        lookback_years=75,
-        roster_driver_ids=roster_ids,
-    )
+    if hist is None:
+        roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
+        hist = collect_historical_results(
+            jc,
+            season=season_i,
+            end_before=ref_date,
+            lookback_years=75,
+            roster_driver_ids=roster_ids,
+        )
     
     # Ensemble skill components
     elo_pace = bt_pace = mixed_pace = None
@@ -437,7 +439,7 @@ def run_predictions_for_event(
                 extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
 
                 spinner.update(f"Predicting {event_title} - {sess}: Building features...")
-                X, meta, roster = build_session_features(
+                X, meta, roster, hist = build_session_features(
                     jc, om, season_i, round_i, sess, ref_date, cfg,
                     extra_history=extra_hist_df,
                     roster_override=cached_roster
@@ -536,13 +538,6 @@ def run_predictions_for_event(
 
                 # Historical results for this roster
                 roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
-                hist = collect_historical_results(
-                    jc,
-                    season=season_i,
-                    end_before=ref_date,
-                    lookback_years=75,
-                    roster_driver_ids=roster_ids,
-                )
 
                 # --- Ensemble skill components (all data-driven) ---
                 spinner.update(f"Predicting {event_title} - {sess}: Running ensemble models...")
