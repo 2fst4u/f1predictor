@@ -4,7 +4,7 @@ import time
 
 from colorama import Fore, Style
 
-from .util import get_logger
+from .util import get_logger, print_countdown
 from .data.jolpica import JolpicaClient
 from .predict import run_predictions_for_event, resolve_event
 
@@ -29,4 +29,4 @@ def live_loop(cfg, season: Optional[str], rnd: str, sessions: List[str]) -> None
             sessions=sessions,
         )
 
-        time.sleep(refresh)
+        print_countdown(refresh, "Next update in")

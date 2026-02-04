@@ -347,3 +347,30 @@ class StatusSpinner:
             print(f"{Fore.YELLOW}⚠{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
         else:
             print(f"{Fore.GREEN}✔{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
+
+def print_countdown(seconds: int, message: str = "Refreshing in") -> None:
+    """
+    Display a countdown timer on the same line.
+    Falls back to simple sleep if not a TTY.
+    """
+    if not sys.stdout.isatty():
+        time.sleep(seconds)
+        return
+
+    # Hide cursor
+    sys.stdout.write(HIDE_CURSOR)
+    sys.stdout.flush()
+
+    try:
+        for i in range(seconds, 0, -1):
+            sys.stdout.write(f"\r{Style.DIM}↻ {message} {i}s...{Style.RESET_ALL}\033[K")
+            sys.stdout.flush()
+            time.sleep(1)
+
+        # Clear line on finish
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+    finally:
+        # Restore cursor
+        sys.stdout.write(SHOW_CURSOR)
+        sys.stdout.flush()
