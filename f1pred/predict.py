@@ -929,15 +929,26 @@ def print_session_console(
                 else:
                     w_parts.append(f"{Style.DIM}☁️{Style.RESET_ALL}")
 
+            # Determine units from config
+            temp_unit_cfg = cfg.data_sources.open_meteo.temperature_unit
+            wind_unit_cfg = cfg.data_sources.open_meteo.windspeed_unit
+            precip_unit_cfg = cfg.data_sources.open_meteo.precipitation_unit
+
+            temp_label = {"celsius": "°C", "fahrenheit": "°F"}.get(temp_unit_cfg, "°C")
+            wind_label = {"kmh": "km/h", "ms": "m/s", "mph": "mph", "kn": "kn"}.get(wind_unit_cfg, "km/h")
+            precip_label = {"mm": "mm", "inch": "in"}.get(precip_unit_cfg, "mm")
+
             # 2. Temperature
             # Color temp: cyan if cold (<15°C) for better readability, red if hot (>30°C), white otherwise
-            if t < 15:
+            # normalize to celsius for coloring threshold
+            t_celsius = t if temp_unit_cfg == "celsius" else (t - 32) * 5/9
+            if t_celsius < 15:
                 temp_color = Fore.CYAN
-            elif t > 30:
+            elif t_celsius > 30:
                 temp_color = Fore.RED
             else:
                 temp_color = Fore.RESET
-            w_parts.append(f"{temp_color}🌡️ {t:.0f}°C{Style.RESET_ALL}")
+            w_parts.append(f"{temp_color}🌡️ {t:.0f}{temp_label}{Style.RESET_ALL}")
             
             # 3. Humidity (New)
             if h is not None and not math.isnan(h):
@@ -947,15 +958,21 @@ def print_session_console(
             # Color rain: cyan if any rain
             rain_color = Fore.CYAN if r > 0 else Fore.RESET
             if r > 0:
-                w_parts.append(f"{rain_color}🌧️ {r:.1f}mm{Style.RESET_ALL}")
+                w_parts.append(f"{rain_color}🌧️ {r:.1f}{precip_label}{Style.RESET_ALL}")
             else:
                 w_parts.append(f"{Style.DIM}Dry{Style.RESET_ALL}")
             
             # 5. Wind
             if w is not None and not math.isnan(w):
                 # Color wind: yellow if strong (>20km/h)
-                wind_color = Fore.YELLOW if w > 20 else Fore.RESET
-                w_parts.append(f"{wind_color}💨 {w:.0f}km/h{Style.RESET_ALL}")
+                # normalize to kmh for coloring threshold
+                w_kmh = w
+                if wind_unit_cfg == "ms": w_kmh = w * 3.6
+                elif wind_unit_cfg == "mph": w_kmh = w * 1.60934
+                elif wind_unit_cfg == "kn": w_kmh = w * 1.852
+
+                wind_color = Fore.YELLOW if w_kmh > 20 else Fore.RESET
+                w_parts.append(f"{wind_color}💨 {w:.0f}{wind_label}{Style.RESET_ALL}")
             
             # 6. Wet Indicator (Official Session Status)
             if is_wet:
