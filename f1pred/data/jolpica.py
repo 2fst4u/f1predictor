@@ -170,6 +170,15 @@ class JolpicaClient:
         # 2. Fetch remaining pages if needed
         if total > limit:
             offsets = list(range(limit, total, limit))
+
+            # Sentinel: Enforce pagination limit to prevent DoS
+            if len(offsets) > self.MAX_PAGINATION_PAGES:
+                logger.warning(
+                    f"Pagination limit exceeded for {path} (total={total}, pages={len(offsets)}). "
+                    f"Truncating to first {self.MAX_PAGINATION_PAGES} pages."
+                )
+                offsets = offsets[:self.MAX_PAGINATION_PAGES]
+
             logger.info(f"Fetching {len(offsets)} additional pages for {path} (total={total})")
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
