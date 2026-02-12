@@ -808,6 +808,38 @@ def _get_prob_color(value: float, is_dnf: bool = False) -> str:
     return Fore.YELLOW
 
 
+def _get_team_color(team_name: str) -> str:
+    """Return colorama color based on team name."""
+    if not team_name:
+        return Style.DIM
+
+    t = team_name.lower()
+
+    # Ferrari (Red)
+    if "ferrari" in t: return Fore.RED
+
+    # Red Bull / RB / AlphaTauri (Blue)
+    if "red bull" in t: return Fore.BLUE
+    if "rb" in t or "alpha" in t: return Fore.BLUE
+    if "alpine" in t: return Fore.MAGENTA  # Pink/Blue mix
+    if "williams" in t: return Fore.BLUE + Style.BRIGHT
+
+    # Mercedes (Cyan/Silver)
+    if "mercedes" in t: return Fore.CYAN
+
+    # McLaren (Yellow/Orange)
+    if "mclaren" in t: return Fore.YELLOW
+
+    # Aston Martin (Green)
+    if "aston martin" in t: return Fore.GREEN
+    if "kick" in t or "sauber" in t: return Fore.GREEN + Style.BRIGHT
+
+    # Haas (White)
+    if "haas" in t: return Fore.WHITE
+
+    return Style.DIM
+
+
 def _render_actual_pos(predicted: int, actual: int, width: int = 6) -> str:
     """Render actual position with accuracy-based color coding and alignment."""
     diff = abs(predicted - actual)
@@ -1113,11 +1145,12 @@ def print_session_console(
             classified_str = f"{Style.DIM}{'--':>6}{Style.RESET_ALL}"
         
         # Print row
+        team_color = _get_team_color(r.get("constructorName") or "")
         row_str = (
             f"{Fore.YELLOW}{pos:>3}.{Style.RESET_ALL}  "
             f"{Style.BRIGHT}{code:<4}{Style.RESET_ALL}  "
             f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
-            f"{Style.DIM}[{team:<{max_team}}]{Style.RESET_ALL}   "
+            f"{team_color}[{team:<{max_team}}]{Style.RESET_ALL}   "
         )
 
         if has_grid:
