@@ -840,6 +840,17 @@ def _get_team_color(team_name: str) -> str:
     return Style.DIM
 
 
+def _get_pos_color(pos: int) -> str:
+    """Return color code based on predicted position (Gold/Silver/Bronze for Top 3)."""
+    if pos == 1:
+        return Fore.YELLOW + Style.BRIGHT  # Gold
+    if pos == 2:
+        return Fore.WHITE + Style.BRIGHT   # Silver
+    if pos == 3:
+        return Fore.MAGENTA + Style.BRIGHT # Bronze
+    return Fore.RESET + Style.DIM          # Others
+
+
 def _render_actual_pos(predicted: int, actual: int, width: int = 6) -> str:
     """Render actual position with accuracy-based color coding and alignment."""
     diff = abs(predicted - actual)
@@ -1146,8 +1157,9 @@ def print_session_console(
         
         # Print row
         team_color = _get_team_color(r.get("constructorName") or "")
+        pos_color = _get_pos_color(pos)
         row_str = (
-            f"{Fore.YELLOW}{pos:>3}.{Style.RESET_ALL}  "
+            f"{pos_color}{pos:>3}.{Style.RESET_ALL}  "
             f"{Style.BRIGHT}{code:<4}{Style.RESET_ALL}  "
             f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
             f"{team_color}[{team:<{max_team}}]{Style.RESET_ALL}   "

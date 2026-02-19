@@ -9,3 +9,7 @@
 ## 2026-02-09 - Environmental Context Scannability
 **Learning:** Adding visual icons (☀️, ☁️, 💧) for environmental conditions in the CLI allows users to scan race context much faster than text alone.
 **Action:** Use specific, recognizable emoji for key environmental variables alongside numerical data to improve "at a glance" readability.
+
+## 2026-02-15 - Visual Hierarchy in Rankings
+**Learning:** For ranked lists, color-coding the top positions (Gold/Silver/Bronze) provides immediate visual structure and celebrates success without needing cluttered icons or emojis.
+**Action:** Use distinct colors for top 3 items in any ranked list to guide the eye.
