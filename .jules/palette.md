@@ -6,6 +6,18 @@
 **Learning:** For CLI tools, strict input validation with friendly error messages is better than silent fallback to default values, especially for explicit arguments. Silent fallbacks can confuse users who think they are getting results for their specific (invalid) input.
 **Action:** Validate CLI arguments early and provide specific, actionable error messages with color coding (Red for errors) to guide the user.
 
+## 2026-02-09 - Environmental Context Scannability
+**Learning:** Adding visual icons (☀️, ☁️, 💧) for environmental conditions in the CLI allows users to scan race context much faster than text alone.
+**Action:** Use specific, recognizable emoji for key environmental variables alongside numerical data to improve "at a glance" readability.
+
+## 2026-02-14 - Rejected: Medal Emojis in CLI Tables
+**Learning:** While emojis can add delight, using them for data fields like "Position" (🥇, 🥈, 🥉) can be controversial. For this user/project, standard numeric formatting is preferred for clarity and consistency.
+**Action:** Avoid replacing numeric rankings with emojis in this project.
+
+## 2026-02-15 - Visual Hierarchy in Rankings
+**Learning:** For ranked lists, color-coding the top positions (Gold/Silver/Bronze) provides immediate visual structure and celebrates success without needing cluttered icons or emojis.
+**Action:** Use distinct colors for top 3 items in any ranked list to guide the eye.
+
 ## 2025-05-24 - CLI Visual Hierarchy with Dimming
 **Learning:** In CLI applications, using `Style.DIM` for "empty" or inactive parts of a visualization (like the remaining part of a progress bar) creates a cleaner visual hierarchy than using full-brightness characters or spaces. It allows the active data to pop without losing the context of the scale.
 **Action:** Use `Style.DIM` for background elements, empty state markers, and secondary information in console output to reduce visual clutter.
@@ -25,10 +37,6 @@
 ## 2026-01-24 - Feature Discovery via Exit Tips
 **Learning:** Users often stick to default commands and miss advanced features like `--live` or `--backtest`. Displaying a random "Pro Tip" at the end of a CLI run significantly improves feature discovery without being intrusive.
 **Action:** Add a contextual or random tip footer to CLI applications to guide users to advanced workflows.
-
-## 2026-02-14 - Rejected: Medal Emojis in CLI Tables
-**Learning:** While emojis can add delight, using them for data fields like "Position" (🥇, 🥈, 🥉) can be controversial. For this user/project, standard numeric formatting is preferred for clarity and consistency.
-**Action:** Avoid replacing numeric rankings with emojis in this project.
 
 ## 2026-05-24 - CLI Table Column Clarity
 **Learning:** In prediction tables where rows are ranked by prediction (implicit position), a column labeled "Pos" for the *actual/result* position is ambiguous and confusing. Users may confuse the row index with the result column.
