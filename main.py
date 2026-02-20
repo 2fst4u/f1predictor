@@ -50,7 +50,7 @@ def _print_random_tip() -> None:
         "See --help for a full list of commands and examples.",
     ]
     tip = random.choice(tips)
-    print(f"\n{Style.DIM}💡 Tip: {tip}{Style.RESET_ALL}")
+    print(f"\n{Style.DIM}* Tip: {tip}{Style.RESET_ALL}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -97,20 +97,20 @@ def main() -> None:
         if not args.season.isdigit() or len(args.season) != 4:
             # Sentinel: Sanitize user input before printing to console
             safe_season = sanitize_for_console(args.season)
-            print(f"{Fore.RED}✖ Invalid season '{safe_season}'.{Style.RESET_ALL} Please use 'current' or a 4-digit year (e.g. {current_year}).")
+            print(f"{Fore.RED}x Invalid season '{safe_season}'.{Style.RESET_ALL} Please use 'current' or a 4-digit year (e.g. {current_year}).")
             return
 
         season_year = int(args.season)
         if season_year < 1950 or season_year > current_year + 1:
             safe_season = sanitize_for_console(args.season)
-            print(f"{Fore.RED}✖ Invalid season '{safe_season}'.{Style.RESET_ALL} F1 data is available from 1950 to {current_year + 1}.")
+            print(f"{Fore.RED}x Invalid season '{safe_season}'.{Style.RESET_ALL} F1 data is available from 1950 to {current_year + 1}.")
             return
 
     if args.round and args.round not in ("next", "last"):
         if not args.round.isdigit():
             # Sentinel: Sanitize user input before printing to console
             safe_round = sanitize_for_console(args.round)
-            print(f"{Fore.RED}✖ Invalid round '{safe_round}'.{Style.RESET_ALL}")
+            print(f"{Fore.RED}x Invalid round '{safe_round}'.{Style.RESET_ALL}")
 
             suggestions = difflib.get_close_matches(args.round.lower(), ["next", "last"], n=1, cutoff=0.6)
             if suggestions:
@@ -143,7 +143,7 @@ def main() -> None:
             # Invalid - try to find suggestion
             # Sentinel: Sanitize user input before printing to console
             safe_s = sanitize_for_console(s)
-            print(f"{Fore.RED}✖ Invalid session '{safe_s}'.{Style.RESET_ALL}")
+            print(f"{Fore.RED}x Invalid session '{safe_s}'.{Style.RESET_ALL}")
 
             suggestions = difflib.get_close_matches(s_lower, valid_sessions, n=1, cutoff=0.6)
             if suggestions:
@@ -202,6 +202,6 @@ if __name__ == "__main__":
         # Catch-all for cleaner error output
         # Sentinel: Sanitize exception message to prevent log injection/terminal spoofing
         safe_msg = sanitize_for_console(str(e))
-        print(f"\n{Fore.RED}✖ An unexpected error occurred:{Style.RESET_ALL} {safe_msg}")
+        print(f"\n{Fore.RED}x An unexpected error occurred:{Style.RESET_ALL} {safe_msg}")
         print(f"{Style.DIM}Run with --log-level debug for more details.{Style.RESET_ALL}")
         sys.exit(1)

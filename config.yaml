@@ -78,6 +78,12 @@ modelling:
     w_gbm: 0.4
     min_std: 0.05
 
+calibration:
+  enabled: true
+  lookback_window_days: 1095  # 3 years
+  frequency_hours: 24
+  weights_file: "calibration_weights.json"
+
 backtesting:
   enabled: true
   seasons: "auto"

@@ -279,6 +279,55 @@ class JolpicaClient:
         mr = self._extract_mrdata(js)
         return mr.get("StandingsTable", {}) or {}
 
+    def get_season_entry_list(self, season: str, max_workers: int = 5) -> List[Dict[str, Any]]:
+        """
+        Build a season entry list by fetching all drivers and then querying their constructor.
+        Returns a list of dicts consistent with _entries_from_results.
+        """
+        try:
+            drivers = self.get_drivers_for_season(season)
+            if not drivers:
+                return []
+            
+            # Helper to fetch constructor for a single driver
+            def _fetch_team(drv: Dict) -> Dict:
+                did = drv.get("driverId")
+                if not did:
+                    return {}
+                try:
+                    # Endpoint: /<season>/drivers/<id>/constructors.json
+                    js = self._get(f"{season}/drivers/{did}/constructors.json")
+                    mr = self._extract_mrdata(js)
+                    ctable = mr.get("ConstructorTable", {})
+                    # We assume the first constructor is the current one for this season context
+                    cons = ctable.get("Constructors", [])
+                    return {
+                        "Driver": drv,
+                        "Constructor": cons[0] if cons else {}
+                    }
+                except Exception as e:
+                    logger.warning(f"Failed to fetch team for driver {did}: {e}")
+                    return {"Driver": drv, "Constructor": {}}
+
+            entries = []
+            logger.info(f"Fetching teams for {len(drivers)} drivers in season {season}")
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_fetch_team, d): d for d in drivers}
+                for future in as_completed(futures):
+                    try:
+                        result = future.result()
+                        if result:
+                            entries.append(result)
+                    except Exception:
+                        pass
+            
+            return entries
+
+        except Exception as e:
+            logger.error(f"Failed to build season entry list for {season}: {e}")
+            return []
+
     # Bulk season endpoints (reduce calls and 429s)
 
     def get_season_race_results(self, season: str) -> List[Dict[str, Any]]:

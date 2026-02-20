@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict
 
+from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
@@ -110,7 +111,7 @@ class BradleyTerryModel:
     def __init__(self) -> None:
         self.strength_: Dict[str, float] = {}
 
-    def fit(self, hist: pd.DataFrame) -> "BradleyTerryModel":
+    def fit(self, hist: pd.DataFrame, half_life_days: float = 365.0) -> "BradleyTerryModel":
         if hist is None or hist.empty:
             logger.info("[ensemble.bt] No history; using flat strength")
             return self
@@ -120,11 +121,40 @@ class BradleyTerryModel:
             logger.info("[ensemble.bt] No race rows; skipping BT fit")
             return self
 
-        grp = races.groupby("driverId")["position"].mean()
-        max_pos = float(grp.max() or 1.0)
-        for d, avg_pos in grp.items():
-            # smaller average position => higher strength in [0, 1]
-            self.strength_[str(d)] = (max_pos - float(avg_pos)) / max_pos
+        # Calculate weights based on recency
+        ref_date = hist["date"].max()
+        if pd.isna(ref_date):
+            ref_date = datetime.now()
+            
+        # We need to compute weights. 
+        # Since we want to use the utility function from features, we might need to import it or duplicate logic.
+        # To avoid circular imports (features imports ensemble?), let's duplicate the simple decay.
+        
+        # Simple weighted average position
+        # w = 2^(-age_days / half_life)
+        
+        # Ensure date column is datetime
+        dates = pd.to_datetime(races["date"], utc=True)
+        ref_ts = pd.Timestamp(ref_date).tz_convert(timezone.utc)
+        
+        ages = (ref_ts - dates).dt.total_seconds() / 86400.0
+        w = np.exp2(-ages / max(1.0, half_life_days))
+        
+        races["w"] = w
+        races["weighted_pos"] = races["position"] * w
+        
+        # Weighted mean: sum(pos * w) / sum(w)
+        grp = races.groupby("driverId").agg(
+            w_pos_sum=("weighted_pos", "sum"),
+            w_sum=("w", "sum")
+        )
+        
+        max_pos = float(races["position"].max() or 20.0)
+        
+        for d, row in grp.iterrows():
+            w_mean = row["w_pos_sum"] / max(1e-6, row["w_sum"])
+            # smaller average position => higher strength
+            self.strength_[str(d)] = (max_pos - float(w_mean)) / max_pos
 
         logger.info("[ensemble.bt] Inferred strengths for %d drivers", len(self.strength_))
         return self
@@ -167,7 +197,7 @@ class MixedEffectsLikeModel:
         self.driver_effect_: Dict[str, float] = {}
         self.team_effect_: Dict[str, float] = {}
 
-    def fit(self, hist: pd.DataFrame) -> "MixedEffectsLikeModel":
+    def fit(self, hist: pd.DataFrame, half_life_days: float = 365.0) -> "MixedEffectsLikeModel":
         if hist is None or hist.empty:
             logger.info("[ensemble.mixed] No history; using flat effects")
             return self
@@ -180,15 +210,45 @@ class MixedEffectsLikeModel:
             return self
 
         races["perf"] = -races["position"].astype(float)
-        mu = float(races["perf"].mean())
-
-        team_mu = races.groupby("constructorId")["perf"].mean()
+        
+        # Calculate weights based on recency
+        ref_date = hist["date"].max()
+        if pd.isna(ref_date):
+            ref_date = datetime.now()
+            
+        dates = pd.to_datetime(races["date"], utc=True)
+        ref_ts = pd.Timestamp(ref_date).tz_convert(timezone.utc)
+        ages = (ref_ts - dates).dt.total_seconds() / 86400.0
+        w = np.exp2(-ages / max(1.0, half_life_days))
+        races["w"] = w
+        
+        # Weighted Global Mean
+        mu = float(np.average(races["perf"], weights=races["w"]))
+        
+        # Weighted Team Effect
+        # team_eff = weighted_mean(perf) - mu
+        # We need to group by team and calculate weighted mean
+        
+        races["w_perf"] = races["perf"] * races["w"]
+        team_grp = races.groupby("constructorId").agg(
+            w_perf_sum=("w_perf", "sum"),
+            w_sum=("w", "sum")
+        )
+        team_mu = team_grp["w_perf_sum"] / team_grp["w_sum"].clip(lower=1e-6)
+        
         team_eff = team_mu - mu
         races = races.join(team_eff.rename("team_eff"), on="constructorId")
         races["team_eff"] = races["team_eff"].fillna(0.0)
 
         races["driver_resid"] = races["perf"] - mu - races["team_eff"]
-        drv_mu = races.groupby("driverId")["driver_resid"].mean()
+        
+        # Weighted Driver Effect
+        races["w_resid"] = races["driver_resid"] * races["w"]
+        drv_grp = races.groupby("driverId").agg(
+            w_resid_sum=("w_resid", "sum"),
+            w_sum=("w", "sum")
+        )
+        drv_mu = drv_grp["w_resid_sum"] / drv_grp["w_sum"].clip(lower=1e-6)
 
         self.team_effect_ = {str(k): float(v) for k, v in team_eff.items()}
         self.driver_effect_ = {str(k): float(v) for k, v in drv_mu.items()}

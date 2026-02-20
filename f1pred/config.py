@@ -147,6 +147,14 @@ class Backtesting:
     metrics: List[str]
 
 
+@dataclass
+class CalibrationCfg:
+    enabled: bool
+    lookback_window_days: int
+    frequency_hours: int
+    weights_file: str
+
+
 
 
 
@@ -158,6 +166,7 @@ class AppConfig:
     caching: Caching
     modelling: Modelling
     backtesting: Backtesting
+    calibration: CalibrationCfg
 
 
 # -----------------------
@@ -188,7 +197,7 @@ def load_config(path: str) -> AppConfig:
 
     errors: List[str] = []
 
-    for section in ("app", "paths", "data_sources", "caching", "modelling", "backtesting"):
+    for section in ("app", "paths", "data_sources", "caching", "modelling", "backtesting", "calibration"):
         if section not in cfg:
             errors.append(f"Missing top-level section '{section}'")
 
@@ -316,6 +325,7 @@ def load_config(path: str) -> AppConfig:
         pace_scale=pace_scale,
     )
     backtesting = Backtesting(**cfg["backtesting"])
+    calibration = CalibrationCfg(**cfg["calibration"])
 
     return AppConfig(
         app=app,
@@ -324,4 +334,5 @@ def load_config(path: str) -> AppConfig:
         caching=caching,
         modelling=modelling,
         backtesting=backtesting,
+        calibration=calibration,
     )

@@ -278,7 +278,7 @@ class StatusSpinner:
     def __init__(self, message: str = "Processing...", delay: float = 0.1):
         self.message = sanitize_for_console(message)
         self.delay = delay
-        self.spinner = itertools.cycle(["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"])
+        self.spinner = itertools.cycle(["-", "\\", "|", "/"])
         self.running = False
         self.thread = None
         self.start_time = 0.0
@@ -342,11 +342,11 @@ class StatusSpinner:
             sys.stdout.flush()
 
         if exc_type:
-            print(f"{Fore.RED}✖{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL} (Failed)")
+            print(f"{Fore.RED}x{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL} (Failed)")
         elif self.status == "skipped":
-            print(f"{Fore.YELLOW}⚠{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}!{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
         else:
-            print(f"{Fore.GREEN}✔{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}+{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
 
 def print_countdown(seconds: int, message: str = "Refreshing in") -> None:
     """
@@ -363,7 +363,7 @@ def print_countdown(seconds: int, message: str = "Refreshing in") -> None:
 
     try:
         for i in range(seconds, 0, -1):
-            sys.stdout.write(f"\r{Style.DIM}↻ {message} {i}s...{Style.RESET_ALL}\033[K")
+            sys.stdout.write(f"\r{Style.DIM}* {message} {i}s...{Style.RESET_ALL}\033[K")
             sys.stdout.flush()
             time.sleep(1)
 

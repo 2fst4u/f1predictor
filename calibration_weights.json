@@ -1,0 +1,15 @@
+{
+  "ensemble": {
+    "w_gbm": 0.05221722063964579,
+    "w_elo": 0.0,
+    "w_bt": 0.0,
+    "w_mixed": 0.9477827793603543
+  },
+  "blending": {
+    "gbm_weight": 0.5,
+    "baseline_weight": 0.5,
+    "baseline_team_factor": 6.726813934415592,
+    "baseline_driver_team_factor": 0.0
+  },
+  "last_race_id": "2025_24"
+}

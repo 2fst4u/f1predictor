@@ -21,6 +21,7 @@ from .models import train_pace_model, estimate_dnf_probabilities
 from .simulate import simulate_grid
 from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace
 from .ranking import plackett_luce_scores
+from .calibrate import CalibrationManager
 
 __all__ = [
     "run_predictions_for_event",
@@ -371,6 +372,61 @@ def run_predictions_for_event(
         precipitation_unit=cfg.data_sources.open_meteo.precipitation_unit,
     )
 
+    # --- Pre-fetch History (Consolidated) ---
+    logger.info("[predict] Pre-fetching deep history for calibration and features...")
+    now = datetime.now(timezone.utc)
+    # Fetch enough history for both calibration (recent) and deep feature building (long term)
+    # 10 years covers the deep needs, and includes the recent 4 years for calibration
+    all_history = collect_historical_results(
+        jc, 
+        season=now.year, 
+        end_before=now, 
+        lookback_years=10 # Deep history for accurate Elo/Features
+    )
+
+    # --- Calibration Check ---
+    # Initialize and check if we need to re-calibrate weights
+    # This happens before any predictions to ensure we use fresh weights
+    try:
+        cm = CalibrationManager(cfg)
+        if cm.check_calibration_needed(history_df=all_history):
+             # We need jc and om for history fetching/feature building
+             cm.run_calibration(jc, om, history_df=all_history)
+    except Exception as e:
+        logger.warning(f"[predict] Calibration process encountered an error: {e}; continuing with existing weights")
+        # Ensure cm exists for load_weights fallback
+        if 'cm' not in locals():
+             cm = type('DummyCM', (), {'load_weights': lambda: {}})()
+
+    # Load weights (either newly calibrated or existing)
+    calibrated_weights = cm.load_weights()
+    
+    # 1. Update Blending Config (passed to train_pace_model via cfg)
+    if "blending" in calibrated_weights:
+        b = calibrated_weights["blending"]
+        # Ensure target config structure exists (it should from config.yaml)
+        if hasattr(cfg, "modelling") and hasattr(cfg.modelling, "blending"):
+            # Update attributes in-place
+            if "gbm_weight" in b: cfg.modelling.blending.gbm_weight = b["gbm_weight"]
+            if "baseline_weight" in b: cfg.modelling.blending.baseline_weight = b["baseline_weight"]
+            if "baseline_team_factor" in b: cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
+            if "baseline_driver_team_factor" in b: cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
+            logger.info(f"[predict] Applied calibrated blending weights (gbm={b.get('gbm_weight', 0):.2f})")
+            print(f"    [Predict] Using calibrated weights (GBM={b.get('gbm_weight', 0):.2f}, Baseline={b.get('baseline_weight', 0):.2f})")
+
+    # 2. Prepare Ensemble Config (passed to combine_pace)
+    ens_cfg_obj = None
+    if "ensemble" in calibrated_weights:
+        e = calibrated_weights["ensemble"]
+        ens_cfg_obj = EnsembleConfig(
+            w_gbm=e.get("w_gbm", 0.25),
+            w_elo=e.get("w_elo", 0.25),
+            w_bt=e.get("w_bt", 0.25),
+            w_mixed=e.get("w_mixed", 0.25)
+        )
+        logger.info(f"[predict] Applied calibrated ensemble weights (gbm={e.get('w_gbm', 0):.2f}, elo={e.get('w_elo', 0):.2f})")
+
+
     # Resolve event
     season_i, round_i, race_info = resolve_event(jc, season, rnd)
     event_title = f"{race_info.get('raceName') or 'Event'} {season_i} (Round {round_i})"
@@ -436,6 +492,17 @@ def run_predictions_for_event(
                 # Convert accumulator to DataFrame for injection
                 extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
 
+                # Use pre-fetched history for this session
+                # We need to filter it to ensure we don't leak future data relative to this specific session
+                # build_session_features calls collect_historical_results internally if not provided,
+                # but we can pass a cached DataFrame if we modify build_session_features to accept it.
+                # Currently build_session_features DOES NOT accept a raw dataframe for history, 
+                # it calls collect_historical_results.
+                # However, collect_historical_results has an in-memory cache (_HIST_CACHE).
+                # Since we called collect_historical_results(jc, ...) at the start of run_predictions_for_event,
+                # the _HIST_CACHE in features.py is ALREADY POPULATED.
+                # So the call inside build_session_features will hit the RAM cache instantly.
+                
                 spinner.update(f"Predicting {event_title} - {sess}: Building features...")
                 X, meta, roster = build_session_features(
                     jc, om, season_i, round_i, sess, ref_date, cfg,
@@ -592,13 +659,14 @@ def run_predictions_for_event(
 
                 # Combine GBM pace with ensemble elements
                 try:
-                    ens_cfg = EnsembleConfig()  # could later be fed from cfg.modelling.ensemble
+                    # Use calibrated config if available, else default/config-based
+                    final_ens_cfg = ens_cfg_obj if ens_cfg_obj else EnsembleConfig()
                     combined_pace = combine_pace(
                         gbm_pace=pace_hat,
                         elo_pace=elo_pace,
                         bt_pace=bt_pace,
                         mixed_pace=mixed_pace,
-                        cfg=ens_cfg,
+                        cfg=final_ens_cfg,
                     )
                     logger.info(
                         "[predict] Combined pace stats: std=%.4f, range=%.4f",
@@ -661,13 +729,15 @@ def run_predictions_for_event(
             if "code" not in ranked.columns:
                 ranked["code"] = ""
 
-            actual_positions = _get_actual_positions_for_session(
-                jc,
-                season_i,
-                round_i,
-                sess,
-                ranked[["driverId", "number", "code"]],
-            )
+            actual_positions = None
+            if sess_dt and sess_dt < datetime.now(timezone.utc):
+                actual_positions = _get_actual_positions_for_session(
+                    jc,
+                    season_i,
+                    round_i,
+                    sess,
+                    ranked[["driverId", "number", "code"]],
+                )
             if actual_positions is not None:
                 ranked["actual_position"] = actual_positions
                 ranked["delta"] = ranked["actual_position"] - ranked["predicted_position"]
@@ -720,21 +790,23 @@ def run_predictions_for_event(
                     "qpos": int(row["predicted_position"]) if sess in ("qualifying", "sprint_qualifying") else np.nan
                 })
 
-            # Check for wet session via FastF1
-            is_wet = False
-            try:
-                session_name_map = {
-                    "race": "Race",
-                    "qualifying": "Qualifying", 
-                    "sprint": "Sprint",
-                    "sprint_qualifying": "Sprint Shootout",
-                }
-                ff1_sess_name = session_name_map.get(sess, sess.title())
-                weather_status = get_session_weather_status(season_i, round_i, ff1_sess_name)
-                if weather_status:
-                    is_wet = weather_status.get("is_wet", False)
-            except Exception:
-                pass
+                # Check for wet session via FastF1 (only if session happened)
+                is_wet = False
+                now_utc = datetime.now(timezone.utc)
+                if sess_dt and sess_dt < now_utc:
+                    try:
+                        session_name_map = {
+                            "race": "Race",
+                            "qualifying": "Qualifying", 
+                            "sprint": "Sprint",
+                            "sprint_qualifying": "Sprint Shootout",
+                        }
+                        ff1_sess_name = session_name_map.get(sess, sess.title())
+                        weather_status = get_session_weather_status(season_i, round_i, ff1_sess_name)
+                        if weather_status:
+                            is_wet = weather_status.get("is_wet", False)
+                    except Exception:
+                        pass
             
             print_session_console(
                 ranked,

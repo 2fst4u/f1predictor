@@ -228,7 +228,15 @@ def derive_roster(
     if roster:
         return roster
 
-    # 3. OPTION C: Previous completed event (fallback for future events)
+    # 3. OPTION C: Season entry list (for start of season when no races have happened yet)
+    # If the requested season matches the current one (or future), try to get the official entry list
+    # This prevents falling back to the previous season's roster (e.g. 2025) at the start of 2026.
+    raw_entries = jc.get_season_entry_list(season)
+    if raw_entries:
+        logger.info(f"[roster] Using official entry list for Season {season}")
+        return _entries_from_results(raw_entries)
+
+    # 4. OPTION D: Previous completed event (fallback for future events)
     try:
         prev = _previous_completed_event_global(jc, s_int, r_int)
     except Exception:
