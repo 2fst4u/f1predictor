@@ -40,3 +40,8 @@
 **Vulnerability:** The default `sqlite` backend in `requests-cache` used `pickle` for serialization. If an attacker could modify the cache file (e.g., in a shared environment before permission hardening), they could achieve arbitrary code execution upon deserialization.
 **Learning:** Convenience libraries often default to Python-specific serialization (pickle) which is unsafe for untrusted data. Even with file permissions, this is a dangerous default.
 **Prevention:** Explicitly configured `serializer="json"` in `requests-cache` to enforce safe serialization. Also hardened directory permissions with `umask` to prevent race conditions during cache creation.
+
+## 2025-02-26 - Path Traversal in API Client
+**Vulnerability:** The `JolpicaClient` constructed API URLs using `driverId` directly from the API response without validation. While the source was trusted (API response), a compromised API or Man-in-the-Middle attack could potentially inject path traversal characters (e.g., `../../etc/passwd`) or other malicious payloads via `driverId`.
+**Learning:** Even "trusted" data sources like external APIs should be treated as potentially malicious when used in critical contexts like URL construction or file paths. Defense in depth requires explicit validation of all inputs.
+**Prevention:** Added `_validate_driver_id` to strictly whitelist alphanumeric characters, underscores, hyphens, and periods, rejecting any input containing `..` or other special characters.

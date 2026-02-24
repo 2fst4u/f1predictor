@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Dict, Any, List, Optional, Tuple
 import time
 import random
+import re
 from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -142,6 +143,21 @@ class JolpicaClient:
             # Use repr() to prevent log injection from malicious input
             raise ValueError(f"Invalid round: {repr(rnd)}")
         return r
+
+    def _validate_driver_id(self, driver_id: str) -> str:
+        """Ensure driver_id contains only safe characters."""
+        did = str(driver_id).strip()
+
+        # Enforce length limit
+        if len(did) > 64:
+            raise ValueError(f"Invalid driverId (too long): {repr(did[:10])}...")
+
+        # Allow alphanumeric, underscore, hyphen, and period
+        # This prevents path traversal (..) and other injection attacks
+        if not re.fullmatch(r'^[a-zA-Z0-9_.-]+$', did):
+            raise ValueError(f"Invalid driverId: {repr(did)}")
+
+        return did
 
     def _fetch_paginated_parallel(
         self,
@@ -295,8 +311,12 @@ class JolpicaClient:
                 if not did:
                     return {}
                 try:
+                    # Validate driverId to prevent potential injection/traversal
+                    # (Though unlikely from API, defensive programming is key)
+                    safe_did = self._validate_driver_id(did)
+
                     # Endpoint: /<season>/drivers/<id>/constructors.json
-                    js = self._get(f"{season}/drivers/{did}/constructors.json")
+                    js = self._get(f"{season}/drivers/{safe_did}/constructors.json")
                     mr = self._extract_mrdata(js)
                     ctable = mr.get("ConstructorTable", {})
                     # We assume the first constructor is the current one for this season context
