@@ -70,6 +70,12 @@ class TestConfigSecurity(unittest.TestCase):
                     "team_weight": 0.4, "clip_min": 0.02, "clip_max": 0.35
                 }
             },
+            "calibration": {
+                "enabled": True,
+                "lookback_window_days": 1095,
+                "frequency_hours": 24,
+                "weights_file": "calibration_weights.json"
+            },
             "backtesting": {
                 "enabled": False,
                 "seasons": [],
