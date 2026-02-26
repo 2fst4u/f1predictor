@@ -30,6 +30,10 @@ class MockJolpicaClient:
         self.get_latest_calls += 1
         return ("2024", "20")
 
+    def get_season_entry_list(self, season):
+        self.call_count += 1
+        return []
+
 def test_future_season_optimization():
     """Verify that predicting for a future season triggers the optimization."""
     jc = MockJolpicaClient()

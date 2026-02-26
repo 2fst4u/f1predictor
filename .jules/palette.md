@@ -41,3 +41,7 @@
 ## 2026-05-24 - CLI Table Column Clarity
 **Learning:** In prediction tables where rows are ranked by prediction (implicit position), a column labeled "Pos" for the *actual/result* position is ambiguous and confusing. Users may confuse the row index with the result column.
 **Action:** Rename result columns to "Actual" or "Result" to clearly distinguish them from the predicted rank (often denoted by `#` or row order). Update legends to explicitly define the column.
+
+## 2025-05-25 - Semantic Icons in CLI Spinners
+**Learning:** Using a generic asterisk `*` for a countdown spinner is ambiguous and lacks visual polish. Replacing it with a unicode refresh icon `↻` (U+21BB) clearly communicates "refreshing" or "waiting" to the user, aligning the visual language with the action.
+**Action:** Use the `↻` icon for refresh/countdown spinners in CLI tools to improve semantic clarity and visual appeal.
