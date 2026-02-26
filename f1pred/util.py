@@ -252,17 +252,6 @@ def http_get_json(session: requests.Session, url: str, params: Optional[Dict[str
                  return str(content)
 
 
-def clear_http_cache() -> None:
-    """
-    Clear the installed requests-cache backend if present.
-    Safe to call even if no cache is installed.
-    """
-    try:
-        requests_cache.clear()
-    except Exception:
-        pass
-
-
 def safe_float(v, default=None):
     try:
         return float(v)
