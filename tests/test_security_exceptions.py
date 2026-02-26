@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from f1pred.util import sanitize_for_console
 import f1pred.predict
+import pandas as pd
 
 def test_sanitize_exception_message():
     """Verify that sanitize_for_console effectively neutralizes malicious exception messages."""
@@ -47,7 +48,9 @@ def test_predict_logs_sanitized_exception(mock_logger):
             with patch("f1pred.predict.JolpicaClient"), \
                  patch("f1pred.predict.OpenMeteoClient"), \
                  patch("f1pred.predict.ensure_dirs"), \
-                 patch("f1pred.predict.init_fastf1"):
+                 patch("f1pred.predict.init_fastf1"), \
+                 patch("f1pred.predict.collect_historical_results", return_value=pd.DataFrame()), \
+                 patch("f1pred.predict.CalibrationManager"):
 
                 # Run prediction
                 # We mock _filter_sessions_for_round to return one session
