@@ -26,3 +26,14 @@ classifiers = [
 Homepage = "https://github.com/2fst4u/f1predictor"
 Repository = "https://github.com/2fst4u/f1predictor"
 Issues = "https://github.com/2fst4u/f1predictor/issues"
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    "f1pred/init.py"
+]
+
+[tool.coverage.report]
+# Locked in gain from metrics.py tests (37% -> 39%)
+fail_under = 39
+show_missing = true
