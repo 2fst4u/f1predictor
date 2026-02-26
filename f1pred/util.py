@@ -363,7 +363,7 @@ def print_countdown(seconds: int, message: str = "Refreshing in") -> None:
 
     try:
         for i in range(seconds, 0, -1):
-            sys.stdout.write(f"\r{Style.DIM}* {message} {i}s...{Style.RESET_ALL}\033[K")
+            sys.stdout.write(f"\r{Style.DIM}↻ {message} {i}s...{Style.RESET_ALL}\033[K")
             sys.stdout.flush()
             time.sleep(1)
 
