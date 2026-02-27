@@ -24,7 +24,6 @@ data_sources:
     forecast_url: "https://api.open-meteo.com/v1/forecast"
     historical_weather_url: "https://archive-api.open-meteo.com/v1/era5"
     historical_forecast_url: "https://historical-forecast-api.open-meteo.com/v1/forecast"
-    elevation_url: "https://api.open-meteo.com/v1/elevation"
     geocoding_url: "https://geocoding-api.open-meteo.com/v1/search"
     enabled: true
     # Unit choices for Open-Meteo (see docs for acceptable values)

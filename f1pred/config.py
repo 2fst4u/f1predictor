@@ -41,7 +41,6 @@ class OpenMeteo:
     forecast_url: str
     historical_weather_url: str
     historical_forecast_url: str
-    elevation_url: str
     geocoding_url: str
     enabled: bool
     temperature_unit: str
@@ -224,7 +223,6 @@ def load_config(path: str) -> AppConfig:
             "forecast_url",
             "historical_weather_url",
             "historical_forecast_url",
-            "elevation_url",
             "geocoding_url",
         ):
             if not _is_http_url(om.get(ukey, "")):

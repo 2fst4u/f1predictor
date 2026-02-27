@@ -364,7 +364,6 @@ def run_predictions_for_event(
         cfg.data_sources.open_meteo.forecast_url,
         cfg.data_sources.open_meteo.historical_weather_url,
         cfg.data_sources.open_meteo.historical_forecast_url,
-        cfg.data_sources.open_meteo.elevation_url,
         cfg.data_sources.open_meteo.geocoding_url,
         timeout=cfg.data_sources.jolpica.timeout_seconds,
         temperature_unit=cfg.data_sources.open_meteo.temperature_unit,

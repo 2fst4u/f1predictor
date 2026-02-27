@@ -21,7 +21,6 @@ class OpenMeteoClient:
                  forecast_url: str,
                  historical_weather_url: str,
                  historical_forecast_url: str,
-                 elevation_url: str,
                  geocoding_url: str,
                  timeout: int = 30,
                  temperature_unit: str = "celsius",
@@ -30,27 +29,12 @@ class OpenMeteoClient:
         self.forecast_url = forecast_url
         self.historical_weather_url = historical_weather_url
         self.historical_forecast_url = historical_forecast_url
-        self.elevation_url = elevation_url
         self.geocoding_url = geocoding_url
         self.timeout = timeout
         self.temperature_unit = temperature_unit
         self.windspeed_unit = windspeed_unit
         self.precipitation_unit = precipitation_unit
         self.session = session_with_retries()
-
-    def get_elevation(self, lat: float, lon: float) -> Optional[float]:
-        if not _valid_lat_lon(lat, lon):
-            logger.info(f"OpenMeteoClient.get_elevation: invalid coordinates lat={repr(lat)}, lon={repr(lon)}")
-            return None
-        js = http_get_json(self.session, self.elevation_url,
-                           params={"latitude": lat, "longitude": lon},
-                           timeout=self.timeout)
-        elev = None
-        try:
-            elev = js.get("elevation", [None])[0] if isinstance(js, dict) else None
-        except Exception:
-            pass
-        return safe_float(elev, None)
 
     @staticmethod
     def _validate_timezone(tz: str) -> str:

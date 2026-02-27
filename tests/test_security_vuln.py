@@ -73,7 +73,6 @@ def test_open_meteo_timezone_validation():
         forecast_url="http://mock",
         historical_weather_url="http://mock-hist",
         historical_forecast_url="http://mock-hist-forecast",
-        elevation_url="http://mock-elev",
         geocoding_url="http://mock-geo",
     )
 

@@ -140,8 +140,6 @@ def init_caches(cfg, disable_cache: bool = False) -> None:
         urls_expire_after[ds.open_meteo.historical_weather_url] = default_expire_seconds
     if getattr(ds.open_meteo, "historical_forecast_url", None):
         urls_expire_after[ds.open_meteo.historical_forecast_url] = default_expire_seconds
-    if getattr(ds.open_meteo, "elevation_url", None):
-        urls_expire_after[ds.open_meteo.elevation_url] = default_expire_seconds
     if getattr(ds.open_meteo, "geocoding_url", None):
         urls_expire_after[ds.open_meteo.geocoding_url] = default_expire_seconds
 
