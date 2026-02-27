@@ -33,7 +33,6 @@ def full_valid_config():
                 "forecast_url": "https://api.open-meteo.com",
                 "historical_weather_url": "https://archive-api.open-meteo.com",
                 "historical_forecast_url": "https://historical-forecast-api.open-meteo.com",
-                "elevation_url": "https://api.open-meteo.com",
                 "geocoding_url": "https://geocoding-api.open-meteo.com",
                 "enabled": True,
                 "temperature_unit": "celsius",
