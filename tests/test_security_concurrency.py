@@ -1,4 +1,5 @@
 
+import sys
 import threading
 import os
 import time
@@ -11,6 +12,7 @@ def worker(path):
     # Adding a small sleep to increase the window of race condition overlap
     time.sleep(0.001)
 
+@pytest.mark.skipif(sys.platform == 'win32', reason="os.umask() is not meaningful on Windows")
 def test_umask_race_condition(tmp_path):
     """
     Verify that concurrent calls to ensure_dirs do not corrupt the global umask.

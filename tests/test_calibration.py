@@ -7,9 +7,6 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import shutil
 
-# Ensure path is correct relative to module import if needed, or import from package
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from f1pred.calibrate import CalibrationManager
 from f1pred.ensemble import EnsembleConfig

@@ -1,5 +1,6 @@
 
 import os
+import sys
 import shutil
 import pytest
 import logging
@@ -14,6 +15,7 @@ def temp_cache_dir(tmp_path):
     if d.exists():
         shutil.rmtree(d)
 
+@pytest.mark.skipif(sys.platform == 'win32', reason="POSIX permissions not enforced on Windows")
 def test_ensure_dirs_permissions(temp_cache_dir):
     """Verify that ensure_dirs creates directories with 0o700 permissions."""
     path_str = str(temp_cache_dir)
@@ -27,6 +29,7 @@ def test_ensure_dirs_permissions(temp_cache_dir):
     # Mode should be 0o700
     assert mode == 0o700, f"Expected 0o700, got {oct(mode)}"
 
+@pytest.mark.skipif(sys.platform == 'win32', reason="POSIX permissions not enforced on Windows")
 def test_ensure_dirs_nested(temp_cache_dir):
     """Verify recursive creation and permission on leaf."""
     nested = temp_cache_dir / "subdir" / "leaf"

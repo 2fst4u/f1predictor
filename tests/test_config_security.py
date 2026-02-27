@@ -79,6 +79,12 @@ class TestConfigSecurity(unittest.TestCase):
                 "enabled": False,
                 "seasons": [],
                 "metrics": []
+            },
+            "calibration": {
+                "enabled": False,
+                "lookback_window_days": 365,
+                "frequency_hours": 24,
+                "weights_file": "calibration_weights.json"
             }
         }
 

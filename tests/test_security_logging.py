@@ -47,14 +47,4 @@ def test_safe_log_formatter_strips_ansi():
     assert "Red Alert" in output
     assert "\033" not in output
 
-def test_safe_log_formatter_integration():
-    """Verify integration via configure_logging (mocking basicConfig logic since it's hard to reset)."""
-    # Since configure_logging uses basicConfig and modifies root logger,
-    # and basicConfig is idempotent (unless force=True), we should test SafeLogFormatter directly mostly.
-    # But let's try to verify that a logger obtained via get_logger uses the formatter if we configure it.
 
-    # We can't easily reset logging in a shared pytest environment without side effects.
-    # So we'll trust the unit tests above for the formatter logic,
-    # and rely on visual inspection/manual verification for the configure_logging wiring
-    # (which we did by reading the file).
-    pass

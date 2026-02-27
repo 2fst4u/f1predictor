@@ -34,6 +34,42 @@ def test_exponential_weights():
     assert np.all(weights > 0)
 
 
+def test_exponential_weights_correctness():
+    """Test exact exponential weight values."""
+    ref_date = datetime(2023, 1, 1, tzinfo=timezone.utc)
+    dates_series = pd.Series([
+        ref_date,
+        ref_date - timedelta(days=1),
+        ref_date - timedelta(days=10)
+    ])
+    weights = exponential_weights(dates_series, ref_date, half_life_days=10)
+
+    assert np.isclose(weights[0], 1.0)
+    assert np.isclose(weights[1], 2**(-0.1))
+    assert np.isclose(weights[2], 0.5)
+
+
+def test_exponential_weights_nat():
+    """Test NaT handling in exponential weights."""
+    ref_date = datetime(2023, 1, 1, tzinfo=timezone.utc)
+    dates_series = pd.Series([pd.NaT, ref_date])
+    weights = exponential_weights(dates_series, ref_date, half_life_days=10)
+
+    # NaT should be treated as 0 age -> weight 1.0 (based on fillna(0) behavior)
+    assert np.isclose(weights[0], 1.0)
+    assert np.isclose(weights[1], 1.0)
+
+
+def test_exponential_weights_list_input():
+    """Test that list input works (not just pd.Series)."""
+    ref_date = datetime(2023, 1, 1, tzinfo=timezone.utc)
+    dates_list = [ref_date, ref_date - timedelta(days=10)]
+    weights = exponential_weights(dates_list, ref_date, half_life_days=10)
+
+    assert np.isclose(weights[0], 1.0)
+    assert np.isclose(weights[1], 0.5)
+
+
 def test_compute_form_indices(sample_historical_data):
     """Test form index calculation."""
     ref_date = datetime(2023, 3, 10, tzinfo=timezone.utc)
