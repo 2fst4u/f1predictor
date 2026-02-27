@@ -1,6 +1,7 @@
 """Tests for ranking utilities."""
 import pytest
 import numpy as np
+from unittest.mock import patch
 from f1pred.ranking import plackett_luce_scores, rank_from_pace
 
 
@@ -72,3 +73,16 @@ def test_rank_all_same_pace():
     order = rank_from_pace(pace, noise_sd=0)
     # Stable sort should preserve original order
     assert list(order) == [0, 1, 2]
+
+def test_pl_all_non_finite():
+    # Covers line 25: `fill = 0.0` when no finite elements exist
+    scores = np.array([np.nan, np.inf])
+    probs = plackett_luce_scores(scores)
+    assert np.allclose(probs, 0.5)
+
+def test_pl_denom_invalid():
+    # Covers line 44: `return np.full(n, 1.0 / n)` when denom is invalid
+    scores = np.array([1.0, 2.0])
+    with patch('numpy.exp', return_value=np.array([np.nan, np.nan])):
+        probs = plackett_luce_scores(scores)
+        assert np.allclose(probs, [0.5, 0.5])

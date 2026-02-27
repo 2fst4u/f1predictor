@@ -35,5 +35,6 @@ omit = [
 
 [tool.coverage.report]
 # Locked in gain from util.py tests (39.04% -> 46.69%)
-fail_under = 46.69
+# Locked in gain from ranking.py tests (46.69% -> 46.75%)
+fail_under = 46.75
 show_missing = true
