@@ -11,7 +11,7 @@ install:
 	pip install -r requirements.txt
 
 predict:
-	python main.py --round next --html
+	python main.py --round next
 
 backtest:
 	python main.py --backtest
