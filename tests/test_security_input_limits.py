@@ -39,7 +39,7 @@ class TestSecurityInputLimits(unittest.TestCase):
         """
         Security Test: Ensure OpenMeteoClient limits timezone string length.
         """
-        om = OpenMeteoClient("http://mock", "http://mock", "http://mock", "http://mock", "http://mock")
+        om = OpenMeteoClient("http://mock", "http://mock", "http://mock", "http://mock")
         long_tz = "Europe/London" + ("/" * 1000)
 
         # Should return "UTC" fallback or raise, but definitely not return the massive string
