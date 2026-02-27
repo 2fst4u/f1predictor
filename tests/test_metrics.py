@@ -153,3 +153,12 @@ class TestComputeEventMetrics:
         assert np.isnan(result["spearman"])
         assert np.isnan(result["kendall"])
         assert np.isnan(result["accuracy_top3"])
+
+    def test_no_driver_column(self):
+        df = pd.DataFrame({
+            "predicted_position": [1, 2],
+            "actual_position": [1, 2],
+        })
+        result = compute_event_metrics(df, None, None, "race", 2025, 1)
+        assert np.isnan(result["accuracy_top3"])
+        assert result["spearman"] == pytest.approx(1.0)
