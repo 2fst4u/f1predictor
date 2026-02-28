@@ -162,8 +162,8 @@ The system will fall back to XGBoost or scikit-learn if LightGBM is unavailable.
 
 If you want to verify the code or contribute:
 ```bash
-pip install pytest
-pytest tests/ -v
+pip install pytest pytest-cov
+python -m pytest tests/ -v
 ```
 
 ## License
