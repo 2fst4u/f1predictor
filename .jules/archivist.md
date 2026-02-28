@@ -1,0 +1,3 @@
+## 2024-05-24 - [Resolve Pytest Local Module Execution Issues]
+**Learning:** Local execution using the `pytest` standalone binary can fail to resolve local modules in this specific virtual environment setup, resulting in ModuleNotFoundError. Relying solely on the `pytest` command creates a barrier to entry for contributors and creates inconsistency between local runs and CI.
+**Action:** Always use `python -m pytest` instead of `pytest` across all scripts, CI, and documentation to ensure reliable execution and module resolution in all environments. Ensure `pytest-cov` is installed alongside `pytest` since the project explicitly tracks coverage and specifies a `fail_under` threshold in `pyproject.toml`.
