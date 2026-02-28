@@ -2,13 +2,13 @@
 import pytest
 import numpy as np
 import pandas as pd
+from unittest.mock import patch
 from f1pred.metrics import (
     accuracy_top_k,
     brier_pairwise,
     crps_position,
     compute_event_metrics,
 )
-
 
 class TestAccuracyTopK:
     def test_perfect_match(self):
@@ -73,7 +73,6 @@ class TestBrierPairwise:
         ])
         score = brier_pairwise(pairwise, actual)
         assert score == pytest.approx(1.0, abs=1e-6)
-
 
 class TestCRPSPosition:
     def test_winner_perfect(self):
@@ -162,3 +161,19 @@ class TestComputeEventMetrics:
         result = compute_event_metrics(df, None, None, "race", 2025, 1)
         assert np.isnan(result["accuracy_top3"])
         assert result["spearman"] == pytest.approx(1.0)
+
+class TestComputeEventMetricsExceptions:
+    @patch('f1pred.metrics.spearmanr', side_effect=ValueError("spearman error"))
+    @patch('f1pred.metrics.kendalltau', side_effect=ValueError("kendall error"))
+    def test_spearman_kendall_exceptions(self, mock_kendall, mock_spearman):
+        # We need this to verify behavior: if scipy functions fail due to some reason
+        # (like identical values causing warnings/errors in older versions or edge cases)
+        # the metric should gracefully return NaN rather than crashing the evaluation.
+        df = pd.DataFrame({
+            "driver_id": ["a", "b"],
+            "predicted_position": [1, 2],
+            "actual_position": [1, 2]
+        })
+        metrics = compute_event_metrics(df, None, None, "race", 2023, 1)
+        assert np.isnan(metrics["spearman"])
+        assert np.isnan(metrics["kendall"])
