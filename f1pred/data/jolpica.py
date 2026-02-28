@@ -283,18 +283,6 @@ class JolpicaClient:
         mr = self._extract_mrdata(js)
         return mr.get("DriverTable", {}).get("Drivers", []) or []
 
-    def get_constructors_for_season(self, season: str) -> List[Dict[str, Any]]:
-        season = self._validate_season(season)
-        js = self._get(f"{season}/constructors.json", params={"limit": 1000})
-        mr = self._extract_mrdata(js)
-        return mr.get("ConstructorTable", {}).get("Constructors", []) or []
-
-    def get_standings(self, season: str) -> Dict[str, Any]:
-        season = self._validate_season(season)
-        js = self._get(f"{season}/driverStandings.json", params={"limit": 1000})
-        mr = self._extract_mrdata(js)
-        return mr.get("StandingsTable", {}) or {}
-
     def get_season_entry_list(self, season: str, max_workers: int = 5) -> List[Dict[str, Any]]:
         """
         Build a season entry list by fetching all drivers and then querying their constructor.
