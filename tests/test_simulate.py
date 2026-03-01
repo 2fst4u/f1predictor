@@ -79,3 +79,14 @@ def test_simulate_grid_no_pairwise():
 
     # Pairwise should be empty (since we returned empty array)
     assert pairwise.size == 0
+
+def test_simulate_grid_empty():
+    """Test that an empty grid returns empty arrays of correct shapes."""
+    pace_index = np.array([])
+    dnf_prob = np.array([])
+
+    prob_matrix, mean_pos, pairwise = simulate_grid(pace_index, dnf_prob, draws=100)
+
+    assert prob_matrix.shape == (0, 0)
+    assert mean_pos.shape == (0,)
+    assert pairwise.shape == (0, 0)
