@@ -41,7 +41,6 @@ def simulate_grid(
         return np.array([]).reshape(0, 0), np.array([]), np.array([]).reshape(0, 0)
     
     # Calculate noise scale based on pace spread
-    pace_std = float(np.std(pace_index))
     pace_range = float(np.ptp(pace_index))  # max - min
     
     if pace_range > 0.01:
