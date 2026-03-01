@@ -38,7 +38,7 @@ The app fetches data from free, public APIs:
 
 - **[Jolpica F1](https://github.com/jolpica/jolpica-f1)** – Schedules, results, standings (Ergast-compatible)
 - **[Open-Meteo](https://open-meteo.com/)** – Weather forecasts and historical weather
-- **[OpenF1](https://openf1.org/)** – Session timing data (historical only)
+
 - **[FastF1](https://theoehrly.github.io/Fast-F1/)** – Detailed timing and telemetry fallback
 
 ## How It Works
@@ -108,7 +108,6 @@ python main.py --backtest
 
 ## Known Limitations
 
-- **No real-time data** – OpenF1 is used for historical data only, not live timing
 - **Weather is approximate** – Forecasts are aggregated around session windows
 - **DNF model is basic** – Uses historical base rates, not detailed reliability analysis
 - **First race of season** – Limited data for brand new driver/team combinations
@@ -127,7 +126,6 @@ f1pred/
 └── data/           # API clients
     ├── jolpica.py
     ├── open_meteo.py
-    ├── openf1.py
     └── fastf1_backend.py
 ```
 
@@ -146,7 +144,7 @@ python main.py --round next
 ```
 
 **Missing actuals for sprint qualifying?**
-Enable OpenF1 and/or install FastF1 in `config.yaml`.
+Enable FastF1 in `config.yaml`.
 
 **Rate limiting errors?**
 The built-in cache and retry logic should handle most cases. Try increasing `live_refresh_seconds` or clearing the `.cache/` directory.
