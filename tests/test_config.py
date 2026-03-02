@@ -149,3 +149,43 @@ def test_load_config_invalid_session_type(full_valid_config):
             load_config(path)
     finally:
         os.remove(path)
+
+def test_load_config_missing_paths(full_valid_config):
+    """Verify that missing paths raise ValueError."""
+    del full_valid_config["paths"]["cache_dir"]
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError, match="Missing paths.cache_dir"):
+            load_config(path)
+    finally:
+        os.remove(path)
+
+def test_load_config_invalid_urls(full_valid_config):
+    """Verify that non-http URLs are rejected."""
+    full_valid_config["data_sources"]["jolpica"]["base_url"] = "ftp://api.jolpi.ca"
+    full_valid_config["data_sources"]["open_meteo"]["forecast_url"] = "ftp://api.open-meteo.com"
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "data_sources.jolpica.base_url must be http(s) URL" in err_msg
+        assert "data_sources.open_meteo.forecast_url must be http(s) URL" in err_msg
+    finally:
+        os.remove(path)
+
+def test_load_config_invalid_units(full_valid_config):
+    """Verify that invalid weather units are rejected."""
+    full_valid_config["data_sources"]["open_meteo"]["temperature_unit"] = "kelvin"
+    full_valid_config["data_sources"]["open_meteo"]["windspeed_unit"] = "knots"
+    full_valid_config["data_sources"]["open_meteo"]["precipitation_unit"] = "liters"
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "data_sources.open_meteo.temperature_unit must be one of" in err_msg
+        assert "data_sources.open_meteo.windspeed_unit must be one of" in err_msg
+        assert "data_sources.open_meteo.precipitation_unit must be one of" in err_msg
+    finally:
+        os.remove(path)
