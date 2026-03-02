@@ -20,7 +20,6 @@ warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
 __all__ = [
     "train_pace_model",
-    "train_dnf_hazard_model",
     "estimate_dnf_probabilities",
 ]
 
@@ -195,57 +194,6 @@ def train_pace_model(X: pd.DataFrame, session_type: str, cfg: Any = None) -> Tup
         pace_hat = base + np.random.RandomState(42).normal(0, 0.01, size=len(base))
 
     return pipe, pace_hat, features
-
-
-def train_dnf_hazard_model(X: pd.DataFrame, hist: pd.DataFrame) -> Any:
-    """
-    Train a simple DNF probability model from historical race data.
-    """
-    races = hist[hist["session"] == "race"].copy()
-    if races.empty:
-        return None
-
-    if "is_dnf" in races.columns:
-        races["dnf"] = races["is_dnf"].astype(int)
-    else:
-        status = races["status"].astype(str).str.lower()
-        dnf = (~races["position"].notna()) | status.str.contains(
-            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
-        )
-        races["dnf"] = dnf.astype(int)
-
-    dnf_rate_driver = races.groupby("driverId")["dnf"].mean().rename("drv_dnf_rate")
-    dnf_rate_team = races.groupby("constructorId")["dnf"].mean().rename("team_dnf_rate")
-
-    base = races[["driverId", "constructorId"]].drop_duplicates().merge(
-        dnf_rate_driver, on="driverId", how="left"
-    ).merge(
-        dnf_rate_team, on="constructorId", how="left"
-    )
-
-    if base.empty:
-        return None
-
-    base["drv_dnf_rate"] = base["drv_dnf_rate"].fillna(base["drv_dnf_rate"].mean())
-    base["team_dnf_rate"] = base["team_dnf_rate"].fillna(base["team_dnf_rate"].mean())
-
-    Xjoin = X.merge(base, on=["driverId", "constructorId"], how="left")
-    Xjoin["drv_dnf_rate"] = Xjoin["drv_dnf_rate"].fillna(base["drv_dnf_rate"].mean())
-    Xjoin["team_dnf_rate"] = Xjoin["team_dnf_rate"].fillna(base["team_dnf_rate"].mean())
-
-    feat_cols = ["drv_dnf_rate", "team_dnf_rate"] + [c for c in Xjoin.columns if c.startswith("weather_")]
-
-    if len(Xjoin) == 0:
-        return None
-
-    threshold = float(Xjoin["drv_dnf_rate"].mean())
-    y_proxy = (Xjoin["drv_dnf_rate"] * 0.5 + Xjoin["team_dnf_rate"] * 0.5 > threshold).astype(int)
-
-    clf = GradientBoostingClassifier(n_estimators=50, max_depth=3, random_state=42)
-    clf.fit(Xjoin[feat_cols], y_proxy)
-
-    base_out = base[["driverId", "constructorId", "drv_dnf_rate", "team_dnf_rate"]].copy()
-    return (clf, feat_cols, base_out)
 
 
 def estimate_dnf_probabilities(
