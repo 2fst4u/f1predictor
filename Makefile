@@ -18,7 +18,7 @@ backtest:
 	python main.py --backtest
 
 test:
-	python -m pytest tests/ -v
+	python -m pytest --cov=f1pred tests/ -v
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

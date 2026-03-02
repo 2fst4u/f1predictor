@@ -24,4 +24,4 @@ jobs:
           pip install pytest pytest-cov
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest --cov=f1pred tests/ -v
