@@ -10,16 +10,17 @@ Thank you for your interest in contributing to F1 Predictor!
 4. Activate it:
    - Windows: `.venv\Scripts\activate`
    - Linux/macOS: `source .venv/bin/activate`
-5. Install dependencies: `pip install -r requirements.txt`
+5. Install dependencies: `pip install -r requirements.txt pytest pytest-cov`
 
 ## Making Changes
 
 1. Create a feature branch: `git checkout -b feature/your-feature-name`
 2. Make your changes
 3. Test that the tool still works: `python main.py --round next`
-4. Commit your changes with a clear message
-5. Push to your fork
-6. Open a Pull Request
+4. Run the test suite: `make test`
+5. Commit your changes with a clear message
+6. Push to your fork
+7. Open a Pull Request
 
 ## Code Standards
 
@@ -32,9 +33,9 @@ Thank you for your interest in contributing to F1 Predictor!
 ## Testing Changes
 
 Before submitting, ensure:
-- The tool runs without errors
-- Predictions are generated successfully
-- No existing functionality is broken
+- The tool runs without errors (`python main.py --round next`)
+- All tests pass locally (`make test`)
+- Code coverage does not drop below the required threshold
 
 ## Questions?
 
