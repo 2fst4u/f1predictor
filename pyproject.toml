@@ -34,9 +34,5 @@ omit = [
 ]
 
 [tool.coverage.report]
-# Locked in gain from util.py tests (39.04% -> 46.69%)
-# Locked in gain from ranking.py tests (46.69% -> 46.75%)
-# Locked in gain from metrics.py edge case tests (46.75% -> 46.96%)
-# Locked in gain from simulate.py empty grid tests (46.96% -> 46.98%)
-fail_under = 46.98
+fail_under = 47.18
 show_missing = true
