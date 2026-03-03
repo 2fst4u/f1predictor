@@ -1,0 +1,43 @@
+import logging
+import pytest
+from unittest.mock import patch, MagicMock
+from f1pred.util import configure_logging, session_with_retries
+
+def test_configure_logging():
+    # Arrange
+    logger = logging.getLogger()
+    original_level = logger.level
+
+    try:
+        # Act
+        configure_logging("DEBUG")
+
+        # Assert
+        assert logger.level == logging.DEBUG
+
+        # Verify the formatter is SafeLogFormatter
+        handlers = logger.handlers
+        assert len(handlers) >= 1
+        formatter = handlers[0].formatter
+        assert formatter.__class__.__name__ == "SafeLogFormatter"
+
+        # Act again to test fallback level (invalid level string)
+        configure_logging("INVALID_LEVEL")
+        assert logger.level == logging.WARNING
+
+    finally:
+        # Clean up
+        logger.setLevel(original_level)
+
+def test_session_with_retries():
+    # Arrange & Act
+    session = session_with_retries(total=2, connect=1, read=1)
+
+    # Assert
+    assert session.headers["User-Agent"] == "f1predictor/1.1.0"
+
+    # Verify the HTTPAdapter is mounted and has correct max_retries
+    adapter = session.get_adapter("http://")
+    assert adapter.max_retries.total == 2
+    assert adapter.max_retries.connect == 1
+    assert adapter.max_retries.read == 1
