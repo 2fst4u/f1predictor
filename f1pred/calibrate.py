@@ -284,7 +284,6 @@ class CalibrationManager:
                 # GBM Score
                 # X_evt might need alignment? pipeline handles it
                 try:
-                    features_used = gbm_pipe.named_steps['pre'].get_feature_names_out() if hasattr(gbm_pipe.named_steps['pre'], 'get_feature_names_out') else None
                     # Sklearn pipeline applied to DF works by column name usually
                     pace_hat = gbm_pipe.predict(X_evt)
                     
