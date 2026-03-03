@@ -156,14 +156,6 @@ pip install lightgbm --no-binary lightgbm
 ```
 The system will fall back to XGBoost or scikit-learn if LightGBM is unavailable.
 
-## Running Tests
-
-If you want to verify the code or contribute:
-```bash
-pip install pytest pytest-cov
-python -m pytest tests/ -v
-```
-
 ## License
 
 MIT – see [LICENSE](LICENSE)
