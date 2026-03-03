@@ -17,7 +17,7 @@ Thank you for your interest in contributing to F1 Predictor!
 1. Create a feature branch: `git checkout -b feature/your-feature-name`
 2. Make your changes
 3. Test that the tool still works: `python main.py --round next`
-4. Run tests: `python -m pytest --cov=f1pred tests/ -v`
+4. Run tests: `make test`
 5. Commit your changes with a clear message
 6. Push to your fork
 7. Open a Pull Request
