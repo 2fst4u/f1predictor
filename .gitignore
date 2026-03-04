@@ -35,6 +35,7 @@ htmlcov/
 .ruff_cache/
 
 # --- Packaging / build artifacts ---
+f1pred/_version.py
 build/
 dist/
 *.egg-info/
