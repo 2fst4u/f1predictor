@@ -123,23 +123,6 @@ def _get_session_datetime(race_info: Dict[str, Any], sess: str) -> Optional[date
         return None
 
 
-def _parse_lap_seconds(v) -> float:
-    """Accept numeric seconds or strings "M:SS.mmm" / "SS.mmm"."""
-    if v is None:
-        return np.nan
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip()
-    if not s:
-        return np.nan
-    try:
-        if ":" in s:
-            m, rest = s.split(":", 1)
-            return float(m) * 60.0 + float(rest)
-        return float(s)
-    except Exception:
-        return np.nan
-
 
 def _get_actual_positions_for_session(
     jc: JolpicaClient,
