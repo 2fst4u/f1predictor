@@ -25,6 +25,5 @@ def test_get_config(client):
 
 def test_get_schedule_invalid(client):
     # Testing error handling
-    # The current implementation of get_schedule might fail if season is invalid
     response = client.get("/api/schedule/invalid")
     assert response.status_code == 500
