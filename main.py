@@ -75,6 +75,9 @@ def parse_args() -> argparse.Namespace:
         choices=["debug", "info", "warning", "error"],
         help="Set logging verbosity (default: from config, or WARNING)"
     )
+    p.add_argument("--web", action="store_true", help="Start the Web UI server")
+    p.add_argument("--port", type=int, default=8000, help="Web UI port (default: 8000)")
+    p.add_argument("--host", type=str, default="127.0.0.1", help="Web UI host (default: 127.0.0.1)")
     return p.parse_args()
 
 
@@ -174,6 +177,14 @@ def main() -> None:
 
     if args.backtest:
         run_backtests(cfg)
+        return
+
+    if args.web:
+        import uvicorn
+        from f1pred.web import app, init_web
+        init_web(cfg)
+        print(f"{Fore.CYAN}Starting F1 Predictor Web UI on http://{args.host}:{args.port}{Style.RESET_ALL}")
+        uvicorn.run(app, host=args.host, port=args.port)
         return
 
     sessions = args.sessions or cfg.modelling.targets.session_types
