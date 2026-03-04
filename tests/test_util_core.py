@@ -1,7 +1,7 @@
 import logging
 import pytest
 from unittest.mock import patch, MagicMock
-from f1pred.util import configure_logging, session_with_retries
+from f1pred.util import configure_logging, session_with_retries, __version__
 
 def test_configure_logging():
     # Arrange
@@ -34,7 +34,10 @@ def test_session_with_retries():
     session = session_with_retries(total=2, connect=1, read=1)
 
     # Assert
-    assert session.headers["User-Agent"] == "f1predictor/1.1.0"
+    assert session.headers["User-Agent"].startswith("f1predictor/")
+    # Ensure it's not a generic placeholder
+    assert session.headers["User-Agent"] != "f1predictor/0.0.0"
+    assert session.headers["User-Agent"] == f"f1predictor/{__version__}"
 
     # Verify the HTTPAdapter is mounted and has correct max_retries
     adapter = session.get_adapter("http://")

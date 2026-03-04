@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68.0", "wheel", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "f1predictor"
-version = "1.1.0"
+dynamic = ["version"]
 description = "Formula 1 race outcome predictor using machine learning"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -27,10 +27,14 @@ Homepage = "https://github.com/2fst4u/f1predictor"
 Repository = "https://github.com/2fst4u/f1predictor"
 Issues = "https://github.com/2fst4u/f1predictor/issues"
 
+[tool.setuptools_scm]
+write_to = "f1pred/_version.py"
+
 [tool.coverage.run]
 omit = [
     "tests/*",
-    "f1pred/init.py"
+    "f1pred/init.py",
+    "f1pred/_version.py"
 ]
 
 [tool.coverage.report]

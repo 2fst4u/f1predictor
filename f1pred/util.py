@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import itertools
+import importlib.metadata
 from typing import Any, Dict, Optional
 from pathlib import Path
 from datetime import timedelta
@@ -20,7 +21,14 @@ colorama_init(autoreset=True)
 
 HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
-USER_AGENT = "f1predictor/1.1.0"
+
+try:
+    __version__ = importlib.metadata.version("f1predictor")
+except importlib.metadata.PackageNotFoundError:
+    # Fallback for local development if not installed
+    __version__ = "0.0.0.dev0"
+
+USER_AGENT = f"f1predictor/{__version__}"
 
 _UMASK_LOCK = threading.Lock()
 
