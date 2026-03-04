@@ -42,8 +42,17 @@
             <div class="container mx-auto flex justify-between items-center">
                 <h1 class="text-2xl font-black tracking-tighter italic">F1 OUTCOME PREDICTOR</h1>
                 <div class="flex items-center space-x-4">
+                    <div class="flex items-center bg-black bg-opacity-20 rounded-full px-3 py-1 mr-2">
+                        <span class="text-[10px] font-bold mr-2 uppercase">Live Mode</span>
+                        <button @click="toggleLive()"
+                                :class="liveMode ? 'bg-green-500' : 'bg-gray-600'"
+                                class="w-8 h-4 rounded-full relative transition duration-200 ease-in-out focus:outline-none">
+                            <div :class="liveMode ? 'translate-x-4' : 'translate-x-0'"
+                                 class="absolute left-0 top-0 w-4 h-4 bg-white rounded-full shadow transform transition duration-200 ease-in-out"></div>
+                        </button>
+                    </div>
                     <span class="text-xs font-bold bg-black bg-opacity-20 px-2 py-1 rounded" x-text="'v' + config.model_version"></span>
-                    <button @click="refreshData()" class="bg-black bg-opacity-20 hover:bg-opacity-30 p-2 rounded-full transition">
+                    <button @click="runPrediction()" class="bg-black bg-opacity-20 hover:bg-opacity-30 p-2 rounded-full transition">
                         <i class="fas fa-sync-alt" :class="loading ? 'animate-spin' : ''"></i>
                     </button>
                 </div>
@@ -256,6 +265,8 @@
         function f1App() {
             return {
                 loading: false,
+                liveMode: false,
+                liveInterval: null,
                 config: {},
                 params: {
                     season: '',
@@ -273,6 +284,21 @@
                         this.params.sessions = this.config.default_sessions || ['qualifying', 'race'];
                     } catch (e) {
                         console.error("Failed to load config", e);
+                    }
+                },
+
+                toggleLive() {
+                    this.liveMode = !this.liveMode;
+                    if (this.liveMode) {
+                        this.runPrediction();
+                        this.liveInterval = setInterval(() => {
+                            if (!this.loading) this.runPrediction();
+                        }, 30000);
+                    } else {
+                        if (this.liveInterval) {
+                            clearInterval(this.liveInterval);
+                            this.liveInterval = null;
+                        }
                     }
                 },
 
