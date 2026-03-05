@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Pre-build heavy C-extension dependencies as wheels
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip wheel -r requirements.txt -w /app/wheels
+    pip wheel -r requirements.txt -w /wheels
 
 # Copy necessary files for the build
 # We need .git to allow setuptools-scm to resolve the version
@@ -51,7 +51,7 @@ RUN apk add --no-cache \
 
 # Install Python dependencies first (for better caching)
 # Copy the built dependency wheels from the builder stage and install them
-COPY --from=builder /app/wheels/*.whl /tmp/wheels/
+COPY --from=builder /wheels/*.whl /tmp/wheels/
 RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 # Copy the built application wheel from the builder stage and install it
