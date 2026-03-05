@@ -39,25 +39,16 @@ def test_prediction_cache_basic(cache_dir):
 def test_prediction_cache_rolling(cache_dir):
     pc = PredictionCache(cache_dir, max_entries=2)
 
-    pc.set({"id": 1}, {"res": 1})
-    pc.set({"id": 2}, {"res": 2})
-
-    # Should still have both
-    assert pc.get({"id": 1}) is not None
-    assert pc.get({"id": 2}) is not None
-
-    # Set third, should trigger cleanup of oldest (which is now id 1 because we just 'get' id 2)
-    # Wait, pc.get(id 1) touched it last. So id 2 is oldest.
-    # Order: set 1 (1), set 2 (1, 2), get 1 (2, 1), get 2 (1, 2).
-    # Let's be explicit.
-
-    pc.set({"id": 1}, {"res": 1}) # mtime(1)
+    # Touches are based on mtime, let's sleep a bit to ensure distinct times
     import time
-    time.sleep(0.1)
-    pc.set({"id": 2}, {"res": 2}) # mtime(2)
-    time.sleep(0.1)
 
-    pc.set({"id": 3}, {"res": 3}) # should delete 1
+    pc.set({"id": 1}, {"res": 1})
+    time.sleep(0.01)
+    pc.set({"id": 2}, {"res": 2})
+    time.sleep(0.01)
+
+    # id 1 is oldest
+    pc.set({"id": 3}, {"res": 3})
 
     assert pc.get({"id": 1}) is None
     assert pc.get({"id": 2}) is not None

@@ -94,6 +94,27 @@
                 <p x-text="error"></p>
             </div>
 
+            <!-- Progress Logs -->
+            <div x-show="loading" x-transition x-cloak class="card p-4 mb-8 border-l-4 border-blue-500">
+                <div class="flex items-center mb-2">
+                    <i class="fas fa-terminal mr-2 text-blue-400"></i>
+                    <h3 class="text-xs font-bold uppercase tracking-widest text-gray-400">Prediction Progress</h3>
+                </div>
+                <div class="bg-black bg-opacity-30 rounded p-3 font-mono text-xs h-32 overflow-y-auto space-y-1" id="log-container">
+                    <template x-for="log in logs">
+                        <div class="flex">
+                            <span class="text-blue-500 mr-2">></span>
+                            <span class="text-gray-300" x-text="log"></span>
+                        </div>
+                    </template>
+                    <div class="flex items-center text-blue-400 animate-pulse">
+                        <span class="mr-2">></span>
+                        <span x-text="currentLog"></span>
+                        <span class="ml-1">...</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Results Section -->
             <div x-show="results && !loading" x-transition x-cloak>
                 <div class="flex items-center justify-between mb-4">
@@ -153,33 +174,39 @@
                             <div class="overflow-x-auto">
                                 <table class="w-full text-left">
                                     <thead>
-                                        <tr class="bg-gray-800 text-xs font-bold text-gray-400 uppercase tracking-wider">
-                                            <th class="p-4 w-12 text-center">Pos</th>
-                                            <th class="p-4">Driver</th>
-                                            <th class="p-4 hidden md:table-cell">Team</th>
-                                            <th class="p-4 text-center">Grid</th>
-                                            <th class="p-4">Win Prob</th>
-                                            <th class="p-4">Podium</th>
-                                            <th class="p-4">DNF</th>
-                                            <th class="p-4 text-right">Actual</th>
+                                        <tr class="bg-gray-800 text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-wider">
+                                            <th class="p-2 sm:p-4 w-8 sm:w-12 text-center">Pos</th>
+                                            <th class="p-2 sm:p-4">Driver</th>
+                                            <th class="p-2 sm:p-4 hidden md:table-cell">Team</th>
+                                            <th class="p-2 sm:p-4 text-center">Grid</th>
+                                            <th class="p-2 sm:p-4">
+                                                <span class="hidden sm:inline">Win Prob</span>
+                                                <span class="sm:hidden">Win %</span>
+                                            </th>
+                                            <th class="p-2 sm:p-4">
+                                                <span class="hidden sm:inline">Podium</span>
+                                                <span class="sm:hidden">Top 3</span>
+                                            </th>
+                                            <th class="p-2 sm:p-4">DNF</th>
+                                            <th class="p-2 sm:p-4 text-right">Actual</th>
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-gray-800">
                                         <template x-for="(p, index) in data.predictions" :key="p.driverId">
-                                            <tr class="hover:bg-gray-800 transition group" :class="getTeamClass(p.constructorName)">
-                                                <td class="p-4 text-center font-black italic text-lg"
+                                            <tr class="hover:bg-gray-800 transition group text-sm sm:text-base" :class="getTeamClass(p.constructorName)">
+                                                <td class="p-2 sm:p-4 text-center font-black italic text-base sm:text-lg"
                                                     :class="index < 3 ? 'text-yellow-500' : 'text-gray-500'"
                                                     x-text="p.predicted_position"></td>
-                                                <td class="p-4">
-                                                    <div class="flex items-center space-x-3">
+                                                <td class="p-2 sm:p-4">
+                                                    <div class="flex items-center space-x-2 sm:space-x-3">
                                                         <div class="font-bold uppercase tracking-tighter" x-text="p.code || '???'"></div>
-                                                        <div class="font-semibold text-gray-200 group-hover:text-white" x-text="p.name"></div>
+                                                        <div class="font-semibold text-gray-200 group-hover:text-white truncate max-w-[80px] sm:max-w-none" x-text="p.name"></div>
                                                     </div>
                                                 </td>
-                                                <td class="p-4 hidden md:table-cell">
+                                                <td class="p-2 sm:p-4 hidden md:table-cell">
                                                     <span class="text-sm text-gray-400" x-text="p.constructorName"></span>
                                                 </td>
-                                                <td class="p-4 text-center">
+                                                <td class="p-2 sm:p-4 text-center">
                                                     <div class="flex flex-col items-center">
                                                         <span class="font-bold" x-text="p.grid || '--'"></span>
                                                         <template x-if="p.grid && p.grid != p.predicted_position">
@@ -190,37 +217,37 @@
                                                         </template>
                                                     </div>
                                                 </td>
-                                                <td class="p-4">
-                                                    <div class="w-24">
-                                                        <div class="flex justify-between text-[10px] mb-1">
+                                                <td class="p-2 sm:p-4">
+                                                    <div class="w-16 sm:w-24">
+                                                        <div class="flex justify-between text-[10px] mb-0.5 sm:mb-1">
                                                             <span x-text="(p.p_win * 100).toFixed(1) + '%'"></span>
                                                         </div>
-                                                        <div class="progress-bar">
+                                                        <div class="progress-bar hidden sm:block">
                                                             <div class="progress-fill" :style="'width: ' + (p.p_win * 100) + '%; background-color: ' + getProbColor(p.p_win * 100)"></div>
                                                         </div>
                                                     </div>
                                                 </td>
-                                                <td class="p-4">
-                                                    <div class="w-24">
-                                                        <div class="flex justify-between text-[10px] mb-1">
+                                                <td class="p-2 sm:p-4">
+                                                    <div class="w-16 sm:w-24">
+                                                        <div class="flex justify-between text-[10px] mb-0.5 sm:mb-1">
                                                             <span x-text="(p.p_top3 * 100).toFixed(1) + '%'"></span>
                                                         </div>
-                                                        <div class="progress-bar">
+                                                        <div class="progress-bar hidden sm:block">
                                                             <div class="progress-fill" :style="'width: ' + (p.p_top3 * 100) + '%; background-color: ' + getProbColor(p.p_top3 * 100)"></div>
                                                         </div>
                                                     </div>
                                                 </td>
-                                                <td class="p-4">
-                                                    <div class="w-24">
-                                                        <div class="flex justify-between text-[10px] mb-1">
+                                                <td class="p-2 sm:p-4">
+                                                    <div class="w-16 sm:w-24">
+                                                        <div class="flex justify-between text-[10px] mb-0.5 sm:mb-1">
                                                             <span x-text="(p.p_dnf * 100).toFixed(1) + '%'"></span>
                                                         </div>
-                                                        <div class="progress-bar">
+                                                        <div class="progress-bar hidden sm:block">
                                                             <div class="progress-fill" :style="'width: ' + (p.p_dnf * 100) + '%; background-color: ' + getProbColor(p.p_dnf * 100, true)"></div>
                                                         </div>
                                                     </div>
                                                 </td>
-                                                <td class="p-4 text-right">
+                                                <td class="p-2 sm:p-4 text-right">
                                                     <template x-if="p.actual_position">
                                                         <span class="font-bold px-2 py-1 rounded"
                                                               :class="p.actual_position == p.predicted_position ? 'bg-green-600' : (Math.abs(p.actual_position - p.predicted_position) <= 2 ? 'bg-blue-600' : 'bg-gray-700')"
@@ -265,6 +292,8 @@
                 results: null,
                 activeSession: null,
                 error: null,
+                logs: [],
+                currentLog: 'Initializing',
 
                 async init() {
                     try {
@@ -288,6 +317,8 @@
                     this.loading = true;
                     this.error = null;
                     this.results = null;
+                    this.logs = [];
+                    this.currentLog = 'Starting prediction engine';
 
                     try {
                         const queryParams = new URLSearchParams();
@@ -295,15 +326,53 @@
                         if (this.params.round) queryParams.append('round', this.params.round);
                         this.params.sessions.forEach(s => queryParams.append('sessions', s));
 
-                        const resp = await fetch(`/api/predict?${queryParams.toString()}`);
-                        if (!resp.ok) {
-                            const err = await resp.json();
+                        const response = await fetch(`/api/predict/stream?${queryParams.toString()}`);
+                        if (!response.ok) {
+                            const err = await response.json();
                             throw new Error(err.detail || "Prediction failed");
                         }
 
-                        this.results = await resp.json();
-                        if (this.results.sessions) {
+                        const reader = response.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buffer = '';
+
+                        while (true) {
+                            const { value, done } = await reader.read();
+                            if (done) break;
+
+                            buffer += decoder.decode(value, { stream: true });
+                            const lines = buffer.split('\n');
+                            buffer = lines.pop();
+
+                            for (const line of lines) {
+                                if (line.startsWith('data: ')) {
+                                    try {
+                                        const payload = JSON.parse(line.substring(6));
+                                        if (payload.type === 'log') {
+                                            if (this.currentLog && this.currentLog !== payload.message) {
+                                                this.logs.push(this.currentLog);
+                                            }
+                                            this.currentLog = payload.message;
+                                            this.$nextTick(() => {
+                                                const container = document.getElementById('log-container');
+                                                if (container) container.scrollTop = container.scrollHeight;
+                                            });
+                                        } else if (payload.type === 'results') {
+                                            this.results = payload.data;
+                                        } else if (payload.type === 'error') {
+                                            throw new Error(payload.message);
+                                        }
+                                    } catch (e) {
+                                        console.error("Failed to parse SSE message", e);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (this.results && this.results.sessions) {
                             this.activeSession = Object.keys(this.results.sessions)[0];
+                        } else if (!this.error) {
+                            throw new Error("No results received from server");
                         }
                     } catch (e) {
                         this.error = e.message;
