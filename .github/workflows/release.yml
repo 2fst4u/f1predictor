@@ -1,4 +1,4 @@
-name: "Release: Test, Tag & Publish"
+name: "Release: Tag & Publish Stable"
 
 on:
   workflow_dispatch:
@@ -15,6 +15,7 @@ on:
 
 jobs:
   test:
+    name: "Quality Gate"
     uses: ./.github/workflows/tests.yml
 
   release:
