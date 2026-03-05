@@ -9,6 +9,7 @@ RUN apk add --no-cache \
     cmake \
     git \
     libstdc++ \
+    linux-headers \
     gcompat \
     openblas-dev
 
