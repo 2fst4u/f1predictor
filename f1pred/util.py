@@ -1,5 +1,6 @@
 import logging
 import json
+import hashlib
 import os
 import re
 import sys
@@ -13,6 +14,8 @@ from datetime import timedelta
 
 import requests
 import requests_cache
+import pandas as pd
+import numpy as np
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from colorama import init as colorama_init, Fore, Style
@@ -342,6 +345,97 @@ class StatusSpinner:
             print(f"{Fore.YELLOW}!{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
         else:
             print(f"{Fore.GREEN}+{Style.RESET_ALL} {self.message} {Style.DIM}{time_str}{Style.RESET_ALL}")
+
+class PredictionCache:
+    """
+    Persistent cache for prediction results.
+    Saves and reuses results based on a hash of input variables.
+    Implements a rolling basis cleanup (LRU-like by file modification time).
+    """
+    def __init__(self, cache_dir: str, max_entries: int = 100):
+        self.cache_dir = Path(cache_dir) / "predictions"
+        self.max_entries = max_entries
+        ensure_dirs(str(self.cache_dir))
+        self.logger = logging.getLogger(__name__)
+
+    def _generate_key(self, inputs: Dict[str, Any]) -> str:
+        """Generate a stable SHA-256 hash key from input variables."""
+        def serialize(obj):
+            if isinstance(obj, (pd.DataFrame, pd.Series)):
+                return obj.to_json(orient="split", date_format="iso")
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (datetime, pd.Timestamp)):
+                return obj.isoformat()
+            if hasattr(obj, "__dict__"):
+                return obj.__dict__
+            return str(obj)
+
+        # Sort keys to ensure stable hashing
+        serialized_inputs = json.dumps(inputs, default=serialize, sort_keys=True)
+        return hashlib.sha256(serialized_inputs.encode("utf-8")).hexdigest()
+
+    def get(self, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Retrieve cached results if available and valid."""
+        key = self._generate_key(inputs)
+        cache_file = self.cache_dir / f"{key}.json"
+
+        if not cache_file.exists():
+            return None
+
+        try:
+            with open(cache_file, "r") as f:
+                data = json.load(f)
+
+            # Reconstruct DataFrames from JSON strings
+            results = data["results"]
+            for k, v in results.items():
+                if isinstance(v, dict) and "columns" in v and "data" in v:
+                    from io import StringIO
+                    results[k] = pd.read_json(StringIO(json.dumps(v)), orient="split")
+                elif isinstance(v, list):
+                    results[k] = np.array(v)
+
+            # Update access time for LRU
+            cache_file.touch()
+            self.logger.info(f"[cache] Prediction cache hit: {key}")
+            return results
+        except Exception as e:
+            self.logger.warning(f"[cache] Failed to read prediction cache {key}: {e}")
+            return None
+
+    def set(self, inputs: Dict[str, Any], results: Dict[str, Any]) -> None:
+        """Save results to cache and perform rolling cleanup."""
+        key = self._generate_key(inputs)
+        cache_file = self.cache_dir / f"{key}.json"
+
+        def serialize(obj):
+            if isinstance(obj, (pd.DataFrame, pd.Series)):
+                # We return the dict from to_json(orient='split') to keep it nestable in JSON
+                return json.loads(obj.to_json(orient="split", date_format="iso"))
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            return str(obj)
+
+        try:
+            with open(cache_file, "w") as f:
+                json.dump({"inputs": inputs, "results": results}, f, default=serialize)
+
+            self._cleanup()
+            self.logger.info(f"[cache] Prediction cache saved: {key}")
+        except Exception as e:
+            self.logger.warning(f"[cache] Failed to save prediction cache {key}: {e}")
+
+    def _cleanup(self) -> None:
+        """Delete oldest cache files if max_entries is exceeded."""
+        files = sorted(self.cache_dir.glob("*.json"), key=lambda x: x.stat().st_mtime)
+        if len(files) > self.max_entries:
+            to_delete = files[:len(files) - self.max_entries]
+            for f in to_delete:
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
 
 def print_countdown(seconds: int, message: str = "Refreshing in") -> None:
     """

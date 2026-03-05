@@ -39,6 +39,9 @@ caching:
       historical_days: 30
     allowable_codes: [200, 203, 206, 300, 301, 308]
     stale_if_error: true
+  prediction_cache:
+    enabled: true
+    max_entries: 100
 
 modelling:
   recency_half_life_days:

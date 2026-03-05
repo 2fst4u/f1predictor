@@ -64,8 +64,15 @@ class RequestsCacheCfg:
 
 
 @dataclass
+class PredictionCacheCfg:
+    enabled: bool
+    max_entries: int
+
+
+@dataclass
 class Caching:
     requests_cache: RequestsCacheCfg
+    prediction_cache: PredictionCacheCfg
 
 
 @dataclass
@@ -299,7 +306,8 @@ def load_config(path: str) -> AppConfig:
         open_meteo=OpenMeteo(**ds_in["open_meteo"]),
     )
     rc_dc = RequestsCacheCfg(**cfg["caching"]["requests_cache"])
-    caching = Caching(requests_cache=rc_dc)
+    pc_dc = PredictionCacheCfg(**cfg["caching"].get("prediction_cache", {"enabled": True, "max_entries": 100}))
+    caching = Caching(requests_cache=rc_dc, prediction_cache=pc_dc)
     rh = RecencyHalfLives(**cfg["modelling"]["recency_half_life_days"])
     mc = MonteCarlo(**cfg["modelling"]["monte_carlo"])
     feat = FeaturesCfg(**cfg["modelling"]["features"])
