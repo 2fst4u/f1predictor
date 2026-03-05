@@ -4,7 +4,7 @@ This module orchestrates feature building, model training, simulation, and
 output generation for F1 race predictions.
 """
 from __future__ import annotations
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 from datetime import datetime, timezone, timedelta
 import os
 
@@ -323,6 +323,7 @@ def run_predictions_for_event(
     rnd: str,
     sessions: List[str],
     return_results: bool = False,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ):
     """Generate predictions for given event with terminal output only.
 
@@ -355,6 +356,7 @@ def run_predictions_for_event(
     )
 
     # --- Pre-fetch History (Consolidated) ---
+    if progress_callback: progress_callback("Pre-fetching history...")
     logger.info("[predict] Pre-fetching deep history for calibration and features...")
     now = datetime.now(timezone.utc)
     # Fetch enough history for both calibration (recent) and deep feature building (long term)
@@ -367,11 +369,13 @@ def run_predictions_for_event(
     )
 
     # --- Calibration Check ---
+    if progress_callback: progress_callback("Checking calibration...")
     # Initialize and check if we need to re-calibrate weights
     # This happens before any predictions to ensure we use fresh weights
     try:
         cm = CalibrationManager(cfg)
         if cm.check_calibration_needed(history_df=all_history):
+             if progress_callback: progress_callback("Running calibration...")
              # We need jc and om for history fetching/feature building
              cm.run_calibration(jc, om, history_df=all_history)
     except Exception as e:
@@ -410,6 +414,7 @@ def run_predictions_for_event(
 
 
     # Resolve event
+    if progress_callback: progress_callback("Resolving event details...")
     season_i, round_i, race_info = resolve_event(jc, season, rnd)
     event_title = f"{race_info.get('raceName') or 'Event'} {season_i} (Round {round_i})"
 
@@ -470,7 +475,7 @@ def run_predictions_for_event(
             ref_date = sess_dt if sess_dt else event_date
             
             # Wrap heavy operations in a spinner
-            with StatusSpinner(f"Predicting {event_title} - {sess}...") as spinner:
+            with StatusSpinner(f"Predicting {event_title} - {sess}...", on_update=progress_callback) as spinner:
                 # Convert accumulator to DataFrame for injection
                 extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
 
@@ -538,7 +543,7 @@ def run_predictions_for_event(
                         else:
                             # 2. Run simulation if not in loop
                             logger.info(f"[predict] {precursor} not in current loop - running simulation to estimate grid")
-                            spinner.update(f"Predicting {event_title} - {sess}: Simulating {precursor} for grid...")
+                            spinner.update(f"Simulating {precursor} for grid...")
                             # Note: _run_single_prediction does NOT see accumulated_history currently,
                             # but it's a cold start anyway if not in loop.
                             qual_ranked = _run_single_prediction(
@@ -566,7 +571,7 @@ def run_predictions_for_event(
                         logger.info(f"[predict] Using actual grid for {sess}")
 
                 # Train pace model
-                spinner.update(f"Predicting {event_title} - {sess}: Training pace model...")
+                spinner.update(f"Training pace model...")
                 pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
 
                 # Standardize GBM pace (z-score) but preserve variance
@@ -594,7 +599,7 @@ def run_predictions_for_event(
                 )
 
                 # --- Ensemble skill components (all data-driven) ---
-                spinner.update(f"Predicting {event_title} - {sess}: Running ensemble models...")
+                spinner.update(f"Running ensemble models...")
                 elo_pace = bt_pace = mixed_pace = None
                 elo_model = bt_model = mixed_model = None
 
@@ -674,7 +679,7 @@ def run_predictions_for_event(
                         dnf_prob[:] = 0.12
 
                 # Monte Carlo simulation
-                spinner.update(f"Predicting {event_title} - {sess}: Simulating Monte Carlo...")
+                spinner.update(f"Simulating Monte Carlo...")
                 draws = cfg.modelling.monte_carlo.draws
                 prob_matrix, mean_pos, pairwise = simulate_grid(
                     combined_pace,

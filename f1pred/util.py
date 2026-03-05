@@ -7,7 +7,7 @@ import threading
 import time
 import itertools
 import importlib.metadata
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 from pathlib import Path
 from datetime import timedelta
 
@@ -270,9 +270,10 @@ class StatusSpinner:
     Context manager that displays a spinning animation during long-running blocking operations.
     Suppress INFO logs while spinning to prevent visual clutter, but allows WARNING/ERROR.
     """
-    def __init__(self, message: str = "Processing...", delay: float = 0.1):
+    def __init__(self, message: str = "Processing...", delay: float = 0.1, on_update: Optional[Callable[[str], None]] = None):
         self.message = sanitize_for_console(message)
         self.delay = delay
+        self.on_update = on_update
         self.spinner = itertools.cycle(["-", "\\", "|", "/"])
         self.running = False
         self.thread = None
@@ -285,6 +286,8 @@ class StatusSpinner:
     def update(self, message: str) -> None:
         """Update the spinner message dynamically."""
         self.message = sanitize_for_console(message)
+        if self.on_update:
+            self.on_update(self.message)
 
     def set_status(self, status: str) -> None:
         """Set the completion status (e.g. 'success', 'skipped')."""
@@ -316,6 +319,9 @@ class StatusSpinner:
             sys.stdout.flush()
             self.thread = threading.Thread(target=self.spin)
             self.thread.start()
+
+        if self.on_update:
+            self.on_update(self.message)
 
         return self
 

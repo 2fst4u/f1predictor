@@ -153,3 +153,13 @@ def test_status_spinner_updates():
         assert s.message == "Initial"
         s.update("Updated")
         assert s.message == "Updated"
+
+def test_status_spinner_callback():
+    callback = MagicMock()
+    with StatusSpinner("Initial", on_update=callback) as s:
+        # Callback should be called on entry
+        callback.assert_called_once_with("Initial")
+        callback.reset_mock()
+
+        s.update("Updated")
+        callback.assert_called_once_with("Updated")
