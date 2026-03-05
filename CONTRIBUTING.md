@@ -37,6 +37,14 @@ Before submitting, ensure:
 - All tests pass locally (`make test`)
 - Code coverage does not drop below the required threshold
 
+## Releasing
+
+Versioning is automatic — every merge to `main` creates a patch version bump.
+
+For minor or major releases, use the **Release** workflow in GitHub Actions with the `workflow_dispatch` trigger. See [AGENTS.md](AGENTS.md) for full details.
+
+To skip a release, include `[skip release]` in the merge commit message.
+
 ## Questions?
 
 Open an issue for discussion before starting major changes.
