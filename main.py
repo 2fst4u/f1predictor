@@ -84,6 +84,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    global logger
     args = parse_args()
 
     # Conventional config search order
@@ -121,7 +122,6 @@ def main() -> None:
     configure_logging(log_level)
     
     # Re-get logger after configuration
-    global logger
     logger = get_logger(__name__)
 
     # Input validation (UX Improvement)
