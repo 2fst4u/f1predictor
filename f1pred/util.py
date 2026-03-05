@@ -7,10 +7,15 @@ import threading
 import time
 import itertools
 import importlib.metadata
+import hashlib
+import io
 from typing import Any, Dict, Optional, Callable
 from pathlib import Path
-from datetime import timedelta
+from datetime import datetime, timedelta
+from dataclasses import is_dataclass, asdict
 
+import pandas as pd
+import numpy as np
 import requests
 import requests_cache
 from requests.adapters import HTTPAdapter
@@ -375,3 +380,87 @@ def print_countdown(seconds: int, message: str = "Refreshing in") -> None:
         # Restore cursor
         sys.stdout.write(SHOW_CURSOR)
         sys.stdout.flush()
+
+
+class PredictionCache:
+    """
+    Persistent, disk-based rolling cache for prediction results.
+    Uses SHA-256 hashes of input variables as keys.
+    """
+    def __init__(self, cache_dir: str, max_entries: int = 50):
+        self.cache_dir = Path(cache_dir) / "predictions"
+        self.max_entries = max_entries
+        self.lock = threading.Lock()
+        ensure_dirs(str(self.cache_dir))
+
+    def _serialize(self, obj: Any, sort_dict: bool = False) -> Any:
+        """Recursively serialize objects for caching."""
+        if isinstance(obj, pd.DataFrame):
+            return obj.to_json(orient="split")
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, (datetime, pd.Timestamp)):
+            return obj.isoformat()
+        if is_dataclass(obj):
+            return self._serialize(asdict(obj), sort_dict=sort_dict)
+        if isinstance(obj, dict):
+            items = sorted(obj.items()) if sort_dict else obj.items()
+            return {k: self._serialize(v, sort_dict=sort_dict) for k, v in items}
+        if isinstance(obj, list):
+            return [self._serialize(i, sort_dict=sort_dict) for i in obj]
+        return str(obj) if sort_dict else obj
+
+    def _generate_key(self, inputs: Dict[str, Any]) -> str:
+        """Generate a stable SHA-256 hash from a dictionary of inputs."""
+        serialized_input = json.dumps(self._serialize(inputs, sort_dict=True), sort_keys=True)
+        return hashlib.sha256(serialized_input.encode("utf-8")).hexdigest()
+
+    def get(self, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Retrieve cached prediction results if they exist."""
+        key = self._generate_key(inputs)
+        cache_file = self.cache_dir / f"{key}.json"
+
+        with self.lock:
+            if cache_file.exists():
+                try:
+                    with open(cache_file, "r") as f:
+                        data = json.load(f)
+
+                    # Deserialization of DataFrames
+                    if "ranked" in data and isinstance(data["ranked"], str):
+                        data["ranked"] = pd.read_json(io.StringIO(data["ranked"]), orient="split")
+                    if "prob_matrix" in data and isinstance(data["prob_matrix"], list):
+                        data["prob_matrix"] = np.array(data["prob_matrix"])
+                    if "pairwise" in data and isinstance(data["pairwise"], list):
+                        data["pairwise"] = np.array(data["pairwise"])
+
+                    # Update modification time to keep it in the rolling cache
+                    cache_file.touch()
+                    return data
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"Failed to load prediction cache {key}: {e}")
+        return None
+
+    def set(self, inputs: Dict[str, Any], results: Dict[str, Any]) -> None:
+        """Save prediction results to the cache."""
+        key = self._generate_key(inputs)
+        cache_file = self.cache_dir / f"{key}.json"
+
+        with self.lock:
+            try:
+                # Rolling deletion if limit exceeded
+                files = sorted(self.cache_dir.glob("*.json"), key=os.path.getmtime)
+                if len(files) >= self.max_entries:
+                    # Delete the oldest one(s)
+                    for f in files[:len(files) - self.max_entries + 1]:
+                        try:
+                            f.unlink()
+                        except Exception:
+                            pass
+
+                # Save new entry
+                serialized_data = self._serialize(results)
+                with open(cache_file, "w") as f:
+                    json.dump(serialized_data, f)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Failed to save prediction cache {key}: {e}")

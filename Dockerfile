@@ -58,12 +58,16 @@ RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 COPY --from=builder /app/dist/*.whl /tmp/app_wheel/
 RUN pip install --no-cache-dir /tmp/app_wheel/*.whl && rm -rf /tmp/app_wheel
 
-# Copy only required runtime files
-COPY main.py config.yaml calibration_weights.json ./
-
-# Create cache directories with appropriate permissions
-RUN mkdir -p .cache/http_cache .cache/fastf1 .cache/matplotlib && \
+# Create config and cache directories with appropriate permissions
+RUN mkdir -p /config .cache/matplotlib && \
+    chmod 777 /config && \
     chmod -R 777 .cache
+
+# Copy only required runtime files
+COPY main.py ./
+COPY config.yaml calibration_weights.json /config/
+# Symlink for local fallback if needed
+RUN ln -s /config/config.yaml ./config.yaml
 
 # Expose the port the app runs on
 EXPOSE 8000

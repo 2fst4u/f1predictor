@@ -9,8 +9,8 @@ app:
   log_level: "WARNING"  # DEBUG, INFO, WARNING, ERROR - reduces default verbosity
 
 paths:
-  cache_dir: ".cache/f1pred"
-  fastf1_cache: ".cache/fastf1"
+  cache_dir: "cache"
+  fastf1_cache: "fastf1_cache"
 
 data_sources:
   jolpica:
@@ -39,6 +39,8 @@ caching:
       historical_days: 30
     allowable_codes: [200, 203, 206, 300, 301, 308]
     stale_if_error: true
+  prediction_cache:
+    max_entries: 50
 
 modelling:
   recency_half_life_days:
