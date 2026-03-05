@@ -34,8 +34,13 @@ Add `[skip release]` to the merge commit message to skip automatic patch bumping
 | Workflow | File | Triggers | Purpose |
 |----------|------|----------|---------|
 | Tests | `tests.yml` | PR to `main` | Runs pytest suite |
-| Release | `release.yml` | Push to `main`, manual dispatch | Creates semver tag + GitHub Release |
-| Docker | `docker-publish.yml` | Push to `main`, tag `v*.*.*`, PR | Builds and pushes Docker image to GHCR |
+| Release | `release.yml` | Push to `main`, manual dispatch | Creates semver tag, GitHub Release, **and builds+pushes Docker image** |
+| Docker | `docker-publish.yml` | Push to `main`, tag `v*.*.*`, PR | Builds Docker image; pushes on non-PR events |
+
+> [!IMPORTANT]
+> Tags pushed by `GITHUB_TOKEN` do not trigger other workflows (GitHub limitation).
+> This is why `release.yml` builds Docker images directly instead of relying on
+> `docker-publish.yml` to be triggered by the tag push.
 
 ### Docker Image Tags
 

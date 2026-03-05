@@ -67,3 +67,20 @@ class TestReleaseInfrastructure:
             "docker-publish.yml must trigger on v*.*.* tags so that "
             "release tags produce Docker images"
         )
+
+    def test_release_workflow_builds_docker(self):
+        """release.yml must build and push Docker images directly.
+
+        Tags pushed by GITHUB_TOKEN do not trigger other workflows,
+        so the release workflow must handle Docker builds itself.
+        """
+        workflow = ROOT / ".github" / "workflows" / "release.yml"
+        content = workflow.read_text()
+        assert "docker/build-push-action" in content, (
+            "release.yml must include docker/build-push-action because "
+            "tags pushed by GITHUB_TOKEN do not trigger other workflows"
+        )
+        assert "packages: write" in content, (
+            "release.yml must have packages: write permission to push "
+            "Docker images to GHCR"
+        )
