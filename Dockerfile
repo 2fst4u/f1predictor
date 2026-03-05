@@ -10,13 +10,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install build tools
-RUN pip install --no-cache-dir setuptools>=68.0 wheel setuptools-scm>=8.0
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install setuptools>=68.0 wheel setuptools-scm>=8.0
 
-# Copy only files needed for the build
+# Copy necessary files for the build
+# We need .git to allow setuptools-scm to resolve the version
+COPY .git/ .git/
 COPY pyproject.toml .
 COPY README.md .
 COPY f1pred/ f1pred/
-COPY .git/ .git/
 
 # Build the wheel (this also generates f1pred/_version.py automatically)
 RUN python -m pip wheel . --no-deps -w dist
@@ -25,40 +27,37 @@ RUN python -m pip wheel . --no-deps -w dist
 FROM python:3.12-slim
 
 # Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
 # Install runtime system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies first (for better caching)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
-# Copy the built wheel from the builder stage
+# Copy the built wheel from the builder stage and install it
 COPY --from=builder /app/dist/*.whl .
-
-# Install the wheel
 RUN pip install --no-cache-dir *.whl && rm *.whl
 
-# Copy remaining project files (main.py, configs, etc.)
-COPY . .
+# Copy only required runtime files
+COPY main.py config.yaml calibration_weights.json ./
 
-# Remove unnecessary files from the image
-RUN rm -rf .git f1pred/ tests/ pyproject.toml
-
-# Create cache directories
-RUN mkdir -p .cache/http_cache .cache/fastf1
+# Create cache directories with appropriate permissions
+RUN mkdir -p .cache/http_cache .cache/fastf1 && \
+    chmod -R 777 .cache
 
 # Expose the port the app runs on
 EXPOSE 8000
 
 # Run the web server by default
-# Note: Since the package is installed, we can also use a script or module execution.
 ENTRYPOINT ["python", "main.py"]
 CMD ["--web", "--host", "0.0.0.0", "--port", "8000"]
