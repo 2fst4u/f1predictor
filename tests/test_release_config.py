@@ -27,14 +27,14 @@ class TestReleaseInfrastructure:
             "setuptools-scm must write version to f1pred/_version.py"
         )
 
-    def test_docker_publish_has_semver_tags(self):
-        """docker-publish.yml must have semver tag patterns for versioned images."""
-        workflow = ROOT / ".github" / "workflows" / "docker-publish.yml"
-        assert workflow.exists(), "docker-publish.yml not found"
+    def test_release_workflow_has_semver_tags(self):
+        """release.yml must have semver tag patterns for versioned images."""
+        workflow = ROOT / ".github" / "workflows" / "release.yml"
+        assert workflow.exists(), "release.yml not found"
         content = workflow.read_text()
         assert "type=semver" in content, (
-            "docker-publish.yml must include type=semver tag patterns "
-            "to produce versioned Docker images from git tags"
+            "release.yml must include type=semver tag patterns "
+            "to produce versioned Docker images"
         )
 
     def test_dockerfile_copies_git_dir(self):
@@ -59,13 +59,24 @@ class TestReleaseInfrastructure:
             "release.yml must trigger on push to main for auto-patch"
         )
 
-    def test_docker_publish_triggers_on_tags(self):
-        """docker-publish.yml must trigger on v*.*.* tag pushes."""
+    def test_docker_publish_is_pr_only(self):
+        """docker-publish.yml must only trigger on PRs to avoid duplicate builds.
+
+        release.yml handles push-to-main Docker builds with semver tags.
+        docker-publish.yml should only validate Dockerfile builds on PRs.
+        """
         workflow = ROOT / ".github" / "workflows" / "docker-publish.yml"
         content = workflow.read_text()
-        assert "v*.*.*" in content, (
-            "docker-publish.yml must trigger on v*.*.* tags so that "
-            "release tags produce Docker images"
+        assert "pull_request" in content, (
+            "docker-publish.yml must trigger on pull_request"
+        )
+        # Ensure no push trigger that would duplicate release.yml
+        import yaml
+        parsed = yaml.safe_load(content)
+        triggers = parsed.get(True, {})  # 'on' parses as True in PyYAML
+        assert "push" not in triggers, (
+            "docker-publish.yml must NOT trigger on push — "
+            "release.yml handles push-to-main Docker builds"
         )
 
     def test_release_workflow_builds_docker(self):
