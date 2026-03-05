@@ -32,7 +32,12 @@ logger = get_logger(__name__)
 
 
 def resolve_event(jc: JolpicaClient, season: Optional[str], rnd: str) -> Tuple[int, int, Dict[str, Any]]:
-    """Resolve season/round to use. Never raises; falls back to current/last if needed."""
+    """Resolve season/round to use. Falls back to current/last if needed."""
+    # Explicitly validate inputs before the fallback try-block to catch fundamentally invalid requests
+    if season is not None and str(season).lower() != "current":
+        jc._validate_season(str(season))
+    jc._validate_round(str(rnd))
+
     try:
         if season is None or (isinstance(season, str) and season.lower() == "current"):
             if rnd == "next":
