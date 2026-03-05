@@ -62,7 +62,7 @@ When a release tag is created, Docker images get these tags on `ghcr.io/2fst4u/f
 ## Testing
 
 ```bash
-make test                              # Run full test suite
+python -m pytest --cov=f1pred tests/ -v  # Run full test suite
 python -m pytest tests/test_release_config.py -v  # Validate release infrastructure
 ```
 
