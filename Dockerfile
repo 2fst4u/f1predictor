@@ -1,17 +1,26 @@
 # --- Stage 1: Build Stage ---
-FROM python:3.12-slim AS builder
+FROM python:3.12-alpine AS builder
 
 WORKDIR /app
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+RUN apk add --no-cache \
+    build-base \
+    cmake \
     git \
-    && rm -rf /var/lib/apt/lists/*
+    libstdc++ \
+    linux-headers \
+    gcompat \
+    openblas-dev
 
 # Install build tools
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install setuptools>=68.0 wheel setuptools-scm>=8.0
+
+# Pre-build heavy C-extension dependencies as wheels
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip wheel -r requirements.txt -w /wheels
 
 # Copy necessary files for the build
 # We need .git to allow setuptools-scm to resolve the version
@@ -20,34 +29,34 @@ COPY pyproject.toml .
 COPY README.md .
 COPY f1pred/ f1pred/
 
-# Build the wheel (this also generates f1pred/_version.py automatically)
+# Build the application wheel (this also generates f1pred/_version.py automatically)
 RUN python -m pip wheel . --no-deps -w dist
 
 # --- Stage 2: Final Runtime Stage ---
-FROM python:3.12-slim
+FROM python:3.12-alpine
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive \
     MPLCONFIGDIR=/app/.cache/matplotlib
 
 WORKDIR /app
 
 # Install runtime system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgomp1 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+    libgomp \
+    libstdc++ \
+    gcompat \
+    openblas
 
 # Install Python dependencies first (for better caching)
-COPY requirements.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt
+# Copy the built dependency wheels from the builder stage and install them
+COPY --from=builder /wheels/*.whl /tmp/wheels/
+RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
-# Copy the built wheel from the builder stage and install it
-COPY --from=builder /app/dist/*.whl .
-RUN pip install --no-cache-dir *.whl && rm *.whl
+# Copy the built application wheel from the builder stage and install it
+COPY --from=builder /app/dist/*.whl /tmp/app_wheel/
+RUN pip install --no-cache-dir /tmp/app_wheel/*.whl && rm -rf /tmp/app_wheel
 
 # Copy only required runtime files
 COPY main.py config.yaml calibration_weights.json ./
