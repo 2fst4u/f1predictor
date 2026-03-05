@@ -15,10 +15,11 @@ on:
 
 jobs:
   test:
-    name: "Quality Gate"
+    name: "1. Unit Tests"
     uses: ./.github/workflows/tests.yml
 
   release:
+    name: "2. Tag & Publish"
     needs: test
     runs-on: ubuntu-latest
     permissions:

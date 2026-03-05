@@ -11,10 +11,11 @@ env:
 
 jobs:
   test:
-    name: "Quality Gate"
+    name: "1. Unit Tests"
     uses: ./.github/workflows/tests.yml
 
   build:
+    name: "2. Build & Publish"
     needs: test
     runs-on: ubuntu-latest
     permissions:
