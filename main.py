@@ -22,6 +22,7 @@ Examples:
 """
 
 import argparse
+import os
 
 from colorama import Fore, Style
 import sys
