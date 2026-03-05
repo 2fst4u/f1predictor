@@ -29,7 +29,8 @@ FROM python:3.12-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    MPLCONFIGDIR=/app/.cache/matplotlib
 
 WORKDIR /app
 
@@ -52,7 +53,7 @@ RUN pip install --no-cache-dir *.whl && rm *.whl
 COPY main.py config.yaml calibration_weights.json ./
 
 # Create cache directories with appropriate permissions
-RUN mkdir -p .cache/http_cache .cache/fastf1 && \
+RUN mkdir -p .cache/http_cache .cache/fastf1 .cache/matplotlib && \
     chmod -R 777 .cache
 
 # Expose the port the app runs on
