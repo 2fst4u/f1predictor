@@ -1,9 +1,7 @@
-name: "Quality: Run Unit Tests"
+name: "Quality: Unit Tests"
 
 on:
   workflow_call: {}
-  pull_request:
-    branches: [main]
 
 jobs:
   test:
