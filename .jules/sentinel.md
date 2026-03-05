@@ -45,3 +45,8 @@
 **Vulnerability:** The `JolpicaClient` constructed API URLs using `driverId` directly from the API response without validation. While the source was trusted (API response), a compromised API or Man-in-the-Middle attack could potentially inject path traversal characters (e.g., `../../etc/passwd`) or other malicious payloads via `driverId`.
 **Learning:** Even "trusted" data sources like external APIs should be treated as potentially malicious when used in critical contexts like URL construction or file paths. Defense in depth requires explicit validation of all inputs.
 **Prevention:** Added `_validate_driver_id` to strictly whitelist alphanumeric characters, underscores, hyphens, and periods, rejecting any input containing `..` or other special characters.
+
+## 2025-05-25 - Information Exposure via HTTP 500 Responses
+**Vulnerability:** The FastAPI endpoints in `web.py` caught generic exceptions and returned `str(e)` directly to the client in the 500 response body (e.g., via `HTTPException(status_code=500, detail=str(e))`). This could leak sensitive internal information, such as file paths, validation patterns, or internal API structures.
+**Learning:** Catching generic exceptions and exposing their string representation to end-users violates the principle of failing securely. Error details should be logged internally, while generic messages should be returned to clients.
+**Prevention:** Ensure that global exception handlers or endpoint-specific `except Exception` blocks log the full stack trace server-side (using `logger.exception`) but return a static, generic error message (like "Internal server error") to the client.

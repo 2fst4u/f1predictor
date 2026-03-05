@@ -55,4 +55,6 @@ Thumbs.db
 .env.*
 *.pem
 *.key
-*.crt
+*.crtcache/
+cache/
+fastf1_cache/
