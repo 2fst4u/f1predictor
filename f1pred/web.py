@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .config import AppConfig
-from .util import get_logger, init_caches, ensure_dirs
+from .util import get_logger, init_caches, ensure_dirs, __version__
 from .predict import run_predictions_for_event, resolve_event
 from .data.jolpica import JolpicaClient
 from .data.fastf1_backend import init_fastf1
@@ -51,6 +51,7 @@ async def get_web_config():
         return {"error": "Config not initialized"}
     return {
         "model_version": _config.app.model_version,
+        "app_version": __version__,
         "default_sessions": _config.modelling.targets.session_types
     }
 

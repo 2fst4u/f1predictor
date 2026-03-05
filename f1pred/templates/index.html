@@ -41,8 +41,9 @@
         <header class="f1-red shadow-lg p-4">
             <div class="container mx-auto flex justify-between items-center">
                 <h1 class="text-2xl font-black tracking-tighter italic">F1 OUTCOME PREDICTOR</h1>
-                <div class="flex items-center space-x-4">
-                    <span class="text-xs font-bold bg-black bg-opacity-20 px-2 py-1 rounded" x-text="'v' + config.model_version"></span>
+                <div class="flex items-center space-x-2">
+                    <span class="text-[10px] font-bold text-white text-opacity-60 uppercase tracking-tighter" x-text="'M:' + config.model_version"></span>
+                    <span class="text-xs font-bold bg-black bg-opacity-20 px-2 py-1 rounded" x-text="'v' + config.app_version"></span>
                     <button @click="refreshData()" class="bg-black bg-opacity-20 hover:bg-opacity-30 p-2 rounded-full transition">
                         <i class="fas fa-sync-alt" :class="loading ? 'animate-spin' : ''"></i>
                     </button>
@@ -139,31 +140,31 @@
                     <div x-show="activeSession === sess" x-transition>
 
                         <!-- Weather Info -->
-                        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                        <div class="grid grid-cols-3 md:grid-cols-5 gap-2 sm:gap-4 mb-6">
                             <template x-if="data.weather && data.weather.temp_mean">
-                                <div class="card p-3 flex items-center space-x-3">
-                                    <div class="text-2xl text-yellow-500"><i class="fas fa-thermometer-half"></i></div>
+                                <div class="card p-2 md:p-3 flex items-center space-x-2 md:space-x-3">
+                                    <div class="text-xl md:text-2xl text-yellow-500"><i class="fas fa-thermometer-half"></i></div>
                                     <div>
-                                        <div class="text-xs text-gray-400 uppercase">Temp</div>
-                                        <div class="font-bold" x-text="Math.round(data.weather.temp_mean) + '°C'"></div>
+                                        <div class="text-[10px] md:text-xs text-gray-400 uppercase">Temp</div>
+                                        <div class="font-bold text-xs md:text-base" x-text="Math.round(data.weather.temp_mean) + '°C'"></div>
                                     </div>
                                 </div>
                             </template>
                             <template x-if="data.weather && data.weather.rain_sum !== undefined">
-                                <div class="card p-3 flex items-center space-x-3">
-                                    <div class="text-2xl text-blue-500"><i class="fas fa-cloud-rain"></i></div>
+                                <div class="card p-2 md:p-3 flex items-center space-x-2 md:space-x-3">
+                                    <div class="text-xl md:text-2xl text-blue-500"><i class="fas fa-cloud-rain"></i></div>
                                     <div>
-                                        <div class="text-xs text-gray-400 uppercase">Rain</div>
-                                        <div class="font-bold" x-text="data.weather.rain_sum.toFixed(1) + 'mm'"></div>
+                                        <div class="text-[10px] md:text-xs text-gray-400 uppercase">Rain</div>
+                                        <div class="font-bold text-xs md:text-base" x-text="data.weather.rain_sum.toFixed(1) + 'mm'"></div>
                                     </div>
                                 </div>
                             </template>
                             <template x-if="data.weather && data.weather.wind_mean">
-                                <div class="card p-3 flex items-center space-x-3">
-                                    <div class="text-2xl text-gray-400"><i class="fas fa-wind"></i></div>
+                                <div class="card p-2 md:p-3 flex items-center space-x-2 md:space-x-3">
+                                    <div class="text-xl md:text-2xl text-gray-400"><i class="fas fa-wind"></i></div>
                                     <div>
-                                        <div class="text-xs text-gray-400 uppercase">Wind</div>
-                                        <div class="font-bold" x-text="Math.round(data.weather.wind_mean) + 'km/h'"></div>
+                                        <div class="text-[10px] md:text-xs text-gray-400 uppercase">Wind</div>
+                                        <div class="font-bold text-xs md:text-base" x-text="Math.round(data.weather.wind_mean) + 'km/h'"></div>
                                     </div>
                                 </div>
                             </template>
