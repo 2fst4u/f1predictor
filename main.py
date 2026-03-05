@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    p.add_argument("--config", type=str, default="config.yaml")
+    p.add_argument("--config", type=str, default=None)
     p.add_argument("--season", type=str, default=None)
     p.add_argument("--round", type=str, default="next")
     p.add_argument(
@@ -83,7 +83,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    cfg: AppConfig = load_config(args.config)
+
+    # Conventional config search order
+    config_path = args.config
+    if config_path is None:
+        if os.path.exists("/config/config.yaml"):
+            config_path = "/config/config.yaml"
+        else:
+            config_path = "config.yaml"
+
+    cfg: AppConfig = load_config(config_path)
 
     # Configure logging - CLI overrides config
     log_level = args.log_level.upper() if args.log_level else cfg.app.log_level

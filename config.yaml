@@ -9,8 +9,8 @@ app:
   log_level: "WARNING"  # DEBUG, INFO, WARNING, ERROR - reduces default verbosity
 
 paths:
-  cache_dir: ".cache/f1pred"
-  fastf1_cache: ".cache/fastf1"
+  cache_dir: "cache"
+  fastf1_cache: "fastf1_cache"
 
 data_sources:
   jolpica:

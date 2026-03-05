@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 from pathlib import Path
 import os
 import yaml
@@ -182,8 +182,11 @@ _ALLOWED_TEMP_UNITS = {"celsius", "fahrenheit"}
 _ALLOWED_WIND_UNITS = {"kmh", "ms", "mph", "kn"}
 _ALLOWED_PRECIP_UNITS = {"mm", "inch"}
 
-def _norm_path(p: str) -> str:
-    return str(Path(os.path.expandvars(os.path.expanduser(p))))
+def _norm_path(p: str, base_dir: Optional[Path] = None) -> str:
+    path = Path(os.path.expandvars(os.path.expanduser(p)))
+    if base_dir and not path.is_absolute():
+        path = base_dir / path
+    return str(path.resolve())
 
 
 def _require(d: Dict, key: str, ctx: str):
@@ -197,7 +200,10 @@ def _is_http_url(s: str) -> bool:
 
 
 def load_config(path: str) -> AppConfig:
-    with open(path, "r", encoding="utf-8") as f:
+    config_path = Path(path).resolve()
+    base_dir = config_path.parent
+
+    with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     errors: List[str] = []
@@ -215,7 +221,7 @@ def load_config(path: str) -> AppConfig:
         if k not in paths_in:
             errors.append(f"Missing paths.{k}")
     if not errors:
-        paths_in = {k: _norm_path(v) for k, v in paths_in.items()}
+        paths_in = {k: _norm_path(v, base_dir) for k, v in paths_in.items()}
 
     # Data source URL sanity and unit checks
     ds_in = cfg["data_sources"]
@@ -330,7 +336,11 @@ def load_config(path: str) -> AppConfig:
         pace_scale=pace_scale,
     )
     backtesting = Backtesting(**cfg["backtesting"])
-    calibration = CalibrationCfg(**cfg["calibration"])
+
+    cal_in = cfg["calibration"]
+    if "weights_file" in cal_in:
+        cal_in["weights_file"] = _norm_path(cal_in["weights_file"], base_dir)
+    calibration = CalibrationCfg(**cal_in)
 
     return AppConfig(
         app=app,
