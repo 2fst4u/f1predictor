@@ -3,8 +3,12 @@ from typing import List, Optional, Dict, Any
 import os
 from datetime import datetime, timezone
 
+import json
+import threading
+import queue
+import math
 from fastapi import FastAPI, Request, Query, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -116,3 +120,75 @@ async def get_predictions(
     except Exception as e:
         logger.exception("Prediction failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/predict/stream")
+async def get_predictions_stream(
+    season: Optional[str] = None,
+    round: str = "next",
+    sessions: List[str] = Query(None)
+):
+    if not _config:
+         raise HTTPException(status_code=500, detail="Application not configured")
+
+    def run_and_collect(q: queue.Queue):
+        try:
+            target_sessions = sessions or _config.modelling.targets.session_types
+
+            def progress_cb(msg: str):
+                q.put({"type": "log", "message": msg})
+
+            results = run_predictions_for_event(
+                _config,
+                season=season,
+                rnd=round,
+                sessions=target_sessions,
+                return_results=True,
+                progress_callback=progress_cb
+            )
+
+            if not results:
+                q.put({"type": "error", "message": "No results generated"})
+                return
+
+            # Convert results to JSON-serializable format (similar to /api/predict)
+            output = {
+                "season": results["season"],
+                "round": results["round"],
+                "sessions": {}
+            }
+
+            for sess, data in results["sessions"].items():
+                ranked_df = data["ranked"]
+                ranked_list = ranked_df.to_dict(orient="records")
+                for row in ranked_list:
+                    for k, v in row.items():
+                        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                            row[k] = None
+                        elif hasattr(v, "isoformat"):
+                            row[k] = v.isoformat()
+
+                output["sessions"][sess] = {
+                    "predictions": ranked_list,
+                    "weather": data.get("meta", {}).get("weather", {})
+                }
+
+            q.put({"type": "results", "data": output})
+        except Exception as e:
+            logger.exception("Streaming prediction failed")
+            q.put({"type": "error", "message": str(e)})
+        finally:
+            q.put(None) # Sentinel to close stream
+
+    def event_generator():
+        q = queue.Queue()
+        thread = threading.Thread(target=run_and_collect, args=(q,))
+        thread.start()
+
+        while True:
+            item = q.get()
+            if item is None:
+                break
+
+            yield f"data: {json.dumps(item)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
