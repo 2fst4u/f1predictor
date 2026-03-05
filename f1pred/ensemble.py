@@ -137,7 +137,9 @@ class BradleyTerryModel:
         dates = pd.to_datetime(races["date"], utc=True)
         ref_ts = pd.Timestamp(ref_date).tz_convert(timezone.utc)
         
-        ages = (ref_ts - dates).dt.total_seconds() / 86400.0
+        # Optimization: Direct numpy operations on datetime64[ns] are significantly faster than .dt.total_seconds()
+        diff = ref_ts.to_datetime64() - dates.values
+        ages = diff.astype('timedelta64[ns]').astype(float) / 86400000000000.0
         w = np.exp2(-ages / max(1.0, half_life_days))
         
         races["w"] = w
@@ -151,10 +153,10 @@ class BradleyTerryModel:
         
         max_pos = float(races["position"].max() or 20.0)
         
-        for d, row in grp.iterrows():
-            w_mean = row["w_pos_sum"] / max(1e-6, row["w_sum"])
-            # smaller average position => higher strength
-            self.strength_[str(d)] = (max_pos - float(w_mean)) / max_pos
+        # Optimization: Vectorized calculation instead of iterrows
+        w_mean = grp["w_pos_sum"] / grp["w_sum"].clip(lower=1e-6)
+        strengths = ((max_pos - w_mean) / max_pos).to_dict()
+        self.strength_ = {str(k): float(v) for k, v in strengths.items()}
 
         logger.info("[ensemble.bt] Inferred strengths for %d drivers", len(self.strength_))
         return self
@@ -218,7 +220,10 @@ class MixedEffectsLikeModel:
             
         dates = pd.to_datetime(races["date"], utc=True)
         ref_ts = pd.Timestamp(ref_date).tz_convert(timezone.utc)
-        ages = (ref_ts - dates).dt.total_seconds() / 86400.0
+
+        # Optimization: Direct numpy operations on datetime64[ns] are significantly faster than .dt.total_seconds()
+        diff = ref_ts.to_datetime64() - dates.values
+        ages = diff.astype('timedelta64[ns]').astype(float) / 86400000000000.0
         w = np.exp2(-ages / max(1.0, half_life_days))
         races["w"] = w
         
