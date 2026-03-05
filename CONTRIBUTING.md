@@ -39,11 +39,9 @@ Before submitting, ensure:
 
 ## Releasing
 
-Versioning is automatic — every merge to `main` creates a patch version bump.
+Prerelease Docker images are built automatically on every push to any branch.
 
-For minor or major releases, use the **Release** workflow in GitHub Actions with the `workflow_dispatch` trigger. See [AGENTS.md](AGENTS.md) for full details.
-
-To skip a release, include `[skip release]` in the merge commit message.
+For stable releases, use the **Release & Publish** workflow in GitHub Actions (manual trigger). See [AGENTS.md](AGENTS.md) for full details.
 
 ## Questions?
 

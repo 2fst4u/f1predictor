@@ -10,47 +10,43 @@ Python ML application for Formula 1 race predictions. Uses `setuptools-scm` for 
 
 - **Source of truth**: Git tags in `v{major}.{minor}.{patch}` format (e.g. `v0.1.0`)
 - **`setuptools-scm`** reads the latest tag to set the Python package version at build time
-- **Docker images** are tagged with semver via `docker/metadata-action` in `docker-publish.yml`
+- **Prerelease images** use `{next-patch}-pre.{N}` format (numerically increasing for Flux)
 
-### Automatic Releases
+### Prerelease Builds (automatic)
 
-Every merge to `main` automatically creates a **patch bump** via `.github/workflows/release.yml`.  
-No action needed for bugfixes and minor changes.
+Every push to **any branch** builds and pushes a Docker image tagged with:
+- `{next-patch}-pre.{run_number}` — numerically increasing (e.g. `0.1.1-pre.42`)
+- Branch name (e.g. `main`, `feature-xyz`)
+- Commit SHA (e.g. `sha-abc1234`)
 
-### Manual Releases
+These are automatically pulled by Flux for continuous deployment.
 
-For feature releases or breaking changes, use the GitHub Actions UI:
+### Stable Releases (manual)
 
-1. Go to **Actions** → **Release** → **Run workflow**
+All stable releases are **manual** via GitHub Actions UI:
+
+1. Go to **Actions** → **Release & Publish** → **Run workflow**
 2. Select bump type: `patch`, `minor`, or `major`
-3. The workflow creates a git tag, GitHub Release, and triggers Docker image publishing
-
-### Skipping a Release
-
-Add `[skip release]` to the merge commit message to skip automatic patch bumping.
+3. The workflow creates a git tag, GitHub Release with rolled-up notes, and builds a semver-tagged Docker image
 
 ## CI/CD Workflows
 
 | Workflow | File | Triggers | Purpose |
 |----------|------|----------|---------|
 | Tests | `tests.yml` | PR to `main` | Runs pytest suite |
-| Release | `release.yml` | Push to `main`, manual dispatch | Creates semver tag, GitHub Release, **and builds+pushes Docker image** |
-| Docker | `docker-publish.yml` | PR to `main` | Validates Dockerfile builds on PRs (does not push) |
+| Prerelease Build | `docker-publish.yml` | Push to any branch | Builds + pushes prerelease Docker image |
+| Release & Publish | `release.yml` | Manual dispatch only | Creates semver tag, GitHub Release, + semver Docker image |
 
 > [!IMPORTANT]
 > Tags pushed by `GITHUB_TOKEN` do not trigger other workflows (GitHub limitation).
-> This is why `release.yml` builds Docker images directly instead of relying on
-> `docker-publish.yml`. Do **not** add a `push` trigger to `docker-publish.yml`
-> as it would cause duplicate builds.
+> This is why `release.yml` builds Docker images directly.
 
 ### Docker Image Tags
 
-When a release tag is created, Docker images get these tags on `ghcr.io/2fst4u/f1predictor`:
-
-- `v1.2.3` — exact version
-- `1.2` — major.minor
-- `sha-abc1234` — commit SHA
-- `main` — latest from main branch
+| Source | Tags on `ghcr.io/2fst4u/f1predictor` |
+|--------|------|
+| Prerelease (every push) | `0.1.1-pre.42`, `main`, `sha-abc1234` |
+| Stable release (manual) | `0.1.1`, `0.1`, `sha-abc1234` |
 
 ## Key Files
 
@@ -70,9 +66,9 @@ python -m pytest tests/test_release_config.py -v  # Validate release infrastruct
 
 `tests/test_release_config.py` enforces that release tooling stays consistent:
 - setuptools-scm is configured in `pyproject.toml`
-- Docker workflow has semver tag patterns
 - Dockerfile copies `.git/` directory
-- Release workflow exists with correct triggers
+- Prerelease workflow pushes on every branch with incrementing versions
+- Release workflow is manual-only with semver Docker tags
 
 > [!IMPORTANT]
 > If you modify `pyproject.toml`, `Dockerfile`, or any workflow file, run `test_release_config.py` to verify consistency.

@@ -1,8 +1,6 @@
 name: Release & Publish
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       bump:
@@ -18,10 +16,6 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # Skip if push was a tag or if commit message contains [skip release]
-    if: >-
-      !startsWith(github.ref, 'refs/tags/') &&
-      !contains(github.event.head_commit.message, '[skip release]')
     permissions:
       contents: write
       packages: write
@@ -33,20 +27,11 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Determine version bump type
-        id: bump_type
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "bump=${{ github.event.inputs.bump }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "bump=patch" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Get latest version tag
         id: latest
         run: |
-          # Find the latest v*.*.* tag, default to v0.0.0 if none exist
-          LATEST=$(git tag -l 'v*.*.*' --sort=-v:refname | head -n 1)
+          # Find the latest stable v*.*.* tag (exclude prereleases)
+          LATEST=$(git tag -l 'v*.*.*' --sort=-v:refname | grep -v '-' | head -n 1)
           if [ -z "$LATEST" ]; then
             LATEST="v0.0.0"
           fi
@@ -63,7 +48,7 @@ jobs:
           MINOR=$(echo "$VERSION" | cut -d. -f2)
           PATCH=$(echo "$VERSION" | cut -d. -f3)
 
-          BUMP="${{ steps.bump_type.outputs.bump }}"
+          BUMP="${{ github.event.inputs.bump }}"
           case "$BUMP" in
             major)
               MAJOR=$((MAJOR + 1))
