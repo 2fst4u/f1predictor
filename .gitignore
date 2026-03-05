@@ -13,6 +13,8 @@ env/
 ENV/
 
 # --- Project caches and generated data (do not commit) ---
+cache/
+fastf1_cache/
 .cache/
 .cache/f1pred/
 .cache/fastf1/
