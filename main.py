@@ -23,6 +23,7 @@ Examples:
 
 import argparse
 import os
+import shutil
 
 from colorama import Fore, Style
 import sys
@@ -88,8 +89,28 @@ def main() -> None:
     # Conventional config search order
     config_path = args.config
     if config_path is None:
-        if os.path.exists("/config/config.yaml"):
-            config_path = "/config/config.yaml"
+        # Check if /config exists and is writable (likely a mounted volume)
+        if os.path.isdir("/config"):
+            if os.path.exists("/config/config.yaml"):
+                config_path = "/config/config.yaml"
+            elif os.access("/config", os.W_OK):
+                # /config exists but is empty/missing config.yaml - bootstrap it if we have defaults
+                # This handles the case where a PVC is mounted but empty
+                logger.info("Bootstrapping /config directory with default configuration")
+                for f in ["config.yaml", "calibration_weights.json"]:
+                    if os.path.exists(f) and not os.path.exists(os.path.join("/config", f)):
+                        try:
+                            shutil.copy2(f, "/config/")
+                        except Exception as e:
+                            # Non-fatal, we'll fall back to local config
+                            logger.warning(f"Failed to bootstrap {f} to /config: {e}")
+
+                if os.path.exists("/config/config.yaml"):
+                    config_path = "/config/config.yaml"
+                else:
+                    config_path = "config.yaml"
+            else:
+                config_path = "config.yaml"
         else:
             config_path = "config.yaml"
 
