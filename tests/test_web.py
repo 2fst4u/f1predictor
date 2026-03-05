@@ -27,3 +27,10 @@ def test_get_schedule_invalid(client):
     # Testing error handling
     response = client.get("/api/schedule/invalid")
     assert response.status_code == 500
+    assert response.json() == {"detail": "Internal server error"}
+
+def test_get_predict_invalid_season(client):
+    # Testing generic exception catch in predict endpoint
+    response = client.get("/api/predict", params={"season": "invalid"})
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal server error"}

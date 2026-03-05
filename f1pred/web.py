@@ -61,7 +61,8 @@ async def get_schedule(season: str):
         races = jc.get_season_schedule(season)
         return {"season": season, "races": races}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Failed to get schedule")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/predict")
 async def get_predictions(
@@ -119,7 +120,7 @@ async def get_predictions(
 
     except Exception as e:
         logger.exception("Prediction failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/predict/stream")
 async def get_predictions_stream(
@@ -175,7 +176,7 @@ async def get_predictions_stream(
             q.put({"type": "results", "data": output})
         except Exception as e:
             logger.exception("Streaming prediction failed")
-            q.put({"type": "error", "message": str(e)})
+            q.put({"type": "error", "message": "Internal server error"})
         finally:
             q.put(None) # Sentinel to close stream
 
