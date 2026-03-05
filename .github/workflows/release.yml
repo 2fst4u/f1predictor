@@ -16,7 +16,11 @@ on:
         default: patch
 
 jobs:
+  test:
+    uses: ./.github/workflows/tests.yml
+
   release:
+    needs: [test]
     runs-on: ubuntu-latest
     # Skip if push was a tag or if commit message contains [skip release]
     if: >-
