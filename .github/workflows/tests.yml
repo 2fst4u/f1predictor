@@ -1,9 +1,7 @@
-name: Tests
+name: "Tests"
 
 on:
-  workflow_call:
-  pull_request:
-    branches: [main]
+  workflow_call: {}
 
 jobs:
   test:

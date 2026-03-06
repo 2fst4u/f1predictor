@@ -1,4 +1,4 @@
-name: Release & Publish
+name: "Release"
 
 on:
   workflow_dispatch:
@@ -14,7 +14,13 @@ on:
         default: patch
 
 jobs:
+  tests:
+    name: "Tests"
+    uses: ./.github/workflows/tests.yml
+
   release:
+    name: "Release"
+    needs: tests
     runs-on: ubuntu-latest
     permissions:
       contents: write
