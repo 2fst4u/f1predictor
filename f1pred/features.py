@@ -142,7 +142,15 @@ def exponential_weights(dates: Union[List[datetime], pd.Series], ref_date: datet
         else:
             # Vectorized path for non-datetime64 pandas Series (e.g. object dtype)
             # Note: dates should not contain NaT ideally, but fillna(0) handles it safely
-            ages = (ref_date - dates).dt.days.fillna(0).values.astype(float)
+            # Using astype('timedelta64[ns]') makes it compatible with .dt if needed,
+            # but standard subtraction gives timedeltas directly.
+            diff = ref_date - dates
+            # Object series with NaT might not support .dt directly unless converted to a timedelta type
+            try:
+                ages = diff.dt.days.fillna(0).values.astype(float)
+            except AttributeError:
+                # If diff is a Series of datetime.timedelta objects
+                ages = diff.apply(lambda x: x.days if pd.notna(x) else 0).values.astype(float)
     else:
         # Legacy path for lists
         ages = np.array([(ref_date - d).days if isinstance(d, datetime) else 0 for d in dates], dtype=float)

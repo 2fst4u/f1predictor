@@ -70,6 +70,17 @@ def test_exponential_weights_list_input():
     assert np.isclose(weights[1], 0.5)
 
 
+def test_exponential_weights_object_series():
+    """Test object dtype handling in exponential weights."""
+    ref_date = datetime(2023, 1, 1, tzinfo=timezone.utc)
+    # Series with object dtype containing datetime objects
+    dates_series = pd.Series([ref_date, ref_date - timedelta(days=10)], dtype=object)
+    weights = exponential_weights(dates_series, ref_date, half_life_days=10)
+
+    assert np.isclose(weights[0], 1.0)
+    assert np.isclose(weights[1], 0.5)
+
+
 def test_compute_form_indices(sample_historical_data):
     """Test form index calculation."""
     ref_date = datetime(2023, 3, 10, tzinfo=timezone.utc)
