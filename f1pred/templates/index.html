@@ -53,19 +53,19 @@
 
         <main class="container mx-auto px-2 py-4 md:p-8">
             <!-- Controls -->
-            <div class="card p-6 mb-8 shadow-xl">
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
+            <div class="card p-4 md:p-6 mb-4 md:mb-8 shadow-xl">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 items-end">
                     <div>
                         <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Season</label>
                         <input type="text" x-model="params.season" placeholder="current"
-                               class="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white focus:outline-none focus:ring-2 focus:ring-red-600">
+                               class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600">
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
                         <input type="text" x-model="params.round" placeholder="next"
-                               class="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white focus:outline-none focus:ring-2 focus:ring-red-600">
+                               class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600">
                     </div>
-                    <div>
+                    <div class="col-span-2 md:col-span-1">
                         <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Sessions</label>
                         <div class="flex flex-wrap gap-2 mt-1">
                             <template x-for="s in ['qualifying', 'race', 'sprint', 'sprint_qualifying']">
@@ -77,7 +77,7 @@
                             </template>
                         </div>
                     </div>
-                    <div>
+                    <div class="col-span-2 md:col-span-1">
                         <button @click="runPrediction()" :disabled="loading"
                                 class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 transition transform active:scale-95">
                             <span x-show="!loading">RUN PREDICTION</span>
