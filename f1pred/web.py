@@ -23,6 +23,26 @@ logger = get_logger(__name__)
 app = FastAPI(title="F1 Prediction Web UI")
 _config: AppConfig = None
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    # 🛡️ Sentinel: Defense in depth - Add security headers to prevent common web vulnerabilities
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    # CSP: Allow self, CDNs for Tailwind/Alpine/FontAwesome, and inline scripts/styles for Alpine/Tailwind.
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
+        "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; "
+        "connect-src 'self';"
+    )
+    response.headers["Content-Security-Policy"] = csp
+    return response
+
 # Templates
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
