@@ -56,22 +56,23 @@
             <div class="card p-4 md:p-6 mb-4 md:mb-8 shadow-xl">
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 items-end">
                     <div>
-                        <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Season</label>
-                        <input type="text" x-model="params.season" placeholder="current"
+                        <label for="input-season" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Season</label>
+                        <input id="input-season" type="text" x-model="params.season" placeholder="current"
                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600">
                     </div>
                     <div>
-                        <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
-                        <input type="text" x-model="params.round" placeholder="next"
+                        <label for="input-round" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
+                        <input id="input-round" type="text" x-model="params.round" placeholder="next"
                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600">
                     </div>
                     <div class="col-span-2 md:col-span-1">
-                        <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Sessions</label>
-                        <div class="flex flex-wrap gap-2 mt-1">
+                        <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider" id="sessions-label">Sessions</label>
+                        <div class="flex flex-wrap gap-2 mt-1" role="group" aria-labelledby="sessions-label">
                             <template x-for="s in ['qualifying', 'race', 'sprint', 'sprint_qualifying']">
                                 <button @click="toggleSession(s)"
+                                        :aria-pressed="params.sessions.includes(s)"
                                         :class="params.sessions.includes(s) ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400'"
-                                        class="text-xs px-2 py-1 rounded border border-gray-700 hover:border-red-500 transition"
+                                        class="text-xs px-2 py-1 rounded border border-gray-700 hover:border-red-500 transition focus:outline-none focus:ring-2 focus:ring-red-500"
                                         x-text="s.replace('_', ' ').toUpperCase()">
                                 </button>
                             </template>
@@ -125,11 +126,15 @@
                 </div>
 
                 <!-- Session Tabs -->
-                <div class="flex border-b border-gray-700 mb-6 overflow-x-auto">
+                <div class="flex border-b border-gray-700 mb-6 overflow-x-auto" role="tablist" aria-label="Session Results">
                     <template x-for="(data, sess) in results.sessions" :key="sess">
                         <button @click="activeSession = sess"
+                                role="tab"
+                                :aria-selected="activeSession === sess"
+                                :id="'tab-' + sess"
+                                :aria-controls="'panel-' + sess"
                                 :class="activeSession === sess ? 'border-red-600 text-red-500' : 'border-transparent text-gray-400 hover:text-gray-200'"
-                                class="py-3 px-6 font-bold uppercase tracking-widest text-sm border-b-2 transition whitespace-nowrap"
+                                class="py-3 px-6 font-bold uppercase tracking-widest text-sm border-b-2 transition whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
                                 x-text="sess.replace('_', ' ')">
                         </button>
                     </template>
@@ -137,7 +142,12 @@
 
                 <!-- Session Content -->
                 <template x-for="(data, sess) in results.sessions" :key="sess">
-                    <div x-show="activeSession === sess" x-transition>
+                    <div x-show="activeSession === sess" x-transition
+                         role="tabpanel"
+                         :id="'panel-' + sess"
+                         :aria-labelledby="'tab-' + sess"
+                         tabindex="0"
+                         class="focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 rounded-lg">
 
                         <!-- Weather Info -->
                         <div class="grid grid-cols-3 md:grid-cols-5 gap-2 sm:gap-4 mb-6">
