@@ -10,6 +10,7 @@ A Formula 1 race prediction tool that uses historical data and machine learning 
 ## What It Does
 
 This tool predicts finishing positions for F1 sessions:
+
 - **Qualifying** – Grid positions
 - **Race** – Final standings
 - **Sprint Qualifying** – Sprint grid
@@ -53,6 +54,7 @@ The app fetches data from free, public APIs:
 ### Two-Stage Prediction (Race)
 
 When predicting a race before qualifying has occurred:
+
 1. The system first runs a full qualifying prediction
 2. Uses predicted qualifying positions as the starting grid
 3. Feeds this grid into the race prediction model
@@ -66,21 +68,22 @@ All settings live in `config.yaml`. The main things you might want to tweak:
 ```yaml
 modelling:
   recency_half_life_days:
-    base: 120      # How quickly old results fade in importance
-    weather: 180   # Weather skill memory
-    team: 240      # Team performance memory
+    base: 120 # How quickly old results fade in importance
+    weather: 180 # Weather skill memory
+    team: 240 # Team performance memory
   monte_carlo:
-    draws: 5000    # Simulation iterations (more = slower but smoother)
+    draws: 5000 # Simulation iterations (more = slower but smoother)
 
 data_sources:
   open_meteo:
-    temperature_unit: "celsius"  # or fahrenheit
-    windspeed_unit: "kmh"        # kmh, ms, mph, kn
+    temperature_unit: "celsius" # or fahrenheit
+    windspeed_unit: "kmh" # kmh, ms, mph, kn
 ```
 
 ## Output
 
-**Terminal output only** – Predictions display directly in the console with:
+**Terminal output and Web UI** – Predictions display directly in the console with:
+
 - Driver names and teams
 - Predicted positions
 - Win probability, podium probability, DNF probability
@@ -89,19 +92,32 @@ data_sources:
 
 ## Usage Modes
 
+### Web UI
+
+Start the built-in web server to view predictions in a browser:
+
+```bash
+python main.py --web --port 8000
+```
+
 ### Standard Prediction
+
 ```bash
 python main.py --season 2024 --round 10
 ```
 
 ### Live Mode
+
 Re-runs predictions periodically and updates when results come in:
+
 ```bash
 python main.py --round next --live --refresh 30
 ```
 
 ### Backtesting
+
 Evaluate model accuracy across historical seasons:
+
 ```bash
 python main.py --backtest
 ```
@@ -138,8 +154,9 @@ f1pred/
 
 **Predictions seem random or uniform?**
 Clear the cache and re-run:
+
 ```bash
-rm -rf .cache/
+rm -rf cache/ fastf1_cache/ .cache/
 python main.py --round next
 ```
 
@@ -150,10 +167,12 @@ Enable FastF1 in `config.yaml`.
 The built-in cache and retry logic should handle most cases. Try increasing `live_refresh_seconds` or clearing the `.cache/` directory.
 
 **Import errors for LightGBM on macOS?**
+
 ```bash
 pip uninstall lightgbm
 pip install lightgbm --no-binary lightgbm
 ```
+
 The system will fall back to XGBoost or scikit-learn if LightGBM is unavailable.
 
 ## License
