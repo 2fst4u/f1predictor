@@ -14,13 +14,13 @@ on:
         default: patch
 
 jobs:
-  test:
+  tests:
     name: "Tests"
     uses: ./.github/workflows/tests.yml
 
   release:
     name: "Release"
-    needs: test
+    needs: tests
     runs-on: ubuntu-latest
     permissions:
       contents: write
