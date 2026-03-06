@@ -36,24 +36,57 @@ class TestReleaseInfrastructure:
             "the version from git tags during the Docker build"
         )
 
-    def test_prerelease_workflow_exists(self):
-        """docker-publish.yml must build prerelease images on every push."""
-        workflow = ROOT / ".github" / "workflows" / "docker-publish.yml"
-        assert workflow.exists(), "docker-publish.yml not found"
-        content = workflow.read_text()
-        parsed = yaml.safe_load(content)
+    def test_tests_workflow_runs_on_push(self):
+        """tests.yml must run on every push to any branch."""
+        workflow = ROOT / ".github" / "workflows" / "tests.yml"
+        assert workflow.exists(), "tests.yml not found"
+        parsed = yaml.safe_load(workflow.read_text())
         triggers = parsed.get(True, {})  # 'on' parses as True in PyYAML
         assert "push" in triggers, (
-            "docker-publish.yml must trigger on push for prerelease builds"
+            "tests.yml must trigger on push to run tests on every commit"
         )
 
-    def test_prerelease_has_incrementing_version(self):
-        """docker-publish.yml must produce numerically increasing prerelease tags."""
-        workflow = ROOT / ".github" / "workflows" / "docker-publish.yml"
+    def test_build_workflow_exists(self):
+        """build.yml must build Docker images after tests pass."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
+        assert workflow.exists(), "build.yml not found"
+        content = workflow.read_text()
+        parsed = yaml.safe_load(content)
+        triggers = parsed.get(True, {})
+        assert "workflow_run" in triggers, (
+            "build.yml must trigger on workflow_run to build after tests pass"
+        )
+
+    def test_build_workflow_triggers_on_release(self):
+        """build.yml must also trigger when a GitHub Release is published."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
+        content = workflow.read_text()
+        parsed = yaml.safe_load(content)
+        triggers = parsed.get(True, {})
+        assert "release" in triggers, (
+            "build.yml must trigger on release events for stable builds"
+        )
+        release_types = triggers["release"].get("types", [])
+        assert "published" in release_types, (
+            "build.yml must trigger on release type 'published'"
+        )
+
+    def test_build_workflow_has_prerelease_versions(self):
+        """build.yml must produce numerically increasing prerelease tags."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
         content = workflow.read_text()
         assert "-pre." in content, (
-            "docker-publish.yml must produce prerelease versions with "
+            "build.yml must produce prerelease versions with "
             "'-pre.' suffix for Flux auto-pull compatibility"
+        )
+
+    def test_build_workflow_has_semver_tags(self):
+        """build.yml must produce semver-tagged Docker images for releases."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
+        content = workflow.read_text()
+        assert "type=semver" in content, (
+            "build.yml must include type=semver tag patterns "
+            "to produce versioned Docker images"
         )
 
     def test_release_workflow_is_manual_only(self):
@@ -70,28 +103,10 @@ class TestReleaseInfrastructure:
             "release.yml must NOT trigger on push — releases are manual decisions"
         )
 
-    def test_release_workflow_builds_docker(self):
-        """release.yml must build and push Docker images directly.
-
-        Tags pushed by GITHUB_TOKEN do not trigger other workflows,
-        so the release workflow must handle Docker builds itself.
-        """
-        workflow = ROOT / ".github" / "workflows" / "release.yml"
-        content = workflow.read_text()
-        assert "docker/build-push-action" in content, (
-            "release.yml must include docker/build-push-action because "
-            "tags pushed by GITHUB_TOKEN do not trigger other workflows"
-        )
-        assert "packages: write" in content, (
-            "release.yml must have packages: write permission to push "
-            "Docker images to GHCR"
-        )
-
-    def test_release_workflow_has_semver_tags(self):
-        """release.yml must produce semver-tagged Docker images."""
-        workflow = ROOT / ".github" / "workflows" / "release.yml"
-        content = workflow.read_text()
-        assert "type=semver" in content, (
-            "release.yml must include type=semver tag patterns "
-            "to produce versioned Docker images"
+    def test_old_docker_publish_removed(self):
+        """docker-publish.yml must not exist (replaced by build.yml)."""
+        old_workflow = ROOT / ".github" / "workflows" / "docker-publish.yml"
+        assert not old_workflow.exists(), (
+            "docker-publish.yml should be deleted — "
+            "Docker builds are now handled by build.yml"
         )

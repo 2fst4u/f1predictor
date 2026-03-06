@@ -1,0 +1,106 @@
+name: "Build"
+
+on:
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
+    branches: ['**']
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: "Build & Push Docker Image"
+    runs-on: ubuntu-latest
+    # Only run if: Tests workflow succeeded, OR this is a release event
+    if: >-
+      (github.event_name == 'release') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Determine version
+        id: version
+        run: |
+          # Find the latest v*.*.* release tag, default to v0.0.0
+          LATEST=$(git tag -l 'v*.*.*' --sort=-v:refname | grep -v '-' | head -n 1)
+          if [ -z "$LATEST" ]; then
+            LATEST="v0.0.0"
+          fi
+
+          VERSION="${LATEST#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          if [ "${{ github.event_name }}" = "release" ]; then
+            # For releases, use the release tag directly
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+            echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "Release version: ${RELEASE_TAG#v}"
+          else
+            # For prerelease builds, bump patch and add pre suffix
+            PATCH=$((PATCH + 1))
+            PRERELEASE="${MAJOR}.${MINOR}.${PATCH}-pre.${{ github.event.workflow_run.run_number }}"
+            echo "version=$PRERELEASE" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "Prerelease version: $PRERELEASE"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Prerelease tags: version, branch, sha
+      - name: Extract Docker metadata (prerelease)
+        if: steps.version.outputs.is_release == 'false'
+        id: meta-prerelease
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=ref,event=branch
+            type=sha
+
+      # Release tags: semver, major.minor, sha
+      - name: Extract Docker metadata (release)
+        if: steps.version.outputs.is_release == 'true'
+        id: meta-release
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.version }}
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.version.outputs.is_release == 'true' && steps.meta-release.outputs.tags || steps.meta-prerelease.outputs.tags }}
+          labels: ${{ steps.version.outputs.is_release == 'true' && steps.meta-release.outputs.labels || steps.meta-prerelease.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
