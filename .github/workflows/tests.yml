@@ -1,7 +1,9 @@
-name: "Quality: Unit Tests"
+name: "Tests"
 
 on:
   workflow_call: {}
+  push:
+    branches: ['**']
 
 jobs:
   test:

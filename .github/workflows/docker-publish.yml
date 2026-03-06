@@ -1,22 +1,19 @@
-name: "CI: Build & Publish Prerelease"
+name: "Build"
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Tests"]
+    types: [completed]
     branches: ['**']
-    tags-ignore: ['v*.*.*']
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  test:
-    name: "1. Unit Tests"
-    uses: ./.github/workflows/tests.yml
-
   build:
-    name: "2. Build & Publish"
-    needs: test
+    name: "Build"
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -26,6 +23,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           fetch-tags: true
 

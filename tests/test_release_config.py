@@ -37,14 +37,14 @@ class TestReleaseInfrastructure:
         )
 
     def test_prerelease_workflow_exists(self):
-        """docker-publish.yml must build prerelease images on every push."""
+        """docker-publish.yml must build prerelease images on test completion."""
         workflow = ROOT / ".github" / "workflows" / "docker-publish.yml"
         assert workflow.exists(), "docker-publish.yml not found"
         content = workflow.read_text()
         parsed = yaml.safe_load(content)
         triggers = parsed.get(True, {})  # 'on' parses as True in PyYAML
-        assert "push" in triggers, (
-            "docker-publish.yml must trigger on push for prerelease builds"
+        assert "workflow_run" in triggers, (
+            "docker-publish.yml must trigger on workflow_run for prerelease builds"
         )
 
     def test_prerelease_has_incrementing_version(self):

@@ -1,4 +1,4 @@
-name: "Release: Tag & Publish Stable"
+name: "Release"
 
 on:
   workflow_dispatch:
@@ -15,11 +15,11 @@ on:
 
 jobs:
   test:
-    name: "1. Unit Tests"
+    name: "Tests"
     uses: ./.github/workflows/tests.yml
 
   release:
-    name: "2. Tag & Publish"
+    name: "Release"
     needs: test
     runs-on: ubuntu-latest
     permissions:
