@@ -8,7 +8,6 @@ teammate comparisons.
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Optional, Union
 from datetime import datetime, timedelta, timezone
-from collections import defaultdict
 from pathlib import Path
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed

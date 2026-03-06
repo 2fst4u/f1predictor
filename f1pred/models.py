@@ -13,7 +13,7 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
+from sklearn.ensemble import GradientBoostingRegressor
 
 # Suppress harmless sklearn warning about feature names when using preprocessing pipelines
 warnings.filterwarnings("ignore", message="X does not have valid feature names")

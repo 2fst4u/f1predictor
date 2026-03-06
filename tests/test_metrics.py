@@ -165,7 +165,7 @@ class TestComputeEventMetrics:
 class TestComputeEventMetricsExceptions:
     @patch('f1pred.metrics.spearmanr', side_effect=ValueError("spearman error"))
     @patch('f1pred.metrics.kendalltau', side_effect=ValueError("kendall error"))
-    def test_spearman_kendall_exceptions(self, mock_kendall, mock_spearman):
+    def test_spearman_kendall_exceptions(self, *_):
         # We need this to verify behavior: if scipy functions fail due to some reason
         # (like identical values causing warnings/errors in older versions or edge cases)
         # the metric should gracefully return NaN rather than crashing the evaluation.

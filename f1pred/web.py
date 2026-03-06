@@ -10,8 +10,6 @@ import math
 from fastapi import FastAPI, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
 from .config import AppConfig
 from .util import get_logger, init_caches, ensure_dirs, __version__

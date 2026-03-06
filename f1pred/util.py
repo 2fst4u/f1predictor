@@ -330,7 +330,7 @@ class StatusSpinner:
 
         return self
 
-    def __exit__(self, exc_type, exc_value, exc_traceback):
+    def __exit__(self, exc_type, *_):
         self.running = False
         if self.thread:
             self.thread.join()

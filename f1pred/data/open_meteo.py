@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from ..util import session_with_retries, http_get_json, get_logger, safe_float
+from ..util import session_with_retries, http_get_json, get_logger
 
 logger = get_logger(__name__)
 
