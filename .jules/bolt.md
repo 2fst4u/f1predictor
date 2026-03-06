@@ -45,3 +45,7 @@
 ## 2026-05-25 - Numpy Datetime Arithmetic
 **Learning:** Computing date differences (ages) using pandas `.dt.days` accessor on a Series is significantly slower (~6x) than converting to numpy `datetime64[ns]` and performing direct arithmetic, due to pandas overhead.
 **Action:** For heavy date difference calculations, convert inputs to `datetime64[ns]` (e.g., `pd.Timestamp(ref).to_datetime64() - series.values`) and divide by nanoseconds per day/unit.
+
+## 2024-06-13 - [Monte Carlo Pairwise Optimization]
+**Learning:** In NumPy, avoiding large N-dimensional boolean intermediate arrays (like a 3D `(draws, N, N)` array) in favor of looping over a smaller dimension (like $N=20$) and doing 2D vectorized slices can save significant memory bandwidth and CPU cache misses, leading to a ~40% speedup in Monte Carlo probability generation.
+**Action:** When vectorizing across multiple dimensions, if one dimension is small (e.g. $N \le 20$), consider a Python loop over that dimension rather than full N-D broadcasting.
