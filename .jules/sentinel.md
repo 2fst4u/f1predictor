@@ -50,3 +50,8 @@
 **Vulnerability:** The FastAPI endpoints in `web.py` caught generic exceptions and returned `str(e)` directly to the client in the 500 response body (e.g., via `HTTPException(status_code=500, detail=str(e))`). This could leak sensitive internal information, such as file paths, validation patterns, or internal API structures.
 **Learning:** Catching generic exceptions and exposing their string representation to end-users violates the principle of failing securely. Error details should be logged internally, while generic messages should be returned to clients.
 **Prevention:** Ensure that global exception handlers or endpoint-specific `except Exception` blocks log the full stack trace server-side (using `logger.exception`) but return a static, generic error message (like "Internal server error") to the client.
+
+## 2024-03-01 - [Missing Security Headers in FastAPI App]
+**Vulnerability:** The FastAPI application serving the Web UI lacked fundamental security headers (like X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Strict-Transport-Security, and Content-Security-Policy), leaving it susceptible to framing (Clickjacking), MIME-sniffing attacks, and potentially cross-site scripting (XSS).
+**Learning:** FastAPI, unlike some opinionated web frameworks, does not ship with built-in or default HTTP security headers middleware. It relies on the developer to explicitly configure these protections.
+**Prevention:** Implement a standard `BaseHTTPMiddleware` (or use `@app.middleware("http")`) across all web services to inject defensive HTTP headers. Always explicitly define a Content-Security-Policy (CSP) that adheres to the principle of least privilege, allowing only verified CDNs or local assets.
