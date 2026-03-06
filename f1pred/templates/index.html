@@ -44,7 +44,7 @@
                 <div class="flex items-center space-x-2">
                     <span class="text-[10px] font-bold text-white text-opacity-60 uppercase tracking-tighter" x-text="'M:' + config.model_version"></span>
                     <span class="text-xs font-bold bg-black bg-opacity-20 px-2 py-1 rounded" x-text="'v' + config.app_version"></span>
-                    <button @click="refreshData()" class="bg-black bg-opacity-20 hover:bg-opacity-30 p-2 rounded-full transition">
+                    <button @click="refreshData()" aria-label="Refresh data" title="Refresh data" class="bg-black bg-opacity-20 hover:bg-opacity-30 focus:outline-none focus:ring-2 focus:ring-white p-2 rounded-full transition">
                         <i class="fas fa-sync-alt" :class="loading ? 'animate-spin' : ''"></i>
                     </button>
                 </div>
