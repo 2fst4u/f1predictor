@@ -1,4 +1,3 @@
-import requests
 import requests_cache
 import logging
 

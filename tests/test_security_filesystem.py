@@ -5,7 +5,6 @@ import shutil
 import pytest
 import logging
 from unittest.mock import patch
-from pathlib import Path
 from f1pred.util import ensure_dirs
 
 @pytest.fixture

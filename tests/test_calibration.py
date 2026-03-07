@@ -1,11 +1,6 @@
 import unittest
-from unittest.mock import MagicMock, patch
-import json
 import os
 import time
-from pathlib import Path
-from datetime import datetime, timedelta, timezone
-import shutil
 
 
 from f1pred.calibrate import CalibrationManager

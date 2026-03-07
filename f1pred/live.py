@@ -1,8 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional
-import time
 
-from colorama import Fore, Style
 
 from .util import get_logger, print_countdown
 from .data.jolpica import JolpicaClient

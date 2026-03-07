@@ -5,7 +5,6 @@ logging.basicConfig(level=logging.INFO)
 print("Importing fastf1...")
 import fastf1
 
-import requests
 import requests_cache
 
 # Simulate util.init_caches

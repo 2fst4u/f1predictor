@@ -1,7 +1,5 @@
 """Tests for model training and prediction."""
-import pytest
 import numpy as np
-import pandas as pd
 from f1pred.models import train_pace_model, estimate_dnf_probabilities
 
 

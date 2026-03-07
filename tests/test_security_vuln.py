@@ -1,7 +1,5 @@
-import pytest
-import time
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from f1pred.util import sanitize_for_console, StatusSpinner
 from f1pred.data.jolpica import JolpicaClient
 from f1pred.data.open_meteo import OpenMeteoClient

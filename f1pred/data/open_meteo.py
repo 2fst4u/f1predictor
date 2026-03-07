@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import Dict, Any, Optional
-from datetime import datetime, timedelta, timezone
+from typing import Dict, Any
+from datetime import datetime, timezone
 
 from ..util import session_with_retries, http_get_json, get_logger
 
@@ -42,7 +42,7 @@ class OpenMeteoClient:
 
         # Enforce length limit (standard IANA timezones are typically < 40 chars)
         if len(tz) > 64:
-             logger.warning(f"OpenMeteoClient: timezone too long, falling back to UTC")
+             logger.warning("OpenMeteoClient: timezone too long, falling back to UTC")
              return "UTC"
 
         if not all(c.isalnum() or c in "/-_+" for c in tz):

@@ -1,6 +1,5 @@
 import pytest
 from unittest.mock import MagicMock
-import json
 from f1pred.util import http_get_json
 
 def test_http_get_json_valid_json():

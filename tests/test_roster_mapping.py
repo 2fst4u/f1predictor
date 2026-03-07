@@ -1,4 +1,3 @@
-import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
 from f1pred.roster import _get_canonical_mapping, _roster_from_fastf1

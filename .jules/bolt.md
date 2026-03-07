@@ -49,3 +49,7 @@
 ## 2024-06-13 - [Monte Carlo Pairwise Optimization]
 **Learning:** In NumPy, avoiding large N-dimensional boolean intermediate arrays (like a 3D `(draws, N, N)` array) in favor of looping over a smaller dimension (like $N=20$) and doing 2D vectorized slices can save significant memory bandwidth and CPU cache misses, leading to a ~40% speedup in Monte Carlo probability generation.
 **Action:** When vectorizing across multiple dimensions, if one dimension is small (e.g. $N \le 20$), consider a Python loop over that dimension rather than full N-D broadcasting.
+
+## 2026-05-26 - Optimizer Objective Precomputation
+**Learning:** Pandas indexing and extracting groupings (e.g. `np.unique` to find grouped indices) inside a heavily called `scipy.optimize.minimize` objective function causes severe python overhead.
+**Action:** Hoist data extraction (converting `pd.DataFrame` columns to `.values`) and grouping operations (generating indices/masks for grouping logic) outside the `objective` function into NumPy arrays before optimization starts, which reduces objective calculation times dramatically (e.g. ~2.8x speedup).

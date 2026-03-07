@@ -1,9 +1,7 @@
 
-import pytest
 from unittest.mock import patch, MagicMock
 from f1pred.util import sanitize_for_console
 import f1pred.predict
-import pandas as pd
 
 def test_sanitize_exception_message():
     """Verify that sanitize_for_console effectively neutralizes malicious exception messages."""

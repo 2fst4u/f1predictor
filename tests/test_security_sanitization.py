@@ -1,4 +1,3 @@
-import pytest
 from f1pred.util import sanitize_for_console
 
 def test_sanitize_removes_ansi_codes():

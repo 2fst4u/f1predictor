@@ -1,9 +1,7 @@
-import sys
 import time
 import logging
-import pytest
 from unittest.mock import MagicMock, call, patch
-from colorama import Fore, Style
+from colorama import Style
 from f1pred.util import print_countdown, HIDE_CURSOR, SHOW_CURSOR, StatusSpinner, safe_float
 
 @patch("f1pred.util.sys.stdout")

@@ -1,6 +1,5 @@
 """Tests for roster derivation."""
-import pytest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 from f1pred.roster import (
     _entries_from_results,
     derive_roster,

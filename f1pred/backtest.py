@@ -1,9 +1,7 @@
 from __future__ import annotations
 from typing import List, Dict, Any
 from datetime import datetime, timezone
-import os
 
-import pandas as pd
 
 from .util import get_logger
 from .data.jolpica import JolpicaClient
