@@ -51,17 +51,19 @@ def test_derive_roster_past_event():
     from datetime import datetime, timezone
 
     jc = Mock()
-    jc.get_qualifying_results.return_value = [
+    # Provide 20 drivers to satisfy the completeness heuristic for modern seasons
+    mock_results = [
         {
-            'Driver': {'driverId': 'verstappen', 'code': 'VER'},
-            'Constructor': {'constructorId': 'red_bull', 'name': 'Red Bull'},
-        },
+            'Driver': {'driverId': f'driver_{i}', 'code': f'D{i}'},
+            'Constructor': {'constructorId': 'team', 'name': 'Team'},
+        } for i in range(20)
     ]
+    jc.get_qualifying_results.return_value = mock_results
 
     event_dt = datetime(2023, 3, 5, tzinfo=timezone.utc)
     now_dt = datetime(2023, 3, 10, tzinfo=timezone.utc)
 
     roster = derive_roster(jc, '2023', '1', event_dt=event_dt, now_dt=now_dt)
 
-    assert len(roster) == 1
-    assert roster[0]['driverId'] == 'verstappen'
+    assert len(roster) == 20
+    assert roster[0]['driverId'] == 'driver_0'

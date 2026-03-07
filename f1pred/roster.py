@@ -302,7 +302,8 @@ def derive_roster(
     # 1. OPTION A: Jolpica known results for this round
     # Check this BEFORE FastF1 because FastF1 may return test session data (e.g., post-season tests)
     same = _same_round_known_roster(jc, season, rnd)
-    if same:
+    # Check if Jolpica results are reasonably complete (at least 20 drivers for a modern season)
+    if same and (len(same) >= 20 or int(season) < 2010):
         return same
 
     # 2. OPTION B: FastF1 (live timing, good for active weekends before results are posted)
