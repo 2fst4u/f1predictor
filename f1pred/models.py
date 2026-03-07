@@ -169,12 +169,6 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
     if "driver_team_form_index" in X.columns:
         base = base - w_base_dt * X["driver_team_form_index"].astype(float).values
 
-    # Incorporate grid position into baseline for race sessions
-    # (lower grid is better, pace is lower is better)
-    if session_type in ("race", "sprint") and "grid" in X.columns:
-        grid_vals = X["grid"].astype(float).fillna(15.0).values
-        base = base + w_grid * grid_vals
-
     # Add small jitter if baseline is flat (for tie-breaking)
     if np.nanstd(base) < 1e-9 and "driverId" in X.columns:
         try:
@@ -199,6 +193,38 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
     else:
         # Both flat - use baseline with small noise for tie-breaking
         pace_hat = base + np.random.RandomState(42).normal(0, 0.01, size=len(base))
+
+    # Second Stage: Incorporate grid "stickiness" for race sessions
+    # This ensures starting position acts as a strong anchor for the prediction.
+    if session_type in ("race", "sprint") and "grid" in X.columns:
+        # Normalize combined pace to ensure comparable scale with grid
+        mu = float(np.nanmean(pace_hat))
+        sd = float(np.nanstd(pace_hat))
+        if sd > 1e-6:
+            pace_z = (pace_hat - mu) / sd
+        else:
+            pace_z = pace_hat - mu
+
+        # Normalize grid to z-score
+        grid_vals = X["grid"].astype(float).fillna(15.0).values
+        g_mu = float(np.nanmean(grid_vals))
+        g_sd = float(np.nanstd(grid_vals))
+        if g_sd > 1e-6:
+            grid_z = (grid_vals - g_mu) / g_sd
+        else:
+            grid_z = grid_vals - g_mu
+
+        # Re-blend: grid_factor acts as "stickiness" (0 = ignored, 1 = absolute)
+        # We use a non-linear scaling to make it more intuitive
+        # (e.g. 0.8 weight means very sticky, while 0.2 means mostly form-based)
+        combined_z = (1.0 - w_grid) * pace_z + w_grid * grid_z
+
+        # Rescale back to original pace magnitude (mu, sd)
+        # This preserves the expected scale for simulation logic
+        if sd > 1e-6:
+            pace_hat = combined_z * sd + mu
+        else:
+            pace_hat = combined_z + mu
 
     return pipe, pace_hat, features
 
