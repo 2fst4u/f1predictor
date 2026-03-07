@@ -155,16 +155,65 @@ def _roster_from_round(jc: JolpicaClient, season: str, rnd: str) -> List[Dict]:
     return []
 
 
-def _roster_from_fastf1(season: int, rnd: int) -> List[Dict]:
+def _get_canonical_mapping(jc: JolpicaClient, season: str) -> Dict[str, Any]:
+    """Build lookup tables to map various identities to canonical Jolpica/Ergast IDs."""
+    try:
+        raw_entries = jc.get_season_entry_list(season)
+        if not raw_entries:
+            return {}
+
+        driver_map = {}
+        constructor_map = {}
+
+        for r in raw_entries:
+            drv = r.get("Driver", {})
+            cons = r.get("Constructor", {})
+
+            d_id = drv.get("driverId")
+            c_id = cons.get("constructorId")
+            c_name = cons.get("name")
+
+            if d_id:
+                # Map by Number
+                num = drv.get("permanentNumber")
+                if num:
+                    driver_map[str(num)] = d_id
+
+                # Map by Code (Abbreviation)
+                code = drv.get("code")
+                if code:
+                    driver_map[code.upper()] = d_id
+
+                # Map by Name (Normalised)
+                gn = drv.get("givenName", "")
+                fn = drv.get("familyName", "")
+                if gn and fn:
+                    name_key = f"{gn} {fn}".lower().strip()
+                    driver_map[name_key] = d_id
+
+            if c_id and c_name:
+                # Map by Name (Normalised)
+                constructor_map[c_name.lower().strip()] = c_id
+
+        return {
+            "drivers": driver_map,
+            "constructors": constructor_map
+        }
+    except Exception as e:
+        logger.warning(f"[roster] Failed to build canonical mapping: {e}")
+        return {}
+
+
+def _roster_from_fastf1(season: int, rnd: int, mapping: Optional[Dict] = None) -> List[Dict]:
     """Attempt to fetch roster from FastF1 (live timing)."""
     try:
         # Import here to avoid circular dependencies if not already imported
         from .data import fastf1_backend as ff1
-        
+
         ev = ff1.get_event(season, rnd)
         if ev is None:
             return []
-            
+
         # Try to load session (e.g., FP1)
         # FastF1 often requires a session to be loaded to get drivers
         try:
@@ -174,17 +223,50 @@ def _roster_from_fastf1(season: int, rnd: int) -> List[Dict]:
             results = sess.results
             if results is None or results.empty:
                 return []
-                
+
             roster = []
+            d_map = (mapping or {}).get("drivers", {})
+            c_map = (mapping or {}).get("constructors", {})
+
             for _, r in results.iterrows():
+                # Try to canonicalize driverId
+                abbr = r.get("Abbreviation")
+                num = r.get("DriverNumber")
+                gn = r.get("FirstName")
+                fn = r.get("LastName")
+
+                did = None
+                if abbr and abbr.upper() in d_map:
+                    did = d_map[abbr.upper()]
+                elif num and str(num) in d_map:
+                    did = d_map[str(num)]
+                elif gn and fn:
+                    name_key = f"{gn} {fn}".lower().strip()
+                    if name_key in d_map:
+                        did = d_map[name_key]
+
+                # Fallback to abbreviation if not mapped
+                if not did:
+                    did = abbr.lower() if abbr else None
+
+                # Try to canonicalize constructorId
+                tname = r.get("TeamName")
+                cid = None
+                if tname and tname.lower().strip() in c_map:
+                    cid = c_map[tname.lower().strip()]
+
+                # Fallback to normalised TeamName
+                if not cid:
+                    cid = tname.lower().replace(" ", "_") if tname else None
+
                 roster.append({
-                    "driverId": r["Abbreviation"].lower() if "Abbreviation" in r else None,
-                    "code": r.get("Abbreviation"),
-                    "givenName": r.get("FirstName"),
-                    "familyName": r.get("LastName"),
-                    "permanentNumber": str(r.get("DriverNumber")),
-                    "constructorId": r.get("TeamName", "").lower().replace(" ", "_"),
-                    "constructorName": r.get("TeamName"),
+                    "driverId": did,
+                    "code": abbr,
+                    "givenName": gn,
+                    "familyName": fn,
+                    "permanentNumber": str(num) if num else None,
+                    "constructorId": cid,
+                    "constructorName": tname,
                 })
             logger.info(f"[roster] Fetched {len(roster)} drivers from FastF1")
             return roster
@@ -224,7 +306,9 @@ def derive_roster(
         return same
 
     # 2. OPTION B: FastF1 (live timing, good for active weekends before results are posted)
-    roster = _roster_from_fastf1(s_int, r_int)
+    # Fetch mapping for canonicalization
+    mapping = _get_canonical_mapping(jc, season)
+    roster = _roster_from_fastf1(s_int, r_int, mapping=mapping)
     if roster:
         return roster
 

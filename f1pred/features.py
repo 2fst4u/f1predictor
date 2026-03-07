@@ -411,6 +411,20 @@ def collect_historical_results(
     elif not df.empty:
         df["is_dnf"] = 0
 
+    # Safeguard: Check if roster driverIds have any overlap with collected history for the current season
+    if roster_set and not df.empty:
+        # Check overlap only in the target season to avoid false positives from past seasons
+        # (though history scan already does some of this)
+        current_season_hist = df[df["season"] == season]
+        if not current_season_hist.empty:
+            overlap = current_season_hist["driverId"].isin(roster_set).sum()
+            if overlap == 0:
+                logger.warning(
+                    f"[features] [history] CRITICAL: Roster of {len(roster_set)} drivers has ZERO overlap "
+                    f"with {season} history. Features will likely be neutral/ignored. "
+                    f"Check for ID mismatch (e.g. FastF1 vs Ergast IDs)."
+                )
+
     _HIST_CACHE[cache_key] = df.copy()
     alias_key = (season, tuple())
     if alias_key not in _HIST_CACHE:
