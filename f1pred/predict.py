@@ -174,11 +174,17 @@ def _get_actual_positions_for_session(
         return None
 
 
-def _filter_sessions_for_round(jc: JolpicaClient, season_i: int, round_i: int, requested: List[str]) -> List[str]:
-    """Assume a regular weekend unless confirmed otherwise.
+def _filter_sessions_for_round(
+    jc: JolpicaClient,
+    season_i: int,
+    round_i: int,
+    requested: List[str],
+    race_info: Optional[Dict[str, Any]] = None
+) -> List[str]:
+    """Ensure requested sessions are valid for the round.
 
     - Always keep qualifying and race.
-    - Include sprint and sprint_qualifying only if the current round already has sprint results posted.
+    - Include sprint and sprint_qualifying if they are in race_info.
     """
     keep = []
     requested_norm = [s.strip().lower() for s in requested]
@@ -187,15 +193,19 @@ def _filter_sessions_for_round(jc: JolpicaClient, season_i: int, round_i: int, r
         if s in requested_norm:
             keep.append(s)
 
-    try:
-        has_sprint = bool(jc.get_sprint_results(str(season_i), str(round_i)))
-    except Exception:
-        has_sprint = False
+    # Use provided race_info or fetch it
+    if race_info is None:
+        try:
+            race_info = jc.get_event(str(season_i), str(round_i))
+        except Exception:
+            race_info = {}
 
-    if has_sprint:
-        for s in ("sprint_qualifying", "sprint"):
-            if s in requested_norm:
-                keep.append(s)
+    if "Sprint" in race_info:
+        if "sprint" in requested_norm:
+            keep.append("sprint")
+    if "SprintQualifying" in race_info:
+        if "sprint_qualifying" in requested_norm:
+            keep.append("sprint_qualifying")
 
     return keep
 
@@ -456,7 +466,7 @@ def run_predictions_for_event(
         event_date = datetime.now(timezone.utc)
 
     # Filter requested sessions for this round
-    sessions = _filter_sessions_for_round(jc, season_i, round_i, sessions)
+    sessions = _filter_sessions_for_round(jc, season_i, round_i, sessions, race_info=race_info)
     
     # Sort sessions chronologically to ensure history flows correctly
     # Standard order: Practice -> Sprint Shootout -> Sprint -> Qualifying -> Race
@@ -527,17 +537,60 @@ def run_predictions_for_event(
                     logger.info(f"[predict] {msg}")
                     continue
 
-                # Cache check
-                cache_inputs = {
+                # 1. Check for actual results first (Bypass prediction if results exist)
+                actual_positions = _get_actual_positions_for_session(
+                    jc,
+                    season_i,
+                    round_i,
+                    sess,
+                    roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
+                )
+
+                if actual_positions is not None and not actual_positions.isna().all():
+                    spinner.update(f"Using actual results for {sess}...")
+                    logger.info(f"[predict] Using actual results for {season_i} R{round_i} {sess}")
+
+                    ranked = X.copy()
+                    # Ensure columns for actuals mapping exist
+                    if "number" not in ranked.columns:
+                        ranked["number"] = roster["number"] if "number" in roster.columns else pd.NA
+                    if "code" not in ranked.columns:
+                        ranked["code"] = roster["code"] if "code" in roster.columns else ""
+
+                    ranked["actual_position"] = actual_positions
+                    # Sort by actual position
+                    ranked = ranked.sort_values("actual_position").reset_index(drop=True)
+
+                    # Fill in prediction-like columns for UI consistency
+                    ranked["predicted_position"] = ranked["actual_position"]
+                    ranked["mean_pos"] = ranked["actual_position"].astype(float)
+                    ranked["p_win"] = (ranked["actual_position"] == 1).astype(float)
+                    ranked["p_top3"] = (ranked["actual_position"] <= 3).astype(float)
+                    ranked["p_dnf"] = ranked["actual_position"].isna().astype(float)
+                    ranked["delta"] = 0
+
+                    # Mock prob_matrix and pairwise for consistency
+                    prob_matrix = np.zeros((len(ranked), len(ranked)))
+                    for i in range(len(ranked)):
+                        val = ranked.loc[i, "actual_position"]
+                        if pd.notna(val):
+                            pos = int(val)
+                            if 1 <= pos <= len(ranked):
+                                prob_matrix[i, pos-1] = 1.0
+                    pairwise = None
+
+                    p_top3 = ranked["p_top3"].values
+                    p_win = ranked["p_win"].values
+                    dnf_prob = ranked["p_dnf"].values
+
+                # 2. Cache check (if no actual results)
+                elif (cached_hit := pred_cache.get(cache_inputs := {
                     "X": X,
                     "weather": meta.get("weather"),
                     "model_version": cfg.app.model_version,
                     "weights": calibrated_weights,
                     "modelling_cfg": cfg.modelling,
-                }
-                cached_hit = pred_cache.get(cache_inputs)
-
-                if cached_hit:
+                })):
                     spinner.update(f"Predicting {event_title} - {sess}: Using cached result...")
                     ranked = cached_hit["ranked"]
                     prob_matrix = cached_hit["prob_matrix"]

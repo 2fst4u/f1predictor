@@ -67,7 +67,7 @@
                     </div>
                     <div>
                         <label for="input-round" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
-                        <select id="input-round" x-model="params.round" :disabled="!params.season || scheduleLoading"
+                        <select id="input-round" x-model="params.round" @change="fetchEventStatus()" :disabled="!params.season || scheduleLoading"
                                 class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50">
                             <option value="">Select Round</option>
                             <template x-for="r in schedule" :key="r.round">
@@ -78,13 +78,19 @@
                     <div class="col-span-2 md:col-span-1">
                         <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider" id="sessions-label">Sessions</label>
                         <div class="flex flex-wrap gap-2 mt-1" role="group" aria-labelledby="sessions-label">
-                            <template x-for="s in ['qualifying', 'race', 'sprint', 'sprint_qualifying']">
-                                <button @click="toggleSession(s)"
-                                        :aria-pressed="params.sessions.includes(s)"
-                                        :class="params.sessions.includes(s) ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400'"
-                                        class="text-xs px-2 py-1 rounded border border-gray-700 hover:border-red-500 transition focus:outline-none focus:ring-2 focus:ring-red-500"
-                                        x-text="s.replace('_', ' ').toUpperCase()">
+                            <template x-for="s in eventSessions" :key="s.id">
+                                <button @click="toggleSession(s.id)"
+                                        :aria-pressed="params.sessions.includes(s.id)"
+                                        :class="params.sessions.includes(s.id) ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400'"
+                                        class="text-[10px] md:text-xs px-2 py-1 rounded border border-gray-700 hover:border-red-500 transition focus:outline-none focus:ring-2 focus:ring-red-500 flex items-center space-x-1">
+                                    <span x-text="s.id.replace('_', ' ').toUpperCase()"></span>
+                                    <template x-if="s.has_results">
+                                        <i class="fas fa-check-circle text-green-400 ml-1" title="Results available"></i>
+                                    </template>
                                 </button>
+                            </template>
+                            <template x-if="!eventSessions.length">
+                                <span class="text-xs text-gray-500 italic">Select a round...</span>
                             </template>
                         </div>
                     </div>
@@ -308,6 +314,8 @@
                 config: {},
                 seasons: [],
                 schedule: [],
+                eventSessions: [],
+                statusLoading: false,
                 params: {
                     season: '',
                     round: '',
@@ -335,6 +343,7 @@
                             this.params.season = this.config.next_event.season || '';
                             await this.fetchSchedule();
                             this.params.round = this.config.next_event.round || '';
+                            await this.fetchEventStatus();
                         }
                     } catch (e) {
                         console.error("Failed to initialize app", e);
@@ -355,11 +364,43 @@
                         // Reset round if current round is not in new schedule
                         if (!this.schedule.some(r => r.round == this.params.round)) {
                             this.params.round = '';
+                            this.eventSessions = [];
+                        } else {
+                             await this.fetchEventStatus();
                         }
                     } catch (e) {
                         console.error("Failed to fetch schedule", e);
                     } finally {
                         this.scheduleLoading = false;
+                    }
+                },
+
+                async fetchEventStatus() {
+                    if (!this.params.season || !this.params.round) {
+                        this.eventSessions = [];
+                        return;
+                    }
+                    this.statusLoading = true;
+                    try {
+                        const resp = await fetch(`/api/event-status/${this.params.season}/${this.params.round}`);
+                        const data = await resp.json();
+                        this.eventSessions = data.sessions || [];
+
+                        // Auto-select sessions that don't have results yet
+                        const toSelect = this.eventSessions
+                            .filter(s => !s.has_results)
+                            .map(s => s.id);
+
+                        if (toSelect.length > 0) {
+                            this.params.sessions = toSelect;
+                        } else if (this.eventSessions.length > 0) {
+                            // If all have results, just select the main ones or none
+                            this.params.sessions = [this.eventSessions[this.eventSessions.length - 1].id];
+                        }
+                    } catch (e) {
+                        console.error("Failed to fetch event status", e);
+                    } finally {
+                        this.statusLoading = false;
                     }
                 },
 

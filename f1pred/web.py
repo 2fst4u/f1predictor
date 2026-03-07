@@ -111,6 +111,75 @@ async def get_schedule(season: str):
         logger.exception("Failed to get schedule")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.get("/api/event-status/{season}/{round}")
+async def get_event_status(season: str, round: str):
+    if not _config:
+        raise HTTPException(status_code=500, detail="Application not configured")
+
+    jc = JolpicaClient(
+        _config.data_sources.jolpica.base_url,
+        _config.data_sources.jolpica.timeout_seconds,
+        _config.data_sources.jolpica.rate_limit_sleep,
+    )
+
+    try:
+        # Resolve actual season/round numbers
+        s_i, r_i, race_info = resolve_event(jc, season, round)
+
+        # Standard chronological order
+        all_possible = ["sprint_qualifying", "sprint", "qualifying", "race"]
+        sessions = []
+
+        # Check for each session if it exists in race_info and if results exist
+        for s in all_possible:
+            # Race and Qualifying always exist in F1
+            exists = s in ("race", "qualifying")
+
+            # Sprint sessions only if present in race_info
+            if s == "sprint" and "Sprint" in race_info:
+                exists = True
+            if s == "sprint_qualifying" and "SprintQualifying" in race_info:
+                exists = True
+
+            if exists:
+                has_results = False
+                try:
+                    if s == "race":
+                        has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
+                    elif s == "qualifying":
+                        has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
+                    elif s == "sprint":
+                        has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
+                    elif s == "sprint_qualifying":
+                        # Sprint shootout results can be in Jolpica as 'sprintQualifying' sometimes
+                        # but standard Ergast API doesn't have it.
+                        # However, some Jolpica extensions might.
+                        # We check if _get_actual_positions_for_session can find it.
+                        from .predict import _get_actual_positions_for_session
+                        from .roster import get_roster
+                        roster = get_roster(jc, str(s_i), str(r_i))
+                        if roster is not None:
+                             acts = _get_actual_positions_for_session(jc, s_i, r_i, s, roster)
+                             has_results = acts is not None and not acts.isna().all()
+                except Exception:
+                    has_results = False
+
+                sessions.append({
+                    "id": s,
+                    "name": s.replace("_", " ").title(),
+                    "has_results": has_results
+                })
+
+        return {
+            "season": s_i,
+            "round": r_i,
+            "raceName": race_info.get("raceName"),
+            "sessions": sessions
+        }
+    except Exception as e:
+        logger.exception("Failed to get event status")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @app.get("/api/predict")
 async def get_predictions(
     season: Optional[str] = None,
