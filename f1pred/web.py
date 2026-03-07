@@ -50,14 +50,18 @@ def init_web(cfg: AppConfig):
     global _config
     _config = cfg
 
-    # Initialize caches and FastF1
+    # Initialize directories
     ensure_dirs(cfg.paths.cache_dir, cfg.paths.fastf1_cache)
-    init_caches(cfg)
+
+    # Initialize FastF1 before requests_cache to avoid MRO conflicts
     try:
         if cfg.data_sources.fastf1.enabled:
             init_fastf1(cfg.paths.fastf1_cache)
     except Exception as e:
         logger.warning(f"FastF1 initialization failed: {e}")
+
+    # Initialize HTTP cache
+    init_caches(cfg)
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
