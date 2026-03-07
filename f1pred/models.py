@@ -149,6 +149,7 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
     # Blending weights from config or defaults
     w_base_team = 0.3
     w_base_dt = 0.2
+    w_grid = 0.8
     w_gbm = 0.75
     w_base = 0.25
     
@@ -158,6 +159,7 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
             w_base = cfg.modelling.blending.baseline_weight
             w_base_team = cfg.modelling.blending.baseline_team_factor
             w_base_dt = cfg.modelling.blending.baseline_driver_team_factor
+            w_grid = getattr(cfg.modelling.blending, "grid_factor", 0.8)
         except AttributeError:
             pass
 
@@ -166,6 +168,12 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
         base = base - w_base_team * X["team_form_index"].astype(float).values
     if "driver_team_form_index" in X.columns:
         base = base - w_base_dt * X["driver_team_form_index"].astype(float).values
+
+    # Incorporate grid position into baseline for race sessions
+    # (lower grid is better, pace is lower is better)
+    if session_type in ("race", "sprint") and "grid" in X.columns:
+        grid_vals = X["grid"].astype(float).fillna(15.0).values
+        base = base + w_grid * grid_vals
 
     # Add small jitter if baseline is flat (for tie-breaking)
     if np.nanstd(base) < 1e-9 and "driverId" in X.columns:

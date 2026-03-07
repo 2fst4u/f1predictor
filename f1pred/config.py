@@ -120,6 +120,7 @@ class BlendingCfg:
     baseline_weight: float
     baseline_team_factor: float
     baseline_driver_team_factor: float
+    grid_factor: float
 
 
 @dataclass
@@ -320,7 +321,13 @@ def load_config(path: str) -> AppConfig:
     ens_dc = EnsembleCfg(**cfg["modelling"].get("ensemble", {}))
     
     sim_dc = SimulationCfg(**cfg["modelling"].get("simulation", {}))
-    blend_dc = BlendingCfg(**cfg["modelling"].get("blending", {}))
+
+    # Blending config with default for new grid_factor to maintain test compatibility
+    blend_in = cfg["modelling"].get("blending", {}).copy()
+    if "grid_factor" not in blend_in:
+        blend_in["grid_factor"] = 0.8
+    blend_dc = BlendingCfg(**blend_in)
+
     dnf_dc = DNFCfg(**cfg["modelling"].get("dnf", {}))
     
     pace_scale = float(cfg["modelling"].get("pace_scale", 1.0))  # Default 1.0 (no scaling)
