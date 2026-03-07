@@ -80,7 +80,7 @@
                         <div class="flex flex-wrap gap-2 mt-1" role="group" aria-labelledby="sessions-label">
                             <template x-for="s in eventSessions" :key="s.id">
                                 <button @click="toggleSession(s.id)"
-                                        :aria-pressed="params.sessions.includes(s.id)"
+                                        :aria-pressed="params.sessions.includes(s.id).toString()"
                                         :class="params.sessions.includes(s.id) ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400'"
                                         class="text-[10px] md:text-xs px-2 py-1 rounded border border-gray-700 hover:border-red-500 transition focus:outline-none focus:ring-2 focus:ring-red-500 flex items-center space-x-1">
                                     <span x-text="s.id.replace('_', ' ').toUpperCase()"></span>
@@ -96,7 +96,7 @@
                     </div>
                     <div class="col-span-2 md:col-span-1">
                         <button @click="runPrediction()" :disabled="loading"
-                                class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 transition transform active:scale-95">
+                                class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 transition transform active:scale-95 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-900">
                             <span x-show="!loading">RUN PREDICTION</span>
                             <span x-show="loading" class="flex items-center justify-center">
                                 <i class="fas fa-spinner animate-spin mr-2"></i> PROCESSING...
@@ -146,7 +146,7 @@
                     <template x-for="(data, sess) in results.sessions" :key="sess">
                         <button @click="activeSession = sess"
                                 role="tab"
-                                :aria-selected="activeSession === sess"
+                                :aria-selected="(activeSession === sess).toString()"
                                 :id="'tab-' + sess"
                                 :aria-controls="'panel-' + sess"
                                 :class="activeSession === sess ? 'border-red-600 text-red-500' : 'border-transparent text-gray-400 hover:text-gray-200'"
@@ -326,6 +326,15 @@
                 error: null,
                 logs: [],
                 currentLog: 'Initializing',
+
+                async refreshData() {
+                    this.params.season = '';
+                    this.params.round = '';
+                    this.params.sessions = [];
+                    this.results = null;
+                    this.activeSession = null;
+                    await this.init();
+                },
 
                 async init() {
                     try {
