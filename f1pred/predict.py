@@ -647,27 +647,43 @@ def run_predictions_for_event(
                                 grid_source = f"predicted (from {precursor} in loop)"
 
                             else:
-                                # 2. Run simulation if not in loop
-                                logger.info(f"[predict] {precursor} not in current loop - running simulation to estimate grid")
-                                spinner.update(f"Simulating {precursor} for grid...")
-                                qual_ranked = _run_single_prediction(
-                                    jc, om, season_i, round_i, precursor, ref_date, cfg
+                                # 2. Check for actual results of precursor
+                                spinner.update(f"Checking actual results for {precursor}...")
+                                precursor_actuals = _get_actual_positions_for_session(
+                                    jc, season_i, round_i, precursor,
+                                    roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
                                 )
-                                if qual_ranked is not None and not qual_ranked.empty:
-                                    grid_map = dict(zip(
-                                        qual_ranked["driverId"],
-                                        qual_ranked["predicted_position"]
-                                    ))
-                                    X["grid"] = X["driverId"].map(grid_map)
-                                    grid_source = f"predicted (from simulated {precursor})"
+
+                                if precursor_actuals is not None and not precursor_actuals.isna().all():
+                                    logger.info(f"[predict] Using actual results for {precursor} as grid")
+                                    # Use .fillna() to only fill missing ones, or overwrite?
+                                    # Usually if one is missing, they are all missing or it's an error.
+                                    # Let's map it.
+                                    X["grid"] = X["grid"].fillna(precursor_actuals)
+                                    grid_source = f"actual (from {precursor})"
+
                                 else:
-                                    # 3. Fallback
-                                    if "form_index" in X.columns:
-                                        X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
-                                        grid_source = "estimated (from form index)"
+                                    # 3. Run simulation if not in loop and no actuals
+                                    logger.info(f"[predict] {precursor} not in current loop and no actuals - running simulation to estimate grid")
+                                    spinner.update(f"Simulating {precursor} for grid...")
+                                    qual_ranked = _run_single_prediction(
+                                        jc, om, season_i, round_i, precursor, ref_date, cfg
+                                    )
+                                    if qual_ranked is not None and not qual_ranked.empty:
+                                        grid_map = dict(zip(
+                                            qual_ranked["driverId"],
+                                            qual_ranked["predicted_position"]
+                                        ))
+                                        X["grid"] = X["grid"].fillna(X["driverId"].map(grid_map))
+                                        grid_source = f"predicted (from simulated {precursor})"
                                     else:
-                                        X["grid"] = np.arange(1, len(X) + 1)
-                                        grid_source = "default (no data)"
+                                        # 3. Fallback
+                                        if "form_index" in X.columns:
+                                            X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
+                                            grid_source = "estimated (from form index)"
+                                        else:
+                                            X["grid"] = np.arange(1, len(X) + 1)
+                                            grid_source = "default (no data)"
                         else:
                             logger.info(f"[predict] Using actual grid for {sess}")
 
