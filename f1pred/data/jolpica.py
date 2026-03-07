@@ -216,6 +216,14 @@ class JolpicaClient:
 
     # Schedules and events
 
+    def get_seasons(self) -> List[Dict[str, Any]]:
+        """Fetch all available seasons."""
+        pages = self._fetch_paginated_parallel("seasons.json")
+        all_seasons = []
+        for mr in pages:
+            all_seasons.extend(mr.get("SeasonTable", {}).get("Seasons", []) or [])
+        return all_seasons
+
     def get_season_schedule(self, season: str) -> List[Dict[str, Any]]:
         season = self._validate_season(season)
         js = self._get(f"{season}.json", params={"limit": 1000})
