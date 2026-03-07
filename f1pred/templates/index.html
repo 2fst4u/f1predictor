@@ -387,9 +387,16 @@
                         this.eventSessions = data.sessions || [];
 
                         // Auto-select sessions that don't have results yet
+                        // AND include the most recent session that HAS results
+                        const lastWithResults = [...this.eventSessions].reverse().find(s => s.has_results);
+
                         const toSelect = this.eventSessions
                             .filter(s => !s.has_results)
                             .map(s => s.id);
+
+                        if (lastWithResults) {
+                            toSelect.unshift(lastWithResults.id);
+                        }
 
                         if (toSelect.length > 0) {
                             this.params.sessions = toSelect;
