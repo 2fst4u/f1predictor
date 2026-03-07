@@ -71,11 +71,35 @@ async def index(request: Request):
 async def get_web_config():
     if not _config:
         return {"error": "Config not initialized"}
+
+    # Get next round info for pre-selection
+    jc = JolpicaClient(_config.data_sources.jolpica.base_url)
+    try:
+        next_s, next_r = jc.get_next_round()
+    except Exception:
+        next_s, next_r = None, None
+
     return {
         "model_version": _config.app.model_version,
         "app_version": __version__,
-        "default_sessions": _config.modelling.targets.session_types
+        "default_sessions": _config.modelling.targets.session_types,
+        "next_event": {
+            "season": next_s,
+            "round": next_r
+        }
     }
+
+@app.get("/api/seasons")
+async def get_seasons():
+    jc = JolpicaClient(_config.data_sources.jolpica.base_url)
+    try:
+        seasons = jc.get_seasons()
+        # Return in descending order for better UX (newest first)
+        seasons.sort(key=lambda x: x.get("season", "0"), reverse=True)
+        return seasons
+    except Exception as e:
+        logger.exception("Failed to get seasons")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/schedule/{season}")
 async def get_schedule(season: str):

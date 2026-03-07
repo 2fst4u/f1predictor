@@ -57,13 +57,23 @@
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 items-end">
                     <div>
                         <label for="input-season" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Season</label>
-                        <input id="input-season" type="text" x-model="params.season" placeholder="current"
-                               class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600">
+                        <select id="input-season" x-model="params.season" @change="fetchSchedule()"
+                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600">
+                            <option value="">Select Season</option>
+                            <template x-for="s in seasons" :key="s.season">
+                                <option :value="s.season" x-text="s.season"></option>
+                            </template>
+                        </select>
                     </div>
                     <div>
                         <label for="input-round" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
-                        <input id="input-round" type="text" x-model="params.round" placeholder="next"
-                               class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600">
+                        <select id="input-round" x-model="params.round" :disabled="!params.season || scheduleLoading"
+                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50">
+                            <option value="">Select Round</option>
+                            <template x-for="r in schedule" :key="r.round">
+                                <option :value="r.round" x-text="'Round ' + r.round + ': ' + r.raceName"></option>
+                            </template>
+                        </select>
                     </div>
                     <div class="col-span-2 md:col-span-1">
                         <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider" id="sessions-label">Sessions</label>
@@ -294,7 +304,10 @@
         function f1App() {
             return {
                 loading: false,
+                scheduleLoading: false,
                 config: {},
+                seasons: [],
+                schedule: [],
                 params: {
                     season: '',
                     round: '',
@@ -308,11 +321,45 @@
 
                 async init() {
                     try {
-                        const resp = await fetch('/api/config');
-                        this.config = await resp.json();
+                        // Load Config
+                        const configResp = await fetch('/api/config');
+                        this.config = await configResp.json();
                         this.params.sessions = this.config.default_sessions || ['qualifying', 'race'];
+
+                        // Load Seasons
+                        const seasonsResp = await fetch('/api/seasons');
+                        this.seasons = await seasonsResp.json();
+
+                        // Pre-select if available
+                        if (this.config.next_event) {
+                            this.params.season = this.config.next_event.season || '';
+                            await this.fetchSchedule();
+                            this.params.round = this.config.next_event.round || '';
+                        }
                     } catch (e) {
-                        console.error("Failed to load config", e);
+                        console.error("Failed to initialize app", e);
+                        this.error = "Failed to initialize application data. Check your connection.";
+                    }
+                },
+
+                async fetchSchedule() {
+                    if (!this.params.season) {
+                        this.schedule = [];
+                        return;
+                    }
+                    this.scheduleLoading = true;
+                    try {
+                        const resp = await fetch(`/api/schedule/${this.params.season}`);
+                        const data = await resp.json();
+                        this.schedule = data.races || [];
+                        // Reset round if current round is not in new schedule
+                        if (!this.schedule.some(r => r.round == this.params.round)) {
+                            this.params.round = '';
+                        }
+                    } catch (e) {
+                        console.error("Failed to fetch schedule", e);
+                    } finally {
+                        this.scheduleLoading = false;
                     }
                 },
 
