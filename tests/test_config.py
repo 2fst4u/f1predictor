@@ -189,3 +189,121 @@ def test_load_config_invalid_units(full_valid_config):
         assert "data_sources.open_meteo.precipitation_unit must be one of" in err_msg
     finally:
         os.remove(path)
+
+def test_load_config_missing_require_key(full_valid_config):
+    """Verify that _require raises an error formatted correctly."""
+    # We trigger a missing required key for a nested dictionary
+    del full_valid_config["data_sources"]["jolpica"]
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "Missing required key 'data_sources.jolpica'" in err_msg
+    finally:
+        os.remove(path)
+
+def test_load_config_missing_modelling_targets(full_valid_config):
+    """Verify that a missing modelling.targets key is caught."""
+    del full_valid_config["modelling"]["targets"]
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "Missing required key 'modelling.targets'" in err_msg
+    finally:
+        os.remove(path)
+
+def test_load_config_invalid_session_types_not_list(full_valid_config):
+    """Verify that session_types must be a list of strings."""
+    full_valid_config["modelling"]["targets"]["session_types"] = "race" # not a list
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "modelling.targets.session_types must be a list of strings" in err_msg
+    finally:
+        os.remove(path)
+
+def test_load_config_missing_caching_requests_cache(full_valid_config):
+    """Verify that a missing caching.requests_cache is caught."""
+    del full_valid_config["caching"]["requests_cache"]
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "Missing required key 'caching.requests_cache'" in err_msg
+    finally:
+        os.remove(path)
+
+def test_load_config_invalid_allowable_codes(full_valid_config):
+    """Verify that allowable_codes must be a list of integers."""
+    full_valid_config["caching"]["requests_cache"]["allowable_codes"] = ["200"] # Not an int
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "caching.requests_cache.allowable_codes must be a list of integers" in err_msg
+    finally:
+        os.remove(path)
+
+def test_load_config_invalid_monte_carlo_draws(full_valid_config):
+    """Verify monte carlo draws out of bound limits"""
+    full_valid_config["modelling"]["monte_carlo"]["draws"] = 100_001
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "modelling.monte_carlo.draws must be between 100 and 100,000 to prevent resource exhaustion" in err_msg
+    finally:
+        os.remove(path)
+
+def test_load_config_invalid_live_refresh_seconds(full_valid_config):
+    """Verify that live_refresh_seconds must be integer >= 10."""
+    full_valid_config["app"]["live_refresh_seconds"] = 5
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "app.live_refresh_seconds must be at least 10 seconds to prevent API abuse" in err_msg
+    finally:
+        os.remove(path)
+
+
+def test_load_config_missing_live_refresh_seconds(full_valid_config):
+    """Verify missing app section throws error"""
+    del full_valid_config["app"]
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "Missing top-level section 'app'" in err_msg
+    finally:
+        os.remove(path)
+
+
+def test_load_config_invalid_config_file_returns_errors(full_valid_config):
+    """Test when errors are appended and raised together."""
+    # Let's cause a non-fatal error so it continues to the end and raises there
+    # For instance, missing `modelling` section from top-level would raise at the beginning,
+    # so we should use a late validation failure.
+    full_valid_config["app"]["live_refresh_seconds"] = "not an int"
+    full_valid_config["modelling"]["monte_carlo"]["draws"] = "not an int"
+
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "Invalid config:\n-" in err_msg
+        assert "app.live_refresh_seconds must be at least 10 seconds" in err_msg
+        assert "modelling.monte_carlo.draws must be between 100" in err_msg
+    finally:
+        os.remove(path)
