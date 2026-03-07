@@ -38,7 +38,8 @@ class CalibrationManager:
                 "gbm_weight": 0.75,
                 "baseline_weight": 0.25,
                 "baseline_team_factor": 0.3,
-                "baseline_driver_team_factor": 0.2
+                "baseline_driver_team_factor": 0.2,
+                "grid_factor": 0.8
             }
         }
         self.last_race_id: Optional[str] = None
@@ -343,6 +344,7 @@ class CalibrationManager:
                         "base_form": base_form[idx],
                         "base_team": base_team[idx],
                         "base_dt": base_dt[idx],
+                        "grid": float(X_evt.iloc[idx].get("grid", 15.0)),
                         "elo": elo[idx] if len(elo) > idx else 0,
                         "bt": bt[idx] if len(bt) > idx else 0,
                         "mixed": mixed[idx] if len(mixed) > idx else 0
@@ -372,37 +374,65 @@ class CalibrationManager:
             
             def objective(weights):
                 # Unpack weights
-                # w_blend: [w_gbm, w_base, w_base_team, w_base_dt] -> normalized
-                # w_ens: [w_pace, w_elo, w_bt, w_mixed] -> normalized
-                # Total 8 params? 
-                # Let's simplify to structure matching config
+                # w_blend: [w_gbm, w_base_form, w_base_team, w_base_dt, w_grid]
+                # w_ens: [we_pace, we_elo, we_bt, we_mixed]
                 
                 # GBM Blend
-                wb_gbm, wb_base, wb_tm, wb_dt = weights[0:4]
-                # Clip to positive
+                wb_gbm, wb_form, wb_tm, wb_dt, wb_grid = weights[0:5]
+
+                # Force positive
                 wb_gbm = max(0, wb_gbm)
-                wb_base = max(0, wb_base)
+                wb_form = max(0, wb_form)
                 wb_tm = max(0, wb_tm)
                 wb_dt = max(0, wb_dt)
+                wb_grid = max(0, wb_grid)
+
+                # Stage 1: Form-based pace (linear combination)
+                # This approximates models.py: w_gbm*gbm + w_base*(form + factor_t*team + factor_d*dt)
+                # But we optimize coefficients directly for better convergence.
+                raw_pace_series = (wb_gbm * df_calib["gbm_raw"] +
+                                   wb_form * df_calib["base_form"] +
+                                   wb_tm * df_calib["base_team"] +
+                                   wb_dt * df_calib["base_dt"])
+
+                # Group by event to perform per-session normalization (matching models.py exactly)
+                # We need to compute normalization locally per event.
+                # Since df_calib has session identifier (season, round), we group.
                 
-                # Normalized base combination
-                # Note: original predict.py logic is:
-                # base = -form - w_tm*team - w_dt*dt
-                # pace = blend(gbm, base)
-                # This structure is a bit rigid. Let's optimize the linear combination directly.
-                # Pace = w_g*GBM + w_b*Form + w_t*Team + w_d*DT
+                # Optimization: Perform grouping manually to avoid pandas overhead in solver
+                event_keys = df_calib[["season", "round"]].values
+                unique_events, event_indices = np.unique(event_keys, axis=0, return_inverse=True)
                 
-                pace = (wb_gbm * df_calib["gbm_raw"] + 
-                        wb_base * df_calib["base_form"] + 
-                        wb_tm * df_calib["base_team"] + 
-                        wb_dt * df_calib["base_dt"])
+                # Array to store standardized pace
+                pace_final = np.zeros(len(df_calib))
+
+                for i in range(len(unique_events)):
+                    mask = (event_indices == i)
+
+                    # 1. Normalize Stage 1 Pace
+                    ev_pace = raw_pace_series.values[mask]
+                    mu_p = np.nanmean(ev_pace)
+                    sd_p = np.nanstd(ev_pace)
+                    p_z = (ev_pace - mu_p) / (sd_p + 1e-6)
+
+                    # 2. Normalize Grid
+                    ev_grid = df_calib["grid"].values[mask]
+                    mu_g = np.nanmean(ev_grid)
+                    sd_g = np.nanstd(ev_grid)
+                    g_z = (ev_grid - mu_g) / (sd_g + 1e-6)
+
+                    # 3. Stage 2: Stickiness blend
+                    grid_imp = np.clip(wb_grid, 0.0, 1.0)
+                    pace_final[mask] = (1.0 - grid_imp) * p_z + grid_imp * g_z
+
+                pace = pace_final
                 
                 # Normalize pace z-score per race to be fair input to ensemble
                 # (Doing this per-row vector optimization is hard without grouping, 
                 #  assume input components are already roughly z-scored. They are.)
                 
                 # Ensemble
-                we_pace, we_elo, we_bt, we_mixed = weights[4:8]
+                we_pace, we_elo, we_bt, we_mixed = weights[5:9]
                 we_pace = max(0, we_pace)
                 we_elo = max(0, we_elo)
                 we_bt = max(0, we_bt)
@@ -425,7 +455,7 @@ class CalibrationManager:
                 return -corr + 0.001 * np.sum(weights**2) # Regularization
 
             # Initial guess
-            init_w = [0.6, 0.4, 0.3, 0.2,  # blending (gbm, base, team_factor, driver_team_factor)
+            init_w = [0.6, 0.4, 0.3, 0.2, 0.8, # blending (gbm, base, team_factor, driver_team_factor, grid_factor)
                       0.4, 0.2, 0.2, 0.2]    # ensemble (pace, elo, bt, mixed)
             
             # Bounds
@@ -438,6 +468,7 @@ class CalibrationManager:
                 (0.05, 1.0), # Baseline
                 (0.2, 2.0),  # Team Factor (relative to form)
                 (0.0, 2.0),  # Driver-Team Factor
+                (0.1, 0.95), # Grid Factor (Stickiness)
                 (0.0, 1.0),  # Ensemble Pace
                 (0.0, 1.0),  # Elo
                 (0.0, 1.0),  # BT
@@ -448,46 +479,49 @@ class CalibrationManager:
             
             w_opt = res.x
             # Normalize ensemble weights to sum to 1 for readability (metric is invariant to scale)
-            ens_sum = sum(w_opt[4:8])
+            ens_sum = sum(w_opt[5:9])
             if ens_sum > 0:
-                w_opt[4:8] /= ens_sum
+                w_opt[5:9] /= ens_sum
                 
-            # Blending weights in predict.py are:
-            # pace = w_gbm*predict + w_base*baseline
-            # baseline = form + w_tm*team + w_dt*dt
-            # To map our linear w1..w4 to this:
-            # Total Baseline weight = w2+w3+w4
-            # w_gbm_cfg = w1 / (w1 + TotalBaseline)
-            # w_base_cfg = 1 - w_gbm_cfg
-            # w_tm_cfg = w3 / w2 (approx)
-            # This mapping is messy. Let's just update the config values that roughly correspond.
-            # actually, calibrate.py logic is best source of truth.
-            # Let's map back to the flat structure I defined in __init__
-            
             logger.info(f"[calibrate] Optimized weights: {w_opt}")
             
             # Map back to structure
             # Blending
-            w_gbm_raw = max(1e-3, w_opt[0])
-            w_base_raw = max(1e-3, w_opt[1])
-            w_team_raw = w_opt[2]
-            w_dt_raw = w_opt[3]
+            # w_opt: [gbm, form, team, dt, grid, ...]
+            # Models.py expects:
+            # pace = w_gbm*gbm + w_base*(form - w_tm*team - w_dt*dt)
+            # wait, models.py uses: base = form - w_tm*team - w_dt*dt
+            # and pace_hat = w_gbm*gbm + w_base*base
+            # NOTE: base_form, base_team, base_dt in df_calib were negated (lower is faster)
+            # So models.py 'minus' becomes 'plus' in calibrate objective but 'minus' in mapping.
+
+            w_gbm_opt = max(1e-3, w_opt[0])
+            w_form_opt = max(1e-3, w_opt[1])
+            w_team_opt = w_opt[2]
+            w_dt_opt = w_opt[3]
+            w_grid_stickiness = float(np.clip(w_opt[4], 0.0, 1.0))
+
+            # total_main = w_gbm + w_form
+            # but we want w_base in config to cover form+team+dt
+            # so w_gbm_cfg = w_gbm / (w_gbm + w_form)
+            # baseline_team_factor = w_team / w_form (ratio relative to form)
             
-            total_main = w_gbm_raw + w_base_raw
+            total_main = w_gbm_opt + w_form_opt
             
             self.current_weights = {
                 "ensemble": {
-                    "w_gbm": float(w_opt[4]), # Pace input
-                    "w_elo": float(w_opt[5]),
-                    "w_bt": float(w_opt[6]),
-                    "w_mixed": float(w_opt[7])
+                    "w_gbm": float(w_opt[5]), # Pace input
+                    "w_elo": float(w_opt[6]),
+                    "w_bt": float(w_opt[7]),
+                    "w_mixed": float(w_opt[8])
                 },
                 "blending": {
-                    "gbm_weight": float(w_gbm_raw / total_main),
-                    "baseline_weight": float(w_base_raw / total_main),
-                    # Factors are relative to the form index
-                    "baseline_team_factor": float(w_team_raw / w_base_raw),
-                    "baseline_driver_team_factor": float(w_dt_raw / w_base_raw)
+                    "gbm_weight": float(w_gbm_opt / total_main),
+                    "baseline_weight": float(w_form_opt / total_main),
+                    # Factors are relative to the form index (ratios)
+                    "baseline_team_factor": float(w_team_opt / w_form_opt),
+                    "baseline_driver_team_factor": float(w_dt_opt / w_form_opt),
+                    "grid_factor": w_grid_stickiness
                 }
             }
             
