@@ -39,7 +39,7 @@ def test_predict_logs_sanitized_exception(mock_logger):
     with patch("f1pred.predict.resolve_event") as mock_resolve:
         mock_resolve.return_value = (2025, 1, {"raceName": "Test GP", "date": "2025-01-01", "time": "12:00:00Z"})
 
-        with patch("f1pred.predict.build_session_features") as mock_build:
+        with patch("f1pred.features.build_session_features") as mock_build:
             # Raise a malicious exception
             malicious_msg = "Crash\n\033[31mForged\033[0m"
             mock_build.side_effect = Exception(malicious_msg)
@@ -49,8 +49,8 @@ def test_predict_logs_sanitized_exception(mock_logger):
                  patch("f1pred.predict.OpenMeteoClient"), \
                  patch("f1pred.predict.ensure_dirs"), \
                  patch("f1pred.predict.init_fastf1"), \
-                 patch("f1pred.predict.collect_historical_results", return_value=MagicMock(empty=False, __len__=lambda s: 1)), \
-                 patch("f1pred.predict.CalibrationManager") as mock_cm, \
+                 patch("f1pred.features.collect_historical_results", return_value=MagicMock(empty=False, __len__=lambda s: 1)), \
+                 patch("f1pred.calibrate.CalibrationManager") as mock_cm, \
                  patch("f1pred.predict.StatusSpinner"):
 
                 # Setup CalibrationManager mock

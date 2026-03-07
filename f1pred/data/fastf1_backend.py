@@ -3,11 +3,6 @@ from typing import Optional, Tuple, Any
 from datetime import datetime, timezone
 import logging
 
-try:
-    import fastf1  # type: ignore
-except Exception:  # pragma: no cover
-    fastf1 = None  # type: ignore
-
 logger = logging.getLogger(__name__)
 _CACHE_INITED = False
 
@@ -15,9 +10,12 @@ _CACHE_INITED = False
 def init_fastf1(cache_dir: str) -> bool:
     """Enable cache and silence FastF1 noisy logs; never raise."""
     global _CACHE_INITED
-    if fastf1 is None:
+    try:
+        import fastf1
+    except ImportError:
         logger.warning("FastF1 is not installed; fastf1_backend is disabled.")
         return False
+
     if _CACHE_INITED:
         return True
     try:
@@ -62,16 +60,15 @@ def _to_py_datetime(dt_obj: Any) -> Optional[datetime]:
 
 
 def get_event(season: int, round_no: int):
-    if fastf1 is None:
-        return None
     try:
+        import fastf1
         return fastf1.get_event(season, round_no)
     except Exception:
         return None
 
 
 def get_session_times(ev, session_name: str) -> Optional[Tuple[datetime, datetime]]:
-    if fastf1 is None or ev is None:
+    if ev is None:
         return None
     try:
         sess = ev.get_session(session_name)
@@ -92,8 +89,6 @@ def get_session_times(ev, session_name: str) -> Optional[Tuple[datetime, datetim
 
 
 def get_session_classification(season: int, round_no: int, session_name: str):
-    if fastf1 is None:
-        return None
     try:
         ev = get_event(season, round_no)
         if ev is None:
@@ -119,8 +114,6 @@ def get_session_weather_status(season: int, round_no: int, session_name: str) ->
       - rainfall: bool if rain was detected
       - track_status: 'WET' or 'DRY' based on conditions
     """
-    if fastf1 is None:
-        return None
     try:
         ev = get_event(season, round_no)
         if ev is None:

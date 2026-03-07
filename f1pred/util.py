@@ -14,8 +14,6 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from dataclasses import is_dataclass, asdict
 
-import pandas as pd
-import numpy as np
 import requests
 import requests_cache
 from requests.adapters import HTTPAdapter
@@ -395,6 +393,8 @@ class PredictionCache:
 
     def _serialize(self, obj: Any, sort_dict: bool = False) -> Any:
         """Recursively serialize objects for caching."""
+        import pandas as pd
+        import numpy as np
         if isinstance(obj, pd.DataFrame):
             return obj.to_json(orient="split")
         if isinstance(obj, np.ndarray):
@@ -417,6 +417,8 @@ class PredictionCache:
 
     def get(self, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Retrieve cached prediction results if they exist."""
+        import pandas as pd
+        import numpy as np
         key = self._generate_key(inputs)
         cache_file = self.cache_dir / f"{key}.json"
 

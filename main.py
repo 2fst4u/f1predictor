@@ -195,16 +195,20 @@ def main() -> None:
             return
         cfg.app.live_refresh_seconds = args.refresh
 
-    # Ensure dirs and install HTTP cache
+    # Ensure dirs
     ensure_dirs(cfg.paths.cache_dir, cfg.paths.fastf1_cache)
-    init_caches(cfg, disable_cache=args.no_cache)
 
     # Auto-initialise FastF1 cache if enabled (no-op if not installed)
+    # Important: FastF1 must be initialized BEFORE requests_cache to avoid MRO conflicts
+    # between fastf1 and requests-cache monkey-patching.
     try:
         if cfg.data_sources.fastf1.enabled:
             init_fastf1(cfg.paths.fastf1_cache)
     except Exception as e:
         logger.warning(f"FastF1 initialization failed (non-fatal): {e}")
+
+    # Install HTTP cache
+    init_caches(cfg, disable_cache=args.no_cache)
 
     if args.backtest:
         run_backtests(cfg)

@@ -8,20 +8,12 @@ from typing import List, Dict, Any, Optional, Tuple, Callable
 from datetime import datetime, timezone, timedelta
 import os
 
-import numpy as np
-import pandas as pd
 from colorama import Fore, Style
 
 from .util import get_logger, ensure_dirs, StatusSpinner, sanitize_for_console, PredictionCache
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.fastf1_backend import init_fastf1, get_session_classification, get_session_weather_status
-from .features import build_session_features, collect_historical_results
-from .models import train_pace_model, estimate_dnf_probabilities
-from .simulate import simulate_grid
-from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace
-from .ranking import plackett_luce_scores
-from .calibrate import CalibrationManager
 
 __all__ = [
     "run_predictions_for_event",
@@ -134,13 +126,14 @@ def _get_actual_positions_for_session(
     season_i: int,
     round_i: int,
     sess: str,
-    roster_view: pd.DataFrame,  # expects columns: driverId, number, code
-) -> Optional[pd.Series]:
+    roster_view: 'pd.DataFrame',  # expects columns: driverId, number, code
+) -> Optional['pd.Series']:
     """Return a Series aligned to roster_view with actual finishing/qualifying position where available.
 
     Uses Jolpica for race/qual/sprint. For sprint_qualifying, uses FastF1 classification if present.
     Never raises; returns None if not available.
     """
+    import pandas as pd
     try:
         if sess == "race":
             act = jc.get_race_results(str(season_i), str(round_i))
@@ -215,14 +208,19 @@ def _run_single_prediction(
     sess: str,
     ref_date: datetime,
     cfg,
-    X_override: Optional[pd.DataFrame] = None,
-) -> Optional[pd.DataFrame]:
+    X_override: Optional['pd.DataFrame'] = None,
+) -> Optional['pd.DataFrame']:
     """Run prediction for a single session and return ranked DataFrame.
     
     If X_override is provided, use it instead of building features.
     Returns None if prediction cannot be completed.
     """
+    import numpy as np
+    import pandas as pd
     from .features import build_session_features, collect_historical_results
+    from .models import train_pace_model, estimate_dnf_probabilities
+    from .simulate import simulate_grid
+    from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace
     
     # Build features (or use override)
     if X_override is not None:
@@ -335,6 +333,15 @@ def run_predictions_for_event(
     Returns a dict when return_results=True for the backtester.
     Never raises on normal control flow; logs and skips sessions if necessary.
     """
+    import numpy as np
+    import pandas as pd
+    from .features import build_session_features, collect_historical_results
+    from .models import train_pace_model, estimate_dnf_probabilities
+    from .simulate import simulate_grid
+    from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace
+    from .ranking import plackett_luce_scores
+    from .calibrate import CalibrationManager
+
     # Ensure FastF1 cache is initialised (no-op if disabled/not installed)
     try:
         if cfg.data_sources.fastf1.enabled:
@@ -947,7 +954,7 @@ def _render_actual_pos(predicted: int, actual: int, width: int = 6) -> str:
 
 
 def print_session_console(
-    df: pd.DataFrame,
+    df: 'pd.DataFrame',
     sess: str,
     cfg,
     weather_info: Optional[Dict[str, float]] = None,
@@ -956,6 +963,7 @@ def print_session_console(
     session_date: Optional[datetime] = None,
     circuit_name: Optional[str] = None
 ) -> None:
+    import pandas as pd
     title = _session_title(sess)
     header_line = f"\n{Fore.YELLOW}{Style.BRIGHT}== {title}"
     if circuit_name:

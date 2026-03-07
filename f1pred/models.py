@@ -6,14 +6,6 @@ gradient boosting models. Supports LightGBM, XGBoost, or sklearn fallback.
 from __future__ import annotations
 from typing import Tuple, Any, List, Optional, Dict
 import warnings
-import numpy as np
-import pandas as pd
-
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.ensemble import GradientBoostingRegressor
 
 # Suppress harmless sklearn warning about feature names when using preprocessing pipelines
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
@@ -23,21 +15,8 @@ __all__ = [
     "estimate_dnf_probabilities",
 ]
 
-# Try optional boosters; fall back to sklearn GBM
-try:
-    import lightgbm as lgb
-    _HAS_LGB = True
-except Exception:
-    _HAS_LGB = False
 
-try:
-    import xgboost as xgb
-    _HAS_XGB = True
-except Exception:
-    _HAS_XGB = False
-
-
-def _split_feature_columns(X: pd.DataFrame, exclude: List[str]) -> Tuple[List[str], List[str], List[str]]:
+def _split_feature_columns(X: 'pd.DataFrame', exclude: List[str]) -> Tuple[List[str], List[str], List[str]]:
     """
     Returns (all_features, numeric_cols, categorical_cols), excluding provided columns.
     """
@@ -47,8 +26,7 @@ def _split_feature_columns(X: pd.DataFrame, exclude: List[str]) -> Tuple[List[st
     return features, num_cols, cat_cols
 
 
-
-def train_pace_model(X: pd.DataFrame, session_type: str, cfg: Any = None) -> Tuple[Any, np.ndarray, list]:
+def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> Tuple[Any, 'np.ndarray', list]:
     """
     Train a model producing a "pace index" (lower is better/faster) per driver.
 
@@ -58,6 +36,14 @@ def train_pace_model(X: pd.DataFrame, session_type: str, cfg: Any = None) -> Tup
     The model learns to predict pace from features, then we blend with a baseline
     derived from form indices to ensure robust predictions even with limited features.
     """
+    import numpy as np
+    import pandas as pd
+    from sklearn.preprocessing import StandardScaler, OneHotEncoder
+    from sklearn.pipeline import Pipeline
+    from sklearn.compose import ColumnTransformer
+    from sklearn.impute import SimpleImputer
+    from sklearn.ensemble import GradientBoostingRegressor
+
     # Target: form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
     if "form_index" not in X.columns:
         y = np.zeros(len(X), dtype=float)
@@ -93,8 +79,11 @@ def train_pace_model(X: pd.DataFrame, session_type: str, cfg: Any = None) -> Tup
     ], remainder="drop")
 
     # Model selection with eager hyperparameters
-    # (Hyperparameters could also be moved to config, but sticking to hardcoded model params for now as requested)
-    if _HAS_LGB:
+    model = None
+
+    # Try LightGBM
+    try:
+        import lightgbm as lgb
         model = lgb.LGBMRegressor(
             n_estimators=150,
             learning_rate=0.1,
@@ -108,21 +97,31 @@ def train_pace_model(X: pd.DataFrame, session_type: str, cfg: Any = None) -> Tup
             n_jobs=-1,
             verbose=-1
         )
-    elif _HAS_XGB:
-        model = xgb.XGBRegressor(
-            n_estimators=150,
-            max_depth=4,
-            learning_rate=0.1,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            reg_lambda=1.0,
-            reg_alpha=0.1,
-            random_state=42,
-            tree_method="hist",
-            n_jobs=-1,
-            verbosity=0
-        )
-    else:
+    except Exception:
+        pass
+
+    # Try XGBoost if LightGBM failed
+    if model is None:
+        try:
+            import xgboost as xgb
+            model = xgb.XGBRegressor(
+                n_estimators=150,
+                max_depth=4,
+                learning_rate=0.1,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                reg_lambda=1.0,
+                reg_alpha=0.1,
+                random_state=42,
+                tree_method="hist",
+                n_jobs=-1,
+                verbosity=0
+            )
+        except Exception:
+            pass
+
+    # Fallback to sklearn
+    if model is None:
         model = GradientBoostingRegressor(
             n_estimators=100,
             learning_rate=0.1,
@@ -197,8 +196,8 @@ def train_pace_model(X: pd.DataFrame, session_type: str, cfg: Any = None) -> Tup
 
 
 def estimate_dnf_probabilities(
-    hist: pd.DataFrame,
-    current_X: pd.DataFrame,
+    hist: 'pd.DataFrame',
+    current_X: 'pd.DataFrame',
     alpha: float = 2.0,
     beta: float = 8.0,
     driver_weight: float = 0.6,
@@ -208,7 +207,7 @@ def estimate_dnf_probabilities(
     cfg: Any = None,
     event_weather: Optional[Dict[str, float]] = None,
     hist_weather: Optional[Dict[Tuple[int, int], Dict[str, float]]] = None,
-) -> np.ndarray:
+) -> 'np.ndarray':
     """
     Estimate per-driver DNF probabilities using Beta-smoothed empirical base rates.
     
@@ -218,6 +217,9 @@ def estimate_dnf_probabilities(
     
     Arguments allow overrides, but cfg takes precedence if provided.
     """
+    import numpy as np
+    import pandas as pd
+
     if cfg:
         try:
             alpha = cfg.modelling.dnf.alpha
