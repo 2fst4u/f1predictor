@@ -130,44 +130,67 @@ def _get_actual_positions_for_session(
 ) -> Optional['pd.Series']:
     """Return a Series aligned to roster_view with actual finishing/qualifying position where available.
 
-    Uses Jolpica for race/qual/sprint. For sprint_qualifying, uses FastF1 classification if present.
+    Uses Jolpica as primary source for race/qual/sprint. Falls back to FastF1 if Jolpica results
+    are missing or incomplete. For sprint_qualifying, uses FastF1 classification as primary.
     Never raises; returns None if not available.
     """
     import pandas as pd
     try:
+        # 1. Try Jolpica first for race/qualifying/sprint
+        amap = None
         if sess == "race":
             act = jc.get_race_results(str(season_i), str(round_i))
             amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position")}
-            return roster_view["driverId"].map(amap) if amap else None
-
-        if sess == "qualifying":
+        elif sess == "qualifying":
             act = jc.get_qualifying_results(str(season_i), str(round_i))
             amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position")}
-            return roster_view["driverId"].map(amap) if amap else None
-
-        if sess == "sprint":
+        elif sess == "sprint":
             act = jc.get_sprint_results(str(season_i), str(round_i))
             amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position")}
-            return roster_view["driverId"].map(amap) if amap else None
 
-        if sess == "sprint_qualifying":
-            cls = get_session_classification(season_i, round_i, "Sprint Shootout")
+        # If Jolpica provided results, check if they are complete (at least as many as in roster)
+        if amap and len(amap) >= len(roster_view):
+            return roster_view["driverId"].map(amap)
+
+        # 2. Try FastF1 if Jolpica is missing, incomplete, or if sess is sprint_qualifying
+        ff1_sess_name = {
+            "race": "Race",
+            "qualifying": "Qualifying",
+            "sprint": "Sprint",
+            "sprint_qualifying": "Sprint Shootout"
+        }.get(sess)
+
+        if ff1_sess_name:
+            cls = get_session_classification(season_i, round_i, ff1_sess_name)
             if cls is not None and hasattr(cls, "empty") and not cls.empty:
+                ff1_map = None
                 if "DriverNumber" in cls.columns:
                     num_series = pd.to_numeric(roster_view["number"], errors="coerce").astype("Int64")
                     num_to_pos = dict(
-                        cls.dropna(subset=["Position"]).astype({"DriverNumber": int, "Position": int})[
+                        cls.astype({"DriverNumber": int})[
                             ["DriverNumber", "Position"]
                         ].values
                     )
-                    return num_series.map(num_to_pos)
-                if "Abbreviation" in cls.columns:
+                    ff1_map = num_series.map(num_to_pos)
+                elif "Abbreviation" in cls.columns:
                     code_series = roster_view["code"].astype(str)
                     abbr_to_pos = dict(
-                        cls.dropna(subset=["Position"])[["Abbreviation", "Position"]].values
+                        cls[["Abbreviation", "Position"]].values
                     )
-                    return code_series.map(abbr_to_pos)
-            return None
+                    ff1_map = code_series.map(abbr_to_pos)
+
+                if ff1_map is not None:
+                    # If Jolpica had partial results, prefer the more complete set
+                    if amap is not None:
+                        jolpica_res = roster_view["driverId"].map(amap)
+                        if ff1_map.count() >= jolpica_res.count():
+                            return ff1_map
+                        return jolpica_res
+                    return ff1_map
+
+        # Fallback to Jolpica partial results if FastF1 failed or was less complete
+        if amap:
+            return roster_view["driverId"].map(amap)
 
         return None
     except Exception:
@@ -1229,7 +1252,12 @@ def print_session_console(
     print(f"{Style.DIM}{'─' * sep_width}{Style.RESET_ALL}")
     
     for _, r in df.iterrows():
-        pos = int(r["predicted_position"])
+        try:
+            pos_val = r.get("predicted_position")
+            pos = int(pos_val) if pd.notna(pos_val) else 0
+        except (ValueError, TypeError):
+            pos = 0
+
         name = sanitize_for_console(r.get("name") or "")[:max_name]
         code = sanitize_for_console(r.get("code") or "")[:3].upper()
         if not code: code = "???"

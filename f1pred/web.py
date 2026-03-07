@@ -144,23 +144,29 @@ async def get_event_status(season: str, round: str):
             if exists:
                 has_results = False
                 try:
-                    if s == "race":
-                        has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
-                    elif s == "qualifying":
-                        has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
-                    elif s == "sprint":
-                        has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
-                    elif s == "sprint_qualifying":
-                        # Sprint shootout results can be in Jolpica as 'sprintQualifying' sometimes
-                        # but standard Ergast API doesn't have it.
-                        # However, some Jolpica extensions might.
-                        # We check if _get_actual_positions_for_session can find it.
-                        from .predict import _get_actual_positions_for_session
-                        from .roster import get_roster
-                        roster = get_roster(jc, str(s_i), str(r_i))
-                        if roster is not None:
-                             acts = _get_actual_positions_for_session(jc, s_i, r_i, s, roster)
-                             has_results = acts is not None and not acts.isna().all()
+                    from .predict import _get_actual_positions_for_session
+                    from .roster import derive_roster
+                    import pandas as pd
+
+                    # Race and Qualifying always exist in F1
+                    # But we need a roster to check completeness via _get_actual_positions_for_session
+                    roster_entries = derive_roster(jc, str(s_i), str(r_i))
+                    if roster_entries:
+                        roster = pd.DataFrame(roster_entries)
+                        # Standardize columns for _get_actual_positions_for_session
+                        if "permanentNumber" in roster.columns:
+                            roster["number"] = roster["permanentNumber"]
+
+                        acts = _get_actual_positions_for_session(jc, s_i, r_i, s, roster)
+                        has_results = acts is not None and not acts.isna().all()
+                    else:
+                        # Fallback to simple Jolpica check if roster fails
+                        if s == "race":
+                            has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
+                        elif s == "qualifying":
+                            has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
+                        elif s == "sprint":
+                            has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
                 except Exception:
                     has_results = False
 
