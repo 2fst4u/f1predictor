@@ -11,18 +11,10 @@ from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 
-import numpy as np
-import pandas as pd
-# Lazy import scipy/sklearn to avoid startup hang/overhead if not needed immediately
-# from scipy.optimize import minimize
-# from sklearn.metrics import log_loss
-
 from .util import get_logger, ensure_dirs
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
-from .features import build_session_features, collect_historical_results
-from .models import train_pace_model
-from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig
+from .ensemble import EnsembleConfig
 
 logger = get_logger(__name__)
 
@@ -83,7 +75,7 @@ class CalibrationManager:
         except Exception as e:
             logger.error(f"[calibrate] Failed to save weights: {e}")
 
-    def check_calibration_needed(self, history_df: Optional[pd.DataFrame] = None) -> bool:
+    def check_calibration_needed(self, history_df: Optional['pd.DataFrame'] = None) -> bool:
         """Check if calibration is needed based on new race results or missing file."""
         if not self.cfg.calibration.enabled:
             return False
@@ -122,10 +114,15 @@ class CalibrationManager:
             
         return False
 
-    def run_calibration(self, jc: JolpicaClient, om: OpenMeteoClient, history_df: Optional[pd.DataFrame] = None):
+    def run_calibration(self, jc: JolpicaClient, om: OpenMeteoClient, history_df: Optional['pd.DataFrame'] = None):
         """Run the full calibration process."""
         # Import heavy deps here
+        import numpy as np
+        import pandas as pd
         from scipy.optimize import minimize
+        from .features import build_session_features, collect_historical_results
+        from .models import train_pace_model
+        from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel
         
         logger.info("[calibrate] Starting calibration process...")
         if history_df is None or history_df.empty:
@@ -418,7 +415,7 @@ class CalibrationManager:
                 
                 # Determine ranks per race
                 # Since we want to vectorize, we can just use correlation.
-                # Rank correlation (Spearman) is good but non-differentiable/hard to optimize directly with standard solvers.
+                # Rank correlation (Spearman) is good but non-differentiable/hard to optimize directly with solvers.
                 # Proxy: Point-biserial or just simple regression target?
                 # The combined score (lower is better) should correlate with Position (lower is better).
                 # We want to MAXIMIZE correlation with Position (since both are lower-is-better, positive corr).

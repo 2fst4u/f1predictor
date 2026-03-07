@@ -1,12 +1,14 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, TYPE_CHECKING
 
 from datetime import datetime, timezone
-import numpy as np
-import pandas as pd
 
 from .util import get_logger
+
+if TYPE_CHECKING:
+    import numpy as np
+    import pandas as pd
 
 logger = get_logger(__name__)
 
@@ -42,7 +44,7 @@ class EloModel:
     def _get_rating(self, driver_id: str) -> float:
         return self.ratings_.get(driver_id, self.base_rating)
 
-    def fit(self, hist: pd.DataFrame) -> "EloModel":
+    def fit(self, hist: 'pd.DataFrame') -> "EloModel":
         if hist is None or hist.empty:
             logger.info("[ensemble.elo] No history; using flat base ratings")
             return self
@@ -76,7 +78,8 @@ class EloModel:
         logger.info("[ensemble.elo] Fitted ratings for %d drivers (updates=%d)", len(self.ratings_), updates)
         return self
 
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
+    def predict(self, X: 'pd.DataFrame') -> 'np.ndarray':
+        import numpy as np
         if X is None or X.empty:
             return np.zeros(0, dtype=float)
 
@@ -111,7 +114,9 @@ class BradleyTerryModel:
     def __init__(self) -> None:
         self.strength_: Dict[str, float] = {}
 
-    def fit(self, hist: pd.DataFrame, half_life_days: float = 365.0) -> "BradleyTerryModel":
+    def fit(self, hist: 'pd.DataFrame', half_life_days: float = 365.0) -> "BradleyTerryModel":
+        import numpy as np
+        import pandas as pd
         if hist is None or hist.empty:
             logger.info("[ensemble.bt] No history; using flat strength")
             return self
@@ -161,7 +166,8 @@ class BradleyTerryModel:
         logger.info("[ensemble.bt] Inferred strengths for %d drivers", len(self.strength_))
         return self
 
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
+    def predict(self, X: 'pd.DataFrame') -> 'np.ndarray':
+        import numpy as np
         if X is None or X.empty:
             return np.zeros(0, dtype=float)
         ids = X.get("driverId")
@@ -199,7 +205,9 @@ class MixedEffectsLikeModel:
         self.driver_effect_: Dict[str, float] = {}
         self.team_effect_: Dict[str, float] = {}
 
-    def fit(self, hist: pd.DataFrame, half_life_days: float = 365.0) -> "MixedEffectsLikeModel":
+    def fit(self, hist: 'pd.DataFrame', half_life_days: float = 365.0) -> "MixedEffectsLikeModel":
+        import numpy as np
+        import pandas as pd
         if hist is None or hist.empty:
             logger.info("[ensemble.mixed] No history; using flat effects")
             return self
@@ -264,7 +272,8 @@ class MixedEffectsLikeModel:
         )
         return self
 
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
+    def predict(self, X: 'pd.DataFrame') -> 'np.ndarray':
+        import numpy as np
         if X is None or X.empty:
             return np.zeros(0, dtype=float)
 
@@ -289,7 +298,8 @@ class MixedEffectsLikeModel:
         return z
 
 
-def _safe_component(arr: np.ndarray | None, n: int, name: str) -> np.ndarray:
+def _safe_component(arr: 'np.ndarray' | None, n: int, name: str) -> 'np.ndarray':
+    import numpy as np
     if arr is None:
         logger.info("[ensemble.combine] %s unavailable; using zeros", name)
         return np.zeros(n, dtype=float)
@@ -300,12 +310,12 @@ def _safe_component(arr: np.ndarray | None, n: int, name: str) -> np.ndarray:
 
 
 def combine_pace(
-    gbm_pace: np.ndarray,
-    elo_pace: np.ndarray | None,
-    bt_pace: np.ndarray | None,
-    mixed_pace: np.ndarray | None,
+    gbm_pace: 'np.ndarray',
+    elo_pace: 'np.ndarray' | None,
+    bt_pace: 'np.ndarray' | None,
+    mixed_pace: 'np.ndarray' | None,
     cfg: EnsembleConfig | None = None,
-) -> np.ndarray:
+) -> 'np.ndarray':
     """Combine multiple pace components into a single pace index.
 
     - All inputs are assumed to be on a "lower is better" scale.
@@ -313,6 +323,7 @@ def combine_pace(
     - If any component is missing or has wrong length, it is safely replaced
       with zeros and a debug log is emitted.
     """
+    import numpy as np
 
     if gbm_pace is None:
         logger.info("[ensemble.combine] gbm_pace is None; returning empty array")
