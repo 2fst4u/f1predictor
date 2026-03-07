@@ -23,7 +23,7 @@ def test_umask_race_condition(tmp_path):
     """
     # 1. Set a known initial umask (e.g. 022, standard for many systems)
     initial_umask = 0o022
-    old = os.umask(initial_umask)
+    os.umask(initial_umask)
 
     # Verify we set it correctly (umask returns PREVIOUS, so call again to read current, then restore)
     current = os.umask(initial_umask)
