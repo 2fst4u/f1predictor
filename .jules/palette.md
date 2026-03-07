@@ -45,3 +45,7 @@
 ## 2025-05-25 - Semantic Icons in CLI Spinners
 **Learning:** Using a generic asterisk `*` for a countdown spinner is ambiguous and lacks visual polish. Replacing it with a unicode refresh icon `↻` (U+21BB) clearly communicates "refreshing" or "waiting" to the user, aligning the visual language with the action.
 **Action:** Use the `↻` icon for refresh/countdown spinners in CLI tools to improve semantic clarity and visual appeal.
+
+## 2025-05-24 - Alpine.js Custom Toggle Accessibility
+**Learning:** When using custom `<button>` elements in Alpine.js (`x-data`) to act as toggleable options (like multi-select checkboxes), screen readers will not announce their state changes unless explicitly provided.
+**Action:** Always add `:aria-pressed="condition.toString()"` to Alpine.js buttons that function as state toggles, ensuring screen reader users can perceive their current selected state.
