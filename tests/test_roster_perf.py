@@ -1,8 +1,6 @@
 """Performance tests for roster derivation."""
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from f1pred.roster import derive_roster
-from f1pred.data.jolpica import JolpicaClient
 
 class MockJolpicaClient:
     def __init__(self):

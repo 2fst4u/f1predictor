@@ -1,6 +1,6 @@
 import unittest
 import time
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 from f1pred.data.jolpica import JolpicaClient
 
 class TestJolpicaParallel(unittest.TestCase):

@@ -2,7 +2,6 @@ import pytest
 from fastapi.testclient import TestClient
 from f1pred.web import app, init_web
 from f1pred.config import load_config
-import os
 
 @pytest.fixture
 def client():

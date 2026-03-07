@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from f1pred.data.jolpica import JolpicaClient
 
 class TestSecurityPagination(unittest.TestCase):

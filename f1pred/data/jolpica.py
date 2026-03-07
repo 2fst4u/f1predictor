@@ -6,7 +6,6 @@ import re
 from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import requests
 from requests import HTTPError
 
 from ..util import session_with_retries, http_get_json, get_logger

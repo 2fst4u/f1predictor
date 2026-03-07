@@ -6,7 +6,6 @@ output generation for F1 race predictions.
 from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple, Callable
 from datetime import datetime, timezone, timedelta
-import os
 
 from colorama import Fore, Style
 
@@ -249,7 +248,6 @@ def _run_single_prediction(
     Returns None if prediction cannot be completed.
     """
     import numpy as np
-    import pandas as pd
     from .features import build_session_features, collect_historical_results
     from .models import train_pace_model, estimate_dnf_probabilities
     from .simulate import simulate_grid
@@ -674,7 +672,7 @@ def run_predictions_for_event(
                             logger.info(f"[predict] Using actual grid for {sess}")
 
                     # Train pace model
-                    spinner.update(f"Training pace model...")
+                    spinner.update("Training pace model...")
                     pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
 
                     # Standardize GBM pace (z-score) but preserve variance
@@ -700,7 +698,7 @@ def run_predictions_for_event(
                     )
 
                     # --- Ensemble skill components ---
-                    spinner.update(f"Running ensemble models...")
+                    spinner.update("Running ensemble models...")
                     elo_pace = bt_pace = mixed_pace = None
                     elo_model = bt_model = mixed_model = None
 
@@ -766,7 +764,7 @@ def run_predictions_for_event(
                             dnf_prob[:] = 0.12
 
                     # Monte Carlo simulation
-                    spinner.update(f"Simulating Monte Carlo...")
+                    spinner.update("Simulating Monte Carlo...")
                     draws = cfg.modelling.monte_carlo.draws
                     prob_matrix, mean_pos, pairwise = simulate_grid(
                         combined_pace,

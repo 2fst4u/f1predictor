@@ -1,6 +1,4 @@
 import logging
-import pytest
-from unittest.mock import patch, MagicMock
 from f1pred.util import configure_logging, session_with_retries, __version__
 
 def test_configure_logging():

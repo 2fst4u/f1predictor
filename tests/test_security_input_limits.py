@@ -1,6 +1,5 @@
 
 import unittest
-import logging
 from f1pred.util import sanitize_for_console
 from f1pred.data.jolpica import JolpicaClient
 from f1pred.data.open_meteo import OpenMeteoClient

@@ -1,11 +1,7 @@
-import pytest
-from pathlib import Path
 from f1pred.util import PredictionCache
 import os
-import time
 import numpy as np
 import pandas as pd
-from datetime import datetime
 
 def test_cache_rolling_deletion(tmp_path):
     # Set up cache with max_entries = 2

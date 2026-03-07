@@ -1,7 +1,6 @@
 from __future__ import annotations
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 import os
-from datetime import datetime, timezone
 
 import json
 import threading
@@ -97,7 +96,7 @@ async def get_seasons():
         # Return in descending order for better UX (newest first)
         seasons.sort(key=lambda x: x.get("season", "0"), reverse=True)
         return seasons
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to get seasons")
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -107,7 +106,7 @@ async def get_schedule(season: str):
     try:
         races = jc.get_season_schedule(season)
         return {"season": season, "races": races}
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to get schedule")
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -182,7 +181,7 @@ async def get_event_status(season: str, round: str):
             "raceName": race_info.get("raceName"),
             "sessions": sessions
         }
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to get event status")
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -224,7 +223,6 @@ async def get_predictions(
             # Convert DataFrame to list of dicts
             ranked_list = ranked_df.to_dict(orient="records")
             # Clean up NaNs for JSON
-            import numpy as np
             import math
             for row in ranked_list:
                 for k, v in row.items():
@@ -240,7 +238,7 @@ async def get_predictions(
 
         return output
 
-    except Exception as e:
+    except Exception:
         logger.exception("Prediction failed")
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -296,7 +294,7 @@ async def get_predictions_stream(
                 }
 
             q.put({"type": "results", "data": output})
-        except Exception as e:
+        except Exception:
             logger.exception("Streaming prediction failed")
             q.put({"type": "error", "message": "Internal server error"})
         finally:

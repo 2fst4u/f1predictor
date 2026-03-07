@@ -1,5 +1,4 @@
 
-import pytest
 from colorama import Fore, Style
 from f1pred.predict import _get_pos_color
 

@@ -1,8 +1,6 @@
 import logging
 import io
-import re
-import pytest
-from f1pred.util import SafeLogFormatter, configure_logging, get_logger
+from f1pred.util import SafeLogFormatter
 
 def test_safe_log_formatter_sanitizes_newlines():
     """Verify that SafeLogFormatter replaces newlines with spaces."""

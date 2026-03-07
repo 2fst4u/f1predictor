@@ -1,4 +1,3 @@
-import pytest
 from colorama import Fore, Style
 from f1pred.predict import _render_actual_pos
 

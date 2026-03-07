@@ -1,9 +1,5 @@
-import os
-import json
 import pandas as pd
 import numpy as np
-import pytest
-from pathlib import Path
 from f1pred.util import PredictionCache
 
 def test_prediction_cache_basic(tmp_path):
