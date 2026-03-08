@@ -840,7 +840,14 @@ def run_predictions_for_event(
                     ranked[["driverId", "number", "code"]],
                 )
             if actual_positions is not None:
-                ranked["actual_position"] = actual_positions
+                # If actual_positions was fetched early (for optimization), it is aligned to the
+                # original 'roster' index. If it was fetched at the end of the loop, it is aligned
+                # to the current 'ranked' index. To avoid scrambling results due to alignment
+                # mismatches after sorting, we map by driverId to ensure correct alignment.
+                if "actual_position" not in ranked.columns:
+                    pos_map = dict(zip(roster["driverId"], actual_positions))
+                    ranked["actual_position"] = ranked["driverId"].map(pos_map)
+
                 ranked["delta"] = ranked["actual_position"] - ranked["predicted_position"]
             else:
                 ranked["actual_position"] = np.nan
