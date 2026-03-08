@@ -214,8 +214,7 @@
                                                 <span class="hidden sm:inline">Podium</span>
                                                 <span class="sm:hidden">Top 3</span>
                                             </th>
-                                            <th class="px-0.5 py-2 sm:p-4">DNF</th>
-                                            <th class="px-0.5 py-2 sm:p-4 text-right">Actual</th>
+                                            <th class="px-0.5 py-2 sm:p-4 text-right">DNF</th>
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-gray-800">
@@ -264,8 +263,8 @@
                                                         </div>
                                                     </div>
                                                 </td>
-                                                <td class="px-0.5 py-2 sm:p-4">
-                                                    <div class="w-10 sm:w-24">
+                                                <td class="px-0.5 py-2 sm:p-4 text-right">
+                                                    <div class="w-10 sm:w-24 ml-auto">
                                                         <div class="flex justify-between text-[10px] mb-0.5 sm:mb-1">
                                                             <span x-text="(p.p_dnf * 100).toFixed(1) + '%'"></span>
                                                         </div>
@@ -273,16 +272,6 @@
                                                             <div class="progress-fill" :style="'width: ' + (p.p_dnf * 100) + '%; background-color: ' + getProbColor(p.p_dnf * 100, true)"></div>
                                                         </div>
                                                     </div>
-                                                </td>
-                                                <td class="px-0.5 py-2 sm:p-4 text-right">
-                                                    <template x-if="p.actual_position">
-                                                        <span class="font-bold px-2 py-1 rounded"
-                                                              :class="p.actual_position == p.predicted_position ? 'bg-green-600' : (Math.abs(p.actual_position - p.predicted_position) <= 2 ? 'bg-blue-600' : 'bg-gray-700')"
-                                                              x-text="p.actual_position"></span>
-                                                    </template>
-                                                    <template x-if="!p.actual_position">
-                                                        <span class="text-gray-600 italic">--</span>
-                                                    </template>
                                                 </td>
                                             </tr>
                                         </template>

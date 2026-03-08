@@ -1242,11 +1242,6 @@ def print_session_console(
     # (Checking generic is_race is enough if we generalized is_race above, but let's be explicit)
     has_grid = is_race and "grid" in df.columns and df["grid"].notna().any()
 
-    # Optimization: Hide "Actual" column if we are displaying actual results (it's redundant)
-    # or if no actual positions are available at all.
-    is_actual_results = df["p_win"].max() == 1.0 and (df["p_win"] == 1.0).sum() == 1
-    show_actual_col = not is_actual_results and "actual_position" in df.columns and df["actual_position"].notna().any()
-    
     # NOTE: Avoid extended Unicode characters in headers and tables (e.g., use 'Chg' instead of 'Δ')
     # and use ASCII '-' or '=' for borders instead of box-drawing characters (─, ▕).
     # This maintains strict compatibility with Windows and standard charmap encodings.
@@ -1268,9 +1263,6 @@ def print_session_console(
         f"{'DNF':>14}"
     ])
 
-    if show_actual_col:
-        header_parts.append(f"{'Actual':>6}")
-
     header = "   ".join(header_parts) + Style.RESET_ALL
     print(header)
     
@@ -1280,8 +1272,6 @@ def print_session_console(
     sep_width = 3 + 4 + max_name + max_team + 2 + 5 + 14 + 14 + 14 + (7 * 3)
     if has_grid:
         sep_width += 4 + 4 + (2 * 3)
-    if show_actual_col:
-        sep_width += 6 + 3
     print(f"{Style.DIM}{'-' * sep_width}{Style.RESET_ALL}")
     
     for _, r in df.iterrows():
@@ -1335,15 +1325,6 @@ def print_session_console(
                 grid_str = f"{Style.DIM}  --{Style.RESET_ALL}"
                 delta_str = f"{Style.DIM}  --{Style.RESET_ALL}"
         
-        # Actual classification display
-        classified_str = ""
-        if show_actual_col:
-            actual_pos = r.get("actual_position")
-            if pd.notna(actual_pos):
-                classified_str = _render_actual_pos(pos, int(actual_pos))
-            else:
-                classified_str = f"{Style.DIM}{'--':>6}{Style.RESET_ALL}"
-        
         # Print row
         team_color = _get_team_color(r.get("constructorName") or "")
         pos_color = _get_pos_color(pos)
@@ -1363,9 +1344,6 @@ def print_session_console(
             f"{win_color}{win:5.1f}% {win_bar}{Style.RESET_ALL}",
             f"{dnf_color}{dnf:5.1f}% {dnf_bar}{Style.RESET_ALL}"
         ])
-
-        if show_actual_col:
-            row_parts.append(classified_str)
 
         row_str = "   ".join(row_parts)
         print(row_str)

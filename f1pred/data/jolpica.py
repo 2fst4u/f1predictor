@@ -79,8 +79,10 @@ class JolpicaClient:
 
         while True:
             try:
-                data = http_get_json(self.session, url, params=params or {}, timeout=self.timeout)
-                if self.rate_limit_sleep and self.rate_limit_sleep > 0:
+                data, from_cache = http_get_json(
+                    self.session, url, params=params or {}, timeout=self.timeout, include_metadata=True
+                )
+                if not from_cache and self.rate_limit_sleep and self.rate_limit_sleep > 0:
                     time.sleep(self.rate_limit_sleep)
                 if attempt > 0:
                     logger.info(
