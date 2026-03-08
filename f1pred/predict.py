@@ -443,6 +443,8 @@ def run_predictions_for_event(
             if "baseline_weight" in b: cfg.modelling.blending.baseline_weight = b["baseline_weight"]
             if "baseline_team_factor" in b: cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
             if "baseline_driver_team_factor" in b: cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
+            if "grid_factor" in b: cfg.modelling.blending.grid_factor = b["grid_factor"]
+            if "current_quali_factor" in b: cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
             logger.info(f"[predict] Applied calibrated blending weights (gbm={b.get('gbm_weight', 0):.2f})")
             print(f"    [Predict] Using calibrated weights (GBM={b.get('gbm_weight', 0):.2f}, Baseline={b.get('baseline_weight', 0):.2f})")
 
@@ -854,7 +856,7 @@ def run_predictions_for_event(
                         "driver": row.get("name"),
                         "code": row.get("code"),
                         "team": row.get("constructorName"),
-                        "predicted_pos": int(row["predicted_position"]),
+                        "predicted_pos": int(row["predicted_position"]) if pd.notna(row["predicted_position"]) else None,
                         "mean_pos": float(row["mean_pos"]),
                         "p_top3": float(row["p_top3"]),
                         "p_win": float(row["p_win"]),
@@ -871,13 +873,13 @@ def run_predictions_for_event(
                 # Note: 'points' are estimates, 'qpos' is relevant for 'qualifying' session
                 accumulated_history.append({
                     "driverId": row["driverId"],
-                    "position": int(row["predicted_position"]),
+                    "position": int(row["predicted_position"]) if pd.notna(row["predicted_position"]) else None,
                     "date": ref_date,
                     "session": sess,
                     "constructorId": row.get("constructorId"),
                     "points": 0.0, # Placeholder
                     "grid": row.get("grid"),
-                    "qpos": int(row["predicted_position"]) if sess in ("qualifying", "sprint_qualifying") else np.nan
+                    "qpos": int(row["predicted_position"]) if sess in ("qualifying", "sprint_qualifying") and pd.notna(row["predicted_position"]) else np.nan
                 })
 
                 # Check for wet session via FastF1 (only if session happened)
@@ -926,31 +928,20 @@ def run_predictions_for_event(
 
 
 def _render_bar_parts(percentage: float, width: int = 5) -> Tuple[str, str]:
-    """Render a high-resolution progress bar using block characters.
+    """Render a progress bar using ASCII characters.
 
     Returns (filled_part, empty_part).
-    filled_part contains solid blocks and the partial block.
-    empty_part contains filler characters.
     """
-    blocks = " ▏▎▍▌▋▊▉█"
     full_value = (percentage / 100.0) * width
     full_chars = int(full_value)
-    remainder = full_value - full_chars
-
-    # Select partial block (8 levels)
-    partial_idx = int(remainder * 8)
-    partial_char = blocks[partial_idx] if partial_idx > 0 else ""
 
     # Build the filled part
-    filled = "█" * full_chars
-    if full_chars < width:
-        filled += partial_char
+    filled = "=" * full_chars
 
     # Calculate empty space length
-    current_len = len(filled)
-    remaining_len = width - current_len
+    remaining_len = width - full_chars
 
-    empty = "░" * remaining_len
+    empty = "-" * remaining_len
 
     return filled, empty
 
@@ -1017,13 +1008,15 @@ def _render_actual_pos(predicted: int, actual: int, width: int = 6) -> str:
     """Render actual position with accuracy-based color coding and alignment."""
     diff = abs(predicted - actual)
 
+    # NOTE: We strictly avoid extended Unicode (like '✓' or '≈') for these symbols
+    # to prevent UnicodeEncodeError crashes on standard Windows charmap terminals.
     # Determine color and symbol
     if diff == 0:
         color = Fore.GREEN
-        symbol = "✓"
+        symbol = "*"
     elif diff <= 2:
         color = Fore.CYAN
-        symbol = "≈"
+        symbol = "~"
     elif diff <= 5:
         color = Fore.YELLOW
         symbol = ""
@@ -1035,7 +1028,7 @@ def _render_actual_pos(predicted: int, actual: int, width: int = 6) -> str:
     num_str = str(actual)
 
     # Calculate padding for right alignment
-    # Note: We assume '✓' takes 1 char width in the terminal.
+    # Note: We assume '*' takes 1 char width in the terminal.
     content_len = len(num_str) + len(symbol)
     padding = max(0, width - content_len)
     pad_str = " " * padding
@@ -1102,11 +1095,12 @@ def print_session_console(
                 rel_str = "<1m"
             else:
                 rel_str = " ".join(parts)
-            print(f"{Style.DIM}🕒 {date_str} (Starts in {rel_str}){Style.RESET_ALL}")
+            # NOTE: Avoid emoji (like '🕒') here; they cause UnicodeEncodeError on Windows terminals.
+            print(f"{Style.DIM}[*] {date_str} (Starts in {rel_str}){Style.RESET_ALL}")
         elif total_seconds > -10800: # Within 3 hours after start
-            print(f"{Style.DIM}🕒 {date_str} (In Progress / Just Finished){Style.RESET_ALL}")
+            print(f"{Style.DIM}[*] {date_str} (In Progress / Just Finished){Style.RESET_ALL}")
         else:
-            print(f"{Style.DIM}🕒 {date_str} (Finished){Style.RESET_ALL}")
+            print(f"{Style.DIM}[*] {date_str} (Finished){Style.RESET_ALL}")
 
     # Weather display with condition-based coloring
     if weather_info:
@@ -1126,26 +1120,30 @@ def print_session_console(
         if has_valid_weather:
             w_parts = []
 
+            # NOTE: Do NOT use weather emojis (☀️, ☁️, 🌡️, 💧, 🌧️, ☔, etc.) in this section.
+            # They will cause strict UnicodeEncodeError crashes on Windows command prompts.
+            # Stick to ASCII alternatives (like [Sun], C, Rain, [WET], etc).
+
             # 1. Cloud Cover (Sky Condition)
             if c is not None and not math.isnan(c):
                 if c < 20:
-                    w_parts.append(f"{Style.BRIGHT}☀️{Style.RESET_ALL}")
+                    w_parts.append(f"{Style.BRIGHT}[Sun]{Style.RESET_ALL}")
                 elif c < 60:
-                    w_parts.append(f"{Style.BRIGHT}🌤️{Style.RESET_ALL}")
+                    w_parts.append(f"{Style.BRIGHT}[Partly Cloudy]{Style.RESET_ALL}")
                 else:
-                    w_parts.append(f"{Style.DIM}☁️{Style.RESET_ALL}")
+                    w_parts.append(f"{Style.DIM}[Cloudy]{Style.RESET_ALL}")
 
             # Determine units from config
             temp_unit_cfg = cfg.data_sources.open_meteo.temperature_unit
             wind_unit_cfg = cfg.data_sources.open_meteo.windspeed_unit
             precip_unit_cfg = cfg.data_sources.open_meteo.precipitation_unit
 
-            temp_label = {"celsius": "°C", "fahrenheit": "°F"}.get(temp_unit_cfg, "°C")
+            temp_label = {"celsius": "C", "fahrenheit": "F"}.get(temp_unit_cfg, "C")
             wind_label = {"kmh": "km/h", "ms": "m/s", "mph": "mph", "kn": "kn"}.get(wind_unit_cfg, "km/h")
             precip_label = {"mm": "mm", "inch": "in"}.get(precip_unit_cfg, "mm")
 
             # 2. Temperature
-            # Color temp: cyan if cold (<15°C) for better readability, red if hot (>30°C), white otherwise
+            # Color temp: cyan if cold (<15C) for better readability, red if hot (>30C), white otherwise
             # normalize to celsius for coloring threshold
             t_celsius = t if temp_unit_cfg == "celsius" else (t - 32) * 5/9
             if t_celsius < 15:
@@ -1154,17 +1152,17 @@ def print_session_console(
                 temp_color = Fore.RED
             else:
                 temp_color = Fore.RESET
-            w_parts.append(f"{temp_color}🌡️ {t:.0f}{temp_label}{Style.RESET_ALL}")
+            w_parts.append(f"{temp_color}{t:.0f}{temp_label}{Style.RESET_ALL}")
             
             # 3. Humidity (New)
             if h is not None and not math.isnan(h):
-                w_parts.append(f"{Fore.BLUE}💧 {h:.0f}%{Style.RESET_ALL}")
+                w_parts.append(f"{Fore.BLUE}{h:.0f}% humidity{Style.RESET_ALL}")
 
             # 4. Rain
             # Color rain: cyan if any rain
             rain_color = Fore.CYAN if r > 0 else Fore.RESET
             if r > 0:
-                w_parts.append(f"{rain_color}🌧️ {r:.1f}{precip_label}{Style.RESET_ALL}")
+                w_parts.append(f"{rain_color}Rain: {r:.1f}{precip_label}{Style.RESET_ALL}")
             else:
                 w_parts.append(f"{Style.DIM}Dry{Style.RESET_ALL}")
             
@@ -1178,11 +1176,11 @@ def print_session_console(
                 elif wind_unit_cfg == "kn": w_kmh = w * 1.852
 
                 wind_color = Fore.YELLOW if w_kmh > 20 else Fore.RESET
-                w_parts.append(f"{wind_color}💨 {w:.0f}{wind_label}{Style.RESET_ALL}")
+                w_parts.append(f"{wind_color}Wind: {w:.0f}{wind_label}{Style.RESET_ALL}")
             
             # 6. Wet Indicator (Official Session Status)
             if is_wet:
-                w_parts.append(f"{Fore.CYAN}{Style.BRIGHT}☔ [WET]{Style.RESET_ALL}")
+                w_parts.append(f"{Fore.CYAN}{Style.BRIGHT}[WET]{Style.RESET_ALL}")
             
             print(f"Weather: {'  '.join(w_parts)}")
         else:
@@ -1225,6 +1223,9 @@ def print_session_console(
     # (Checking generic is_race is enough if we generalized is_race above, but let's be explicit)
     has_grid = is_race and "grid" in df.columns and df["grid"].notna().any()
     
+    # NOTE: Avoid extended Unicode characters in headers and tables (e.g., use 'Chg' instead of 'Δ')
+    # and use ASCII '-' or '=' for borders instead of box-drawing characters (─, ▕).
+    # This maintains strict compatibility with Windows and standard charmap encodings.
     # Print column headers
     if has_grid:
         header = (
@@ -1233,7 +1234,7 @@ def print_session_console(
             f"{'Driver':<{max_name}}   "
             f"{'Team':<{max_team+2}}   "
             f"{'Grid':>4}   "
-            f"{'Δ':>4}   "
+            f"{'Chg':>4}   "
             f"{'Avg':>5}   "
             f"{'Top3':>14}   "
             f"{win_label:>14}   "
@@ -1263,7 +1264,7 @@ def print_session_console(
         sep_width = base_width + 4 + 3 + 4 + 3
     else:
         sep_width = base_width
-    print(f"{Style.DIM}{'─' * sep_width}{Style.RESET_ALL}")
+    print(f"{Style.DIM}{'-' * sep_width}{Style.RESET_ALL}")
     
     for _, r in df.iterrows():
         try:
@@ -1293,9 +1294,9 @@ def print_session_console(
         dnf_filled, dnf_empty = _render_bar_parts(dnf, width=5)
 
         # Construct bars with colored filled part and dim empty part
-        win_bar = f"{Style.DIM}▕{Style.RESET_ALL}{win_color}{win_filled}{Style.RESET_ALL}{Style.DIM}{win_empty}▏{Style.RESET_ALL}"
-        top3_bar = f"{Style.DIM}▕{Style.RESET_ALL}{top3_color}{top3_filled}{Style.RESET_ALL}{Style.DIM}{top3_empty}▏{Style.RESET_ALL}"
-        dnf_bar = f"{Style.DIM}▕{Style.RESET_ALL}{dnf_color}{dnf_filled}{Style.RESET_ALL}{Style.DIM}{dnf_empty}▏{Style.RESET_ALL}"
+        win_bar = f"{Style.DIM}[{Style.RESET_ALL}{win_color}{win_filled}{Style.RESET_ALL}{Style.DIM}{win_empty}]{Style.RESET_ALL}"
+        top3_bar = f"{Style.DIM}[{Style.RESET_ALL}{top3_color}{top3_filled}{Style.RESET_ALL}{Style.DIM}{top3_empty}]{Style.RESET_ALL}"
+        dnf_bar = f"{Style.DIM}[{Style.RESET_ALL}{dnf_color}{dnf_filled}{Style.RESET_ALL}{Style.DIM}{dnf_empty}]{Style.RESET_ALL}"
         
         # Grid position and delta for race sessions
         grid_str = ""
@@ -1307,9 +1308,9 @@ def print_session_console(
                 delta = grid_int - pos  # positive = gained positions (started lower, finished higher)
                 grid_str = f"{grid_int:>4}"
                 if delta > 0:
-                    delta_str = f"{Fore.GREEN}↑{delta:>2}{Style.RESET_ALL} "
+                    delta_str = f"{Fore.GREEN}+{delta:>2}{Style.RESET_ALL} "
                 elif delta < 0:
-                    delta_str = f"{Fore.RED}↓{abs(delta):>2}{Style.RESET_ALL} "
+                    delta_str = f"{Fore.RED}-{abs(delta):>2}{Style.RESET_ALL} "
                 else:
                     delta_str = f"{Style.DIM}  ={Style.RESET_ALL} "
             else:
@@ -1346,4 +1347,4 @@ def print_session_console(
         print(row_str)
 
     # Print legend explaining abbreviations
-    print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, DNF=Retirement Prob, Actual=Result (✓=Exact, ≈=Close), Δ=Grid Delta{Style.RESET_ALL}")
+    print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, DNF=Retirement Prob, Actual=Result (*=Exact, ~=Close), Chg=Grid Delta{Style.RESET_ALL}")

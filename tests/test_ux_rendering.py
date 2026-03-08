@@ -4,18 +4,18 @@ from f1pred.predict import _render_actual_pos
 def test_render_actual_pos_exact_match():
     # Predicted 1, Actual 1
     # Expect: Green color, checkmark
-    # width 6. "✓" + "1" = 2 chars. Padding 4.
+    # width 6. "*" + "1" = 2 chars. Padding 4.
     result = _render_actual_pos(1, 1, width=6)
     # We check exact string construction
-    expected = f"    {Fore.GREEN}{Style.BRIGHT}✓1{Style.RESET_ALL}"
+    expected = f"    {Fore.GREEN}{Style.BRIGHT}*1{Style.RESET_ALL}"
     assert result == expected
 
 def test_render_actual_pos_close_match():
     # Predicted 1, Actual 2 (Diff 1)
-    # Expect: Cyan color, ≈ symbol
-    # width 6. "≈2" = 2 chars. Padding 4.
+    # Expect: Cyan color, ~ symbol
+    # width 6. "~2" = 2 chars. Padding 4.
     result = _render_actual_pos(1, 2, width=6)
-    expected = f"    {Fore.CYAN}{Style.BRIGHT}≈2{Style.RESET_ALL}"
+    expected = f"    {Fore.CYAN}{Style.BRIGHT}~2{Style.RESET_ALL}"
     assert result == expected
 
 def test_render_actual_pos_ok_match():
@@ -35,7 +35,7 @@ def test_render_actual_pos_bad_match():
 
 def test_render_actual_pos_custom_width():
     # Width 4
-    # Exact match: "✓1" = 2 chars. Padding 2.
+    # Exact match: "*1" = 2 chars. Padding 2.
     result = _render_actual_pos(1, 1, width=4)
-    expected = f"  {Fore.GREEN}{Style.BRIGHT}✓1{Style.RESET_ALL}"
+    expected = f"  {Fore.GREEN}{Style.BRIGHT}*1{Style.RESET_ALL}"
     assert result == expected

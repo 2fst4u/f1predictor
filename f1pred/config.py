@@ -121,6 +121,7 @@ class BlendingCfg:
     baseline_team_factor: float
     baseline_driver_team_factor: float
     grid_factor: float
+    current_quali_factor: float = 0.5
 
 
 @dataclass
@@ -326,6 +327,8 @@ def load_config(path: str) -> AppConfig:
     blend_in = cfg["modelling"].get("blending", {}).copy()
     if "grid_factor" not in blend_in:
         blend_in["grid_factor"] = 0.8
+    if "current_quali_factor" not in blend_in:
+        blend_in["current_quali_factor"] = 0.5
     blend_dc = BlendingCfg(**blend_in)
 
     dnf_dc = DNFCfg(**cfg["modelling"].get("dnf", {}))

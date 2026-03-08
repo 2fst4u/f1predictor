@@ -936,65 +936,68 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
     # Fetch actual starting grid for this race (if available)
     # Grid comes from race results endpoint - it shows the actual grid after penalties
     grid_df = pd.DataFrame(columns=["driverId", "grid"])
+    # Current weekend qualifying position (raw pace signal, NOT penalty-adjusted)
+    quali_pos_df = pd.DataFrame(columns=["driverId", "current_quali_pos"])
     if session_type == "race" and not roster.empty:
         try:
-            race_results = jc.get_race_results(str(season), str(rnd))
-            if race_results:
-                grid_rows = []
-                for res in race_results:
-                    drv = res.get("Driver", {}) or {}
-                    driver_id = drv.get("driverId")
-                    grid_pos = res.get("grid")
-                    if driver_id and grid_pos is not None:
-                        grid_rows.append({
-                            "driverId": driver_id,
-                            "grid": int(grid_pos)
-                        })
-                if grid_rows:
-                    grid_df = pd.DataFrame(grid_rows)
-                    logger.info(f"[features] Fetched actual grid from race results for {len(grid_df)} drivers")
-            else:
-                logger.info("[features] Race results not yet available - checking qualifying results for grid")
-                qual_results = jc.get_qualifying_results(str(season), str(rnd))
-                if qual_results:
-                    grid_rows = []
-                    for res in qual_results:
-                        drv = res.get("Driver", {}) or {}
-                        driver_id = drv.get("driverId")
-                        pos = res.get("position")
-                        if driver_id and pos is not None and int(pos) > 0:
-                            grid_rows.append({
-                                "driverId": driver_id,
-                                "grid": int(pos)
+            from .data.fastf1_backend import get_session_classification
+            s_int = int(season) if str(season) != "current" else datetime.now().year
+            r_int = int(rnd)
+            
+            # Fetch Qualifying Results via FastF1
+            fast_q = get_session_classification(s_int, r_int, "Q")
+            if fast_q is not None and not fast_q.empty:
+                fast_rows = []
+                for _, r in fast_q.iterrows():
+                    abbr = str(r.get("Abbreviation", "")).upper()
+                    pos = r.get("Position")
+                    if abbr and pos and not pd.isna(pos):
+                        match = roster[roster["code"] == abbr]
+                        if not match.empty:
+                            fast_rows.append({
+                                "driverId": match.iloc[0]["driverId"],
+                                "grid": int(pos),
+                                "current_quali_pos": int(pos)
                             })
-                    if grid_rows:
-                        grid_df = pd.DataFrame(grid_rows)
-                        logger.info(f"[features] Fetched actual grid from qualifying results for {len(grid_df)} drivers")
+                if fast_rows:
+                    grid_df = pd.DataFrame(fast_rows)[["driverId", "grid"]]
+                    quali_pos_df = pd.DataFrame(fast_rows)[["driverId", "current_quali_pos"]]
+                    logger.info(f"[features] Fetched actual grid and current_quali_pos from FastF1 Qualifying for {len(grid_df)} drivers")
+            else:
+                logger.info("[features] FastF1 Qualifying classification not available or empty.")
+
         except Exception as e:
-            logger.info(f"[features] Could not fetch grid from race/qualifying results: {e}")
+            logger.info(f"[features] Could not fetch grid/quali from FastF1: {e}")
     elif session_type == "sprint" and not roster.empty:
         try:
-            sprint_results = jc.get_sprint_results(str(season), str(rnd))
-            if sprint_results:
-                grid_rows = []
-                for res in sprint_results:
-                    drv = res.get("Driver", {}) or {}
-                    driver_id = drv.get("driverId")
-                    grid_pos = res.get("grid")
-                    if driver_id and grid_pos is not None:
-                        grid_rows.append({
-                            "driverId": driver_id,
-                            "grid": int(grid_pos)
-                        })
-                if grid_rows:
-                    grid_df = pd.DataFrame(grid_rows)
-                    logger.info(f"[features] Fetched actual grid from sprint results for {len(grid_df)} drivers")
+            from .data.fastf1_backend import get_session_classification
+            s_int = int(season) if str(season) != "current" else datetime.now().year
+            r_int = int(rnd)
+            
+            # Fetch Sprint Qualifying Results via FastF1 (Session 'SQ')
+            fast_sq = get_session_classification(s_int, r_int, "SQ")
+            if fast_sq is not None and not fast_sq.empty:
+                fast_rows = []
+                for _, r in fast_sq.iterrows():
+                    abbr = str(r.get("Abbreviation", "")).upper()
+                    pos = r.get("Position")
+                    if abbr and pos and not pd.isna(pos):
+                        match = roster[roster["code"] == abbr]
+                        if not match.empty:
+                            fast_rows.append({
+                                "driverId": match.iloc[0]["driverId"],
+                                "grid": int(pos),
+                                "current_quali_pos": int(pos)
+                            })
+                if fast_rows:
+                    grid_df = pd.DataFrame(fast_rows)[["driverId", "grid"]]
+                    quali_pos_df = pd.DataFrame(fast_rows)[["driverId", "current_quali_pos"]]
+                    logger.info(f"[features] Fetched actual grid from FastF1 Sprint Qualifying (SQ) for {len(grid_df)} drivers")
             else:
-                logger.info("[features] Sprint results not yet available - sprint shootout classification fallback needed")
-                # sprint shootout classification is fetched differently and might not have grid
-                # get_session_classification exists but is fastf1 backend only
+                logger.info("[features] FastF1 Sprint Qualifying classification not available or empty.")
+
         except Exception as e:
-            logger.info(f"[features] Could not fetch grid from sprint results: {e}")
+            logger.info(f"[features] Could not fetch grid from FastF1 Sprint Qualifying: {e}")
 
 
     # Historical results (optimized, cached, roster-aware)
@@ -1139,6 +1142,13 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             X = X.merge(grid_df, on="driverId", how="left")
         else:
             X["grid"] = np.nan
+
+        # Merge current weekend qualifying position (direct pace signal)
+        if not quali_pos_df.empty:
+            X = X.merge(quali_pos_df, on="driverId", how="left")
+            logger.info(f"[features] Merged current_quali_pos for {X['current_quali_pos'].notna().sum()} drivers")
+        else:
+            X["current_quali_pos"] = np.nan
 
 
 

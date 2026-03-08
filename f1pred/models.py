@@ -7,6 +7,8 @@ from __future__ import annotations
 from typing import Tuple, Any, List, Optional, Dict
 import warnings
 
+from .util import get_logger
+
 # Suppress harmless sklearn warning about feature names when using preprocessing pipelines
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
@@ -15,6 +17,7 @@ __all__ = [
     "estimate_dnf_probabilities",
 ]
 
+logger = get_logger(__name__)
 
 def _split_feature_columns(X: 'pd.DataFrame', exclude: List[str]) -> Tuple[List[str], List[str], List[str]]:
     """
@@ -53,7 +56,7 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
     # Features (exclude identifiers, session meta, and target to prevent leakage)
     exclude_cols = [
         "driverId", "name", "code", "constructorId", "constructorName", "number",
-        "session_type", "form_index"
+        "session_type", "form_index", "current_quali_pos"
     ]
     
     # Also exclude columns that are entirely NaN (e.g., grid for qualifying)
@@ -152,6 +155,7 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
     w_grid = 0.8
     w_gbm = 0.75
     w_base = 0.25
+    w_quali = 0.5
     
     if cfg:
         try:
@@ -160,6 +164,7 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
             w_base_team = cfg.modelling.blending.baseline_team_factor
             w_base_dt = cfg.modelling.blending.baseline_driver_team_factor
             w_grid = getattr(cfg.modelling.blending, "grid_factor", 0.8)
+            w_quali = getattr(cfg.modelling.blending, "current_quali_factor", 0.5)
         except AttributeError:
             pass
 
@@ -194,37 +199,84 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
         # Both flat - use baseline with small noise for tie-breaking
         pace_hat = base + np.random.RandomState(42).normal(0, 0.01, size=len(base))
 
+    # Stage 1.5: Blend current weekend qualifying position if available
+    # This is a direct, high-weight signal from THIS weekend's qualifying
+    # Applied before grid stickiness so both qualifying pace and grid influence the result
+    if session_type in ("race", "sprint") and "current_quali_pos" in X.columns:
+        quali_vals = X["current_quali_pos"].astype(float).values
+        has_quali = ~np.isnan(quali_vals)
+        if has_quali.any():
+            # Normalize pace_hat to z-score for fair blending
+            p_mu = float(np.nanmean(pace_hat))
+            p_sd = float(np.nanstd(pace_hat))
+            if p_sd > 1e-6:
+                pace_z = (pace_hat - p_mu) / p_sd
+            else:
+                pace_z = pace_hat - p_mu
+
+            # Normalize qualifying positions to z-score (lower position = faster = lower z)
+            q_mu = float(np.nanmean(quali_vals[has_quali]))
+            q_sd = float(np.nanstd(quali_vals[has_quali]))
+            if q_sd > 1e-6:
+                quali_z = (quali_vals - q_mu) / q_sd
+            else:
+                quali_z = quali_vals - q_mu
+
+            # Blend: w_quali controls how much current qualifying overrides historical form
+            blended_z = np.where(
+                has_quali,
+                (1.0 - w_quali) * pace_z + w_quali * quali_z,
+                pace_z  # Keep original for drivers without qualifying data
+            )
+
+            # Rescale back to original pace scale
+            if p_sd > 1e-6:
+                pace_hat = blended_z * p_sd + p_mu
+            else:
+                pace_hat = blended_z + p_mu
+
+            logger.info(
+                "[models] Blended current_quali_pos (factor=%.2f) for %d/%d drivers",
+                w_quali, has_quali.sum(), len(X)
+            )
+
     # Second Stage: Incorporate grid "stickiness" for race sessions
     # This ensures starting position acts as a strong anchor for the prediction.
     if session_type in ("race", "sprint") and "grid" in X.columns:
-        # Normalize combined pace to ensure comparable scale with grid
+        # 1. Grid is the absolute anchor
+        # Use actual grid if available, otherwise fallback to index/average
+        grid_vals = X["grid"].astype(float).fillna(15.0).values
+        
+        # 2. Normalize pace_hat to determine pace relative advantage (z-score)
         mu = float(np.nanmean(pace_hat))
         sd = float(np.nanstd(pace_hat))
         if sd > 1e-6:
             pace_z = (pace_hat - mu) / sd
         else:
             pace_z = pace_hat - mu
-
-        # Normalize grid to z-score
-        grid_vals = X["grid"].astype(float).fillna(15.0).values
-        g_mu = float(np.nanmean(grid_vals))
-        g_sd = float(np.nanstd(grid_vals))
-        if g_sd > 1e-6:
-            grid_z = (grid_vals - g_mu) / g_sd
-        else:
-            grid_z = grid_vals - g_mu
-
-        # Re-blend: grid_factor acts as "stickiness" (0 = ignored, 1 = absolute)
-        # We use a non-linear scaling to make it more intuitive
-        # (e.g. 0.8 weight means very sticky, while 0.2 means mostly form-based)
-        combined_z = (1.0 - w_grid) * pace_z + w_grid * grid_z
-
-        # Rescale back to original pace magnitude (mu, sd)
-        # This preserves the expected scale for simulation logic
-        if sd > 1e-6:
-            pace_hat = combined_z * sd + mu
-        else:
-            pace_hat = combined_z + mu
+            
+        # 3. Apply pace advantage as a Delta to the anchor
+        # w_grid = stickiness. If stickiness is 0.8, pace accounts for 20% of movement.
+        # Max reasonable delta bounded to 10 positions (a 2 sigma pace advantage = ~5 grid slots)
+        MAX_DELTA = 10.0
+        pace_multiplier = 1.0 - w_grid
+        pace_delta = pace_z * pace_multiplier * MAX_DELTA
+        
+        # 4. Final simulated baseline is Grid + Expected Delta
+        # E.g., Starting P2 (grid=2.0) with very poor historical pace (pace_z=+1.5):
+        # pace_hat = 2.0 + (1.5 * 0.2 * 10) = 5.0 -> predicts 5th place
+        pace_hat = grid_vals + pace_delta
+        
+        logger.info(
+            "[models] Applied Anchor-Delta grid stickiness: Max Pace Delta = ±%.1f positions",
+            pace_multiplier * MAX_DELTA * 2.5 # ~2.5 sigma max typical swing
+        )
+        
+        # DEBUG PRINTS FOR UNDERSTANDING
+        if "driverId" in X.columns and session_type == "race":
+            for i, drv in enumerate(X["driverId"]):
+                if drv in ("antonelli", "hadjar", "piastri"):
+                    logger.info(f"[DEBUG] {drv} | Grid: {grid_vals[i]} | PaceZ: {pace_z[i]:.2f} | Delta: {pace_delta[i]:.2f} | Final PaceHat: {pace_hat[i]:.2f}")
 
     return pipe, pace_hat, features
 

@@ -9,7 +9,9 @@
     "gbm_weight": 0.5,
     "baseline_weight": 0.5,
     "baseline_team_factor": 6.726813934415592,
-    "baseline_driver_team_factor": 0.0
+    "baseline_driver_team_factor": 0.0,
+    "grid_factor": 0.8,
+    "current_quali_factor": 0.5
   },
   "last_race_id": "2025_24"
 }

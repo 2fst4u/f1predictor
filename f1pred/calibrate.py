@@ -38,7 +38,8 @@ class CalibrationManager:
                 "baseline_weight": 0.25,
                 "baseline_team_factor": 0.3,
                 "baseline_driver_team_factor": 0.2,
-                "grid_factor": 0.8
+                "grid_factor": 0.8,
+                "current_quali_factor": 0.5
             }
         }
         self.last_race_id: Optional[str] = None
