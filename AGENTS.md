@@ -34,8 +34,8 @@ All stable releases are **manual** via GitHub Actions UI:
 
 | Workflow | File | Triggers | Purpose |
 |----------|------|----------|---------|
-| Tests | `tests.yml` | `push`, `workflow_call` | Runs pytest suite on every commit |
-| Build | `build.yml` | `workflow_run` (main), `pull_request`, `release` | Runs tests, then builds + pushes Docker image |
+| Tests | `tests.yml` | `workflow_call` | Reusable workflow to run pytest suite |
+| Build | `build.yml` | `push` (excl PR merges to main), `release` | Runs tests, then builds + pushes Docker image |
 | Release | `release.yml` | Manual dispatch only | Creates semver tag + GitHub Release |
 
 ### Docker Image Tags
@@ -64,8 +64,8 @@ python -m pytest tests/test_release_config.py -v  # Validate release infrastruct
 `tests/test_release_config.py` enforces that release tooling stays consistent:
 - setuptools-scm is configured in `pyproject.toml`
 - Dockerfile copies `.git/` directory
-- Tests workflow runs on push and as a reusable component via `workflow_call`
-- Build workflow triggers on workflow_run (main) or pull_request (running tests first) and on release publication
+- Tests workflow runs as a reusable component via `workflow_call`
+- Build workflow triggers on push (running tests first) and on release publication
 - Build workflow produces prerelease and semver Docker tags
 - Release workflow is manual-only
 - Old `docker-publish.yml` does not exist
