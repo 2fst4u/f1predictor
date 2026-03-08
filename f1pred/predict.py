@@ -1241,48 +1241,47 @@ def print_session_console(
     # Check if grid data is available for race/sprint sessions
     # (Checking generic is_race is enough if we generalized is_race above, but let's be explicit)
     has_grid = is_race and "grid" in df.columns and df["grid"].notna().any()
+
+    # Optimization: Hide "Actual" column if we are displaying actual results (it's redundant)
+    # or if no actual positions are available at all.
+    is_actual_results = df["p_win"].max() == 1.0 and (df["p_win"] == 1.0).sum() == 1
+    show_actual_col = not is_actual_results and "actual_position" in df.columns and df["actual_position"].notna().any()
     
     # NOTE: Avoid extended Unicode characters in headers and tables (e.g., use 'Chg' instead of 'Δ')
     # and use ASCII '-' or '=' for borders instead of box-drawing characters (─, ▕).
     # This maintains strict compatibility with Windows and standard charmap encodings.
     # Print column headers
+    header_parts = [
+        f"{Style.DIM}{'#':>3}",
+        f"{'Code':<4}",
+        f"{'Driver':<{max_name}}",
+        f"{'Team':<{max_team+2}}"
+    ]
+
     if has_grid:
-        header = (
-            f"{Style.DIM}{'#':>3}   "
-            f"{'Code':<4}  "
-            f"{'Driver':<{max_name}}   "
-            f"{'Team':<{max_team+2}}   "
-            f"{'Grid':>4}   "
-            f"{'Chg':>4}   "
-            f"{'Avg':>5}   "
-            f"{'Top3':>14}   "
-            f"{win_label:>14}   "
-            f"{'DNF':>14}   "
-            f"{'Actual':>6}{Style.RESET_ALL}"
-        )
-    else:
-        header = (
-            f"{Style.DIM}{'#':>3}   "
-            f"{'Code':<4}  "
-            f"{'Driver':<{max_name}}   "
-            f"{'Team':<{max_team+2}}   "
-            f"{'Avg':>5}   "
-            f"{'Top3':>14}   "
-            f"{win_label:>14}   "
-            f"{'DNF':>14}   "
-            f"{'Actual':>6}{Style.RESET_ALL}"
-        )
+        header_parts.extend([f"{'Grid':>4}", f"{'Chg':>4}"])
+
+    header_parts.extend([
+        f"{'Avg':>5}",
+        f"{'Top3':>14}",
+        f"{win_label:>14}",
+        f"{'DNF':>14}"
+    ])
+
+    if show_actual_col:
+        header_parts.append(f"{'Actual':>6}")
+
+    header = "   ".join(header_parts) + Style.RESET_ALL
     print(header)
     
     # Horizontal separator
-    # 3(#) + 3(sp) + 4(Code) + 2(sp) + max_name + 3(sp) + max_team+2 + 3(sp)
-    # + [4(Grid) + 3(sp) + 4(Delta) + 3(sp)]
-    # + 5(Avg) + 3(sp) + 14(Top3) + 3(sp) + 14(Win) + 3(sp) + 14(DNF) + 3(sp) + 6(Actual)
-    base_width = 3 + 3 + 4 + 2 + max_name + 3 + max_team + 2 + 3 + 5 + 3 + 14 + 3 + 14 + 3 + 14 + 3 + 6
+    # Calculate widths based on logic above
+    # Base: 3(#) + 4(Code) + max_name + max_team+2 + 5(Avg) + 14(Top3) + 14(Win) + 14(DNF) + 7*3(spacing)
+    sep_width = 3 + 4 + max_name + max_team + 2 + 5 + 14 + 14 + 14 + (7 * 3)
     if has_grid:
-        sep_width = base_width + 4 + 3 + 4 + 3
-    else:
-        sep_width = base_width
+        sep_width += 4 + 4 + (2 * 3)
+    if show_actual_col:
+        sep_width += 6 + 3
     print(f"{Style.DIM}{'-' * sep_width}{Style.RESET_ALL}")
     
     for _, r in df.iterrows():
@@ -1337,32 +1336,38 @@ def print_session_console(
                 delta_str = f"{Style.DIM}  --{Style.RESET_ALL}"
         
         # Actual classification display
-        actual_pos = r.get("actual_position")
-        if pd.notna(actual_pos):
-            classified_str = _render_actual_pos(pos, int(actual_pos))
-        else:
-            classified_str = f"{Style.DIM}{'--':>6}{Style.RESET_ALL}"
+        classified_str = ""
+        if show_actual_col:
+            actual_pos = r.get("actual_position")
+            if pd.notna(actual_pos):
+                classified_str = _render_actual_pos(pos, int(actual_pos))
+            else:
+                classified_str = f"{Style.DIM}{'--':>6}{Style.RESET_ALL}"
         
         # Print row
         team_color = _get_team_color(r.get("constructorName") or "")
         pos_color = _get_pos_color(pos)
-        row_str = (
-            f"{pos_color}{pos:>3}.{Style.RESET_ALL}  "
-            f"{Style.BRIGHT}{code:<4}{Style.RESET_ALL}  "
-            f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}   "
-            f"{team_color}[{team:<{max_team}}]{Style.RESET_ALL}   "
-        )
+        row_parts = [
+            f"{pos_color}{pos:>3}.{Style.RESET_ALL}",
+            f"{Style.BRIGHT}{code:<4}{Style.RESET_ALL}",
+            f"{Fore.CYAN}{name:<{max_name}}{Style.RESET_ALL}",
+            f"{team_color}[{team:<{max_team}}]{Style.RESET_ALL}"
+        ]
 
         if has_grid:
-            row_str += f"{grid_str}   {delta_str}   "
+            row_parts.extend([grid_str, delta_str])
 
-        row_str += (
-            f"{mp:5.1f}   "
-            f"{top3_color}{top3:5.1f}% {top3_bar}{Style.RESET_ALL}   "
-            f"{win_color}{win:5.1f}% {win_bar}{Style.RESET_ALL}   "
-            f"{dnf_color}{dnf:5.1f}% {dnf_bar}{Style.RESET_ALL}   "
-            f"{classified_str}"
-        )
+        row_parts.extend([
+            f"{mp:5.1f}",
+            f"{top3_color}{top3:5.1f}% {top3_bar}{Style.RESET_ALL}",
+            f"{win_color}{win:5.1f}% {win_bar}{Style.RESET_ALL}",
+            f"{dnf_color}{dnf:5.1f}% {dnf_bar}{Style.RESET_ALL}"
+        ])
+
+        if show_actual_col:
+            row_parts.append(classified_str)
+
+        row_str = "   ".join(row_parts)
         print(row_str)
 
     # Print legend explaining abbreviations
