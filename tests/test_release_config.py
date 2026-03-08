@@ -36,25 +36,25 @@ class TestReleaseInfrastructure:
             "the version from git tags during the Docker build"
         )
 
-    def test_tests_workflow_runs_on_push(self):
-        """tests.yml must run on every push to any branch."""
+    def test_tests_workflow_runs_on_workflow_call(self):
+        """tests.yml must only run on workflow_call."""
         workflow = ROOT / ".github" / "workflows" / "tests.yml"
         assert workflow.exists(), "tests.yml not found"
         parsed = yaml.safe_load(workflow.read_text())
         triggers = parsed.get(True, {})  # 'on' parses as True in PyYAML
-        assert "push" in triggers, (
-            "tests.yml must trigger on push to run tests on every commit"
+        assert "workflow_call" in triggers, (
+            "tests.yml must trigger on workflow_call to run tests on every commit"
         )
 
-    def test_build_workflow_exists(self):
+    def test_build_workflow_triggers_on_push(self):
         """build.yml must build Docker images after tests pass."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"
         assert workflow.exists(), "build.yml not found"
         content = workflow.read_text()
         parsed = yaml.safe_load(content)
         triggers = parsed.get(True, {})
-        assert "workflow_run" in triggers, (
-            "build.yml must trigger on workflow_run to build after tests pass"
+        assert "push" in triggers, (
+            "build.yml must trigger on push to build after tests pass"
         )
 
     def test_build_workflow_triggers_on_release(self):
