@@ -1,8 +1,10 @@
-name: "Build"
+name: "CI"
 
 on:
-  push:
-    branches: ['**']
+  workflow_run:
+    workflows: ["Tests"]
+    types:
+      - completed
   release:
     types: [published]
 
@@ -13,15 +15,20 @@ env:
 jobs:
   tests:
     name: "Tests"
+    if: github.event_name == 'release'
     uses: ./.github/workflows/tests.yml
 
   build:
-    name: "Build & Push Docker Image"
+    name: "Build"
     runs-on: ubuntu-latest
     needs: tests
-    if: >-
-      (github.event_name == 'release') ||
-      (github.event_name == 'push' && (github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'Merge pull request')))
+    if: |
+      always() &&
+      (
+        (github.event_name == 'release' && needs.tests.result == 'success') ||
+        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+         (github.event.workflow_run.head_branch != 'main' || !startsWith(github.event.workflow_run.head_commit.message, 'Merge pull request')))
+      )
     permissions:
       contents: read
       packages: write
@@ -30,6 +37,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
