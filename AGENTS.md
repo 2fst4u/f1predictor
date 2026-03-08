@@ -14,7 +14,7 @@ Python ML application for Formula 1 race predictions. Uses `setuptools-scm` for 
 
 ### Prerelease Builds (automatic)
 
-Every push to **main** (including merges) triggers a build via `workflow_run`. For all other branches, a build is triggered via **pull request**, which first runs tests to gate the Docker build. This ensures PR visibility and efficiency. The job builds a Docker image tagged with:
+Every push to **main**, or any **pull request**, triggers the sequential CI/CD pipeline. The process is orchestrated within a single workflow: the `Tests` job runs first, and upon success, the `Build` job proceeds. This ensures gated builds and clear visibility within PRs without redundancy. The job builds a Docker image tagged with:
 - `{next-patch}-pre.{run_number}` — numerically increasing (e.g. `0.1.1-pre.42`)
 - `prerelease` — static tag that always points to the latest dev build
 - Branch name (e.g. `main`, `feature-xyz`)
@@ -34,15 +34,15 @@ All stable releases are **manual** via GitHub Actions UI:
 
 | Workflow | File | Triggers | Purpose |
 |----------|------|----------|---------|
-| Tests | `tests.yml` | `push` (main), `workflow_call` | Runs pytest suite on every commit |
-| Build | `build.yml` | `workflow_run` (main), `pull_request`, `release` | Runs tests, then builds + pushes Docker image |
+| Tests | `tests.yml` | `workflow_call` | Reusable pytest suite |
+| Build | `build.yml` | `push` (main), `pull_request`, `release` | Runs tests, then builds + pushes Docker image |
 | Release | `release.yml` | Manual dispatch only | Creates semver tag + GitHub Release |
 
 ### Docker Image Tags
 
 | Source | Tags on `ghcr.io/2fst4u/f1predictor` |
 |--------|------|
-| Prerelease (dev branches & main merges) | `0.1.1-pre.42`, `prerelease`, `branch-name`, `sha-abc1234` |
+| Prerelease (dev branches & direct main pushes) | `0.1.1-pre.42`, `prerelease`, `branch-name`, `sha-abc1234` |
 | Stable release (manual) | `0.1.1`, `0.1`, `sha-abc1234` |
 
 ## Key Files
@@ -64,8 +64,8 @@ python -m pytest tests/test_release_config.py -v  # Validate release infrastruct
 `tests/test_release_config.py` enforces that release tooling stays consistent:
 - setuptools-scm is configured in `pyproject.toml`
 - Dockerfile copies `.git/` directory
-- Tests workflow runs on push and as a reusable component via `workflow_call`
-- Build workflow triggers on workflow_run (main) or pull_request (running tests first) and on release publication
+- Tests workflow runs as a reusable component via `workflow_call`
+- Build workflow triggers on push (running tests first) and on release publication
 - Build workflow produces prerelease and semver Docker tags
 - Release workflow is manual-only
 - Old `docker-publish.yml` does not exist
