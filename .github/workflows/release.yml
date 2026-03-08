@@ -24,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.next.outputs.version }}
 
     steps:
       - name: Checkout repository
@@ -80,11 +82,20 @@ jobs:
           git tag -a "${{ steps.next.outputs.version }}" -m "Release ${{ steps.next.outputs.version }}"
           git push origin "${{ steps.next.outputs.version }}"
 
-      # The published release event triggers build.yml to build the
-      # Docker image — no need to duplicate Docker steps here.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.next.outputs.version }}
           name: ${{ steps.next.outputs.version }}
           generate_release_notes: true
+
+  build-release:
+    name: "Build Release Image"
+    needs: release
+    uses: ./.github/workflows/build.yml
+    with:
+      is_release: true
+      release_tag: ${{ needs.release.outputs.version }}
+    permissions:
+      contents: read
+      packages: write

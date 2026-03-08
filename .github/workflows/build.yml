@@ -2,11 +2,23 @@ name: "Build"
 
 on:
   push:
-    branches: ["main"]
+    branches: ["**"]
   pull_request:
     branches: ["**"]
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      is_release:
+        description: "Is this a release build?"
+        type: boolean
+        required: false
+        default: false
+      release_tag:
+        description: "The release tag"
+        type: string
+        required: false
+        default: ""
 
 env:
   REGISTRY: ghcr.io
@@ -47,7 +59,12 @@ jobs:
           MINOR=$(echo "$VERSION" | cut -d. -f2)
           PATCH=$(echo "$VERSION" | cut -d. -f3)
 
-          if [ "${{ github.event_name }}" = "release" ]; then
+          if [ "${{ inputs.is_release }}" = "true" ]; then
+            RELEASE_TAG="${{ inputs.release_tag }}"
+            echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "Release version: ${RELEASE_TAG#v}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
             # For releases, use the release tag directly
             RELEASE_TAG="${{ github.event.release.tag_name }}"
             echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
