@@ -10,7 +10,7 @@ Thank you for your interest in contributing to F1 Predictor!
 4. Activate it:
    - Windows: `.venv\Scripts\activate`
    - Linux/macOS: `source .venv/bin/activate`
-5. Install dependencies: `pip install -r requirements.txt pytest pytest-cov httpx pyyaml pytest-asyncio pytest-mock`
+5. Install dependencies: `pip install -r requirements.txt pytest pytest-cov httpx`
 
 ## Making Changes
 
