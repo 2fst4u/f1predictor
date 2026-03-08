@@ -248,7 +248,7 @@ def _run_single_prediction(
     Returns None if prediction cannot be completed.
     """
     import numpy as np
-    from .features import build_session_features, collect_historical_results
+    from .features import build_session_features, collect_historical_results, build_roster
     from .models import train_pace_model, estimate_dnf_probabilities
     from .simulate import simulate_grid
     from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace
@@ -366,7 +366,7 @@ def run_predictions_for_event(
     """
     import numpy as np
     import pandas as pd
-    from .features import build_session_features, collect_historical_results
+    from .features import build_session_features, collect_historical_results, build_roster
     from .models import train_pace_model, estimate_dnf_probabilities
     from .simulate import simulate_grid
     from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace
@@ -402,63 +402,44 @@ def run_predictions_for_event(
     pred_cache = PredictionCache(cfg.paths.cache_dir, max_entries=cfg.caching.prediction_cache.max_entries)
 
     # --- Pre-fetch History (Consolidated) ---
-    if progress_callback: progress_callback("Pre-fetching history...")
-    logger.info("[predict] Pre-fetching deep history for calibration and features...")
-    now = datetime.now(timezone.utc)
-    # Fetch enough history for both calibration (recent) and deep feature building (long term)
-    # 10 years covers the deep needs, and includes the recent 4 years for calibration
-    all_history = collect_historical_results(
-        jc, 
-        season=now.year, 
-        end_before=now, 
-        lookback_years=10 # Deep history for accurate Elo/Features
-    )
+    # We delay this until after we check if predictions are needed (not bypassed by actual results)
+    # to ensure instant results for finished sessions.
+    all_history = None
 
     # --- Calibration Check ---
-    if progress_callback: progress_callback("Checking calibration...")
-    # Initialize and check if we need to re-calibrate weights
-    # This happens before any predictions to ensure we use fresh weights
-    try:
-        cm = CalibrationManager(cfg)
-        if cm.check_calibration_needed(history_df=all_history):
-             if progress_callback: progress_callback("Running calibration...")
-             # We need jc and om for history fetching/feature building
-             cm.run_calibration(jc, om, history_df=all_history)
-    except Exception as e:
-        logger.warning(f"[predict] Calibration process encountered an error: {e}; continuing with existing weights")
-        # Ensure cm exists for load_weights fallback
-        if 'cm' not in locals():
-             cm = type('DummyCM', (), {'load_weights': lambda: {}})()
-
+    # We'll initialize CalibrationManager but only run it if we enter the prediction loop
+    cm = CalibrationManager(cfg)
     # Load weights (either newly calibrated or existing)
     calibrated_weights = cm.load_weights()
-    
-    # 1. Update Blending Config (passed to train_pace_model via cfg)
-    if "blending" in calibrated_weights:
-        b = calibrated_weights["blending"]
-        # Ensure target config structure exists (it should from config.yaml)
-        if hasattr(cfg, "modelling") and hasattr(cfg.modelling, "blending"):
-            # Update attributes in-place
-            if "gbm_weight" in b: cfg.modelling.blending.gbm_weight = b["gbm_weight"]
-            if "baseline_weight" in b: cfg.modelling.blending.baseline_weight = b["baseline_weight"]
-            if "baseline_team_factor" in b: cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
-            if "baseline_driver_team_factor" in b: cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
-            if "grid_factor" in b: cfg.modelling.blending.grid_factor = b["grid_factor"]
-            if "current_quali_factor" in b: cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
-            logger.info(f"[predict] Applied calibrated blending weights (gbm={b.get('gbm_weight', 0):.2f})")
-            print(f"    [Predict] Using calibrated weights (GBM={b.get('gbm_weight', 0):.2f}, Baseline={b.get('baseline_weight', 0):.2f})")
+    try:
+        # 1. Update Blending Config (passed to train_pace_model via cfg)
+        if "blending" in calibrated_weights:
+            b = calibrated_weights["blending"]
+            # Ensure target config structure exists (it should from config.yaml)
+            if hasattr(cfg, "modelling") and hasattr(cfg.modelling, "blending"):
+                # Update attributes in-place
+                if "gbm_weight" in b: cfg.modelling.blending.gbm_weight = b["gbm_weight"]
+                if "baseline_weight" in b: cfg.modelling.blending.baseline_weight = b["baseline_weight"]
+                if "baseline_team_factor" in b: cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
+                if "baseline_driver_team_factor" in b: cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
+                if "grid_factor" in b: cfg.modelling.blending.grid_factor = b["grid_factor"]
+                if "current_quali_factor" in b: cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
+                logger.info(f"[predict] Applied calibrated blending weights (gbm={b.get('gbm_weight', 0):.2f})")
+                print(f"    [Predict] Using calibrated weights (GBM={b.get('gbm_weight', 0):.2f}, Baseline={b.get('baseline_weight', 0):.2f})")
 
-    # 2. Prepare Ensemble Config (passed to combine_pace)
-    ens_cfg_obj = None
-    if "ensemble" in calibrated_weights:
-        e = calibrated_weights["ensemble"]
-        ens_cfg_obj = EnsembleConfig(
-            w_gbm=e.get("w_gbm", 0.25),
-            w_elo=e.get("w_elo", 0.25),
-            w_bt=e.get("w_bt", 0.25),
-            w_mixed=e.get("w_mixed", 0.25)
-        )
-        logger.info(f"[predict] Applied calibrated ensemble weights (gbm={e.get('w_gbm', 0):.2f}, elo={e.get('w_elo', 0):.2f})")
+        # 2. Prepare Ensemble Config (passed to combine_pace)
+        ens_cfg_obj = None
+        if "ensemble" in calibrated_weights:
+            e = calibrated_weights["ensemble"]
+            ens_cfg_obj = EnsembleConfig(
+                w_gbm=e.get("w_gbm", 0.25),
+                w_elo=e.get("w_elo", 0.25),
+                w_bt=e.get("w_bt", 0.25),
+                w_mixed=e.get("w_mixed", 0.25)
+            )
+            logger.info(f"[predict] Applied calibrated ensemble weights (gbm={e.get('w_gbm', 0):.2f}, elo={e.get('w_elo', 0):.2f})")
+    except Exception:
+        pass
 
 
     # Resolve event
@@ -522,69 +503,42 @@ def run_predictions_for_event(
             sess_dt = _get_session_datetime(race_info, sess)
             ref_date = sess_dt if sess_dt else event_date
             
+            actual_positions = None
             # Wrap heavy operations in a spinner
             with StatusSpinner(f"Predicting {event_title} - {sess}...", on_update=progress_callback) as spinner:
-                # Convert accumulator to DataFrame for injection
-                extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
+                # 1. Early Results Check (Bypass heavy feature building if session finished)
+                if cached_roster is not None:
+                    roster = cached_roster
+                else:
+                    spinner.update(f"Predicting {event_title} - {sess}: Deriving roster...")
+                    roster = build_roster(jc, str(season_i), str(round_i), event_dt=ref_date)
+                    if roster is not None and not roster.empty:
+                        cached_roster = roster
 
-                # Use pre-fetched history for this session
-                # We need to filter it to ensure we don't leak future data relative to this specific session
-                # build_session_features calls collect_historical_results internally if not provided,
-                # but we can pass a cached DataFrame if we modify build_session_features to accept it.
-                # Currently build_session_features DOES NOT accept a raw dataframe for history, 
-                # it calls collect_historical_results.
-                # However, collect_historical_results has an in-memory cache (_HIST_CACHE).
-                # Since we called collect_historical_results(jc, ...) at the start of run_predictions_for_event,
-                # the _HIST_CACHE in features.py is ALREADY POPULATED.
-                # So the call inside build_session_features will hit the RAM cache instantly.
-                
-                spinner.update(f"Predicting {event_title} - {sess}: Building features...")
-                X, meta, roster = build_session_features(
-                    jc, om, season_i, round_i, sess, ref_date, cfg,
-                    extra_history=extra_hist_df,
-                    roster_override=cached_roster
-                )
-
-                if cached_roster is None and roster is not None and not roster.empty:
-                    cached_roster = roster
-
-                if (
-                    X is None
-                    or roster is None
-                    or (hasattr(X, "empty") and X.empty)
-                    or (hasattr(roster, "empty") and roster.empty)
-                ):
-                    msg = f"Skipping {sess} (no data)"
-                    spinner.update(msg)
-                    spinner.set_status("skipped")
-                    logger.info(f"[predict] {msg}")
-                    continue
-
-                # 1. Check for actual results first (Bypass prediction if results exist)
-                actual_positions = _get_actual_positions_for_session(
-                    jc,
-                    season_i,
-                    round_i,
-                    sess,
-                    roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
-                )
+                # 1.5 Optimization check: Check for actual results if session is in the past
+                # We do this before heavy feature building to ensure near-instant results for finished sessions
+                if roster is not None and not roster.empty:
+                    actual_positions = _get_actual_positions_for_session(
+                        jc, season_i, round_i, sess,
+                        roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
+                    )
 
                 if actual_positions is not None and not actual_positions.isna().all():
                     spinner.update(f"Using actual results for {sess}...")
                     logger.info(f"[predict] Using actual results for {season_i} R{round_i} {sess}")
 
-                    ranked = X.copy()
-                    # Ensure columns for actuals mapping exist
+                    ranked = roster.copy()
+                    # Ensure columns for UI/Console mapping exist
                     if "number" not in ranked.columns:
-                        ranked["number"] = roster["number"] if "number" in roster.columns else pd.NA
+                        ranked["number"] = pd.NA
                     if "code" not in ranked.columns:
-                        ranked["code"] = roster["code"] if "code" in roster.columns else ""
+                        ranked["code"] = ""
 
                     ranked["actual_position"] = actual_positions
                     # Sort by actual position
                     ranked = ranked.sort_values("actual_position").reset_index(drop=True)
 
-                    # Fill in prediction-like columns for UI consistency
+                    # Fill in prediction-like columns for UI/Console consistency
                     ranked["predicted_position"] = ranked["actual_position"]
                     ranked["mean_pos"] = ranked["actual_position"].astype(float)
                     ranked["p_win"] = (ranked["actual_position"] == 1).astype(float)
@@ -606,214 +560,269 @@ def run_predictions_for_event(
                     p_win = ranked["p_win"].values
                     dnf_prob = ranked["p_dnf"].values
 
-                # 2. Cache check (if no actual results)
-                elif (cached_hit := pred_cache.get(cache_inputs := {
-                    "X": X,
-                    "weather": meta.get("weather"),
-                    "model_version": cfg.app.model_version,
-                    "weights": calibrated_weights,
-                    "modelling_cfg": cfg.modelling,
-                })):
-                    spinner.update(f"Predicting {event_title} - {sess}: Using cached result...")
-                    ranked = cached_hit["ranked"]
-                    prob_matrix = cached_hit["prob_matrix"]
-                    pairwise = cached_hit["pairwise"]
-
-                    # Reconstruction for reporting consistency
-                    p_top3 = ranked["p_top3"].values
-                    p_win = ranked["p_win"].values
-                    dnf_prob = ranked["p_dnf"].values
-                else:
-                    # Universal Grid Feature logic (Race<-Quali, Sprint<-SprintQuali)
-                    # Map target session -> precursor session that determines grid
-                    grid_precursor_map = {
-                        "race": "qualifying",
-                        "sprint": "sprint_qualifying",
+                    meta = {
+                        "season": season_i,
+                        "round": round_i,
+                        "circuit": circuit_name,
+                        "weather": {},
                     }
+                else:
+                    # 2. Build features (Expensive operation)
+                    extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
+                    spinner.update(f"Predicting {event_title} - {sess}: Building features...")
+                    X, meta, roster = build_session_features(
+                        jc, om, season_i, round_i, sess, ref_date, cfg,
+                        extra_history=extra_hist_df,
+                        roster_override=cached_roster
+                    )
 
-                    has_grid_concept = sess in grid_precursor_map
+                    if cached_roster is None and roster is not None and not roster.empty:
+                        cached_roster = roster
 
-                    grid_source = "actual"
-                    if has_grid_concept and "grid" in X.columns:
-                        if X["grid"].isna().any():
-                            precursor = grid_precursor_map[sess]
-                            logger.info(f"[predict] Grid not available for {sess} - looking for {precursor} results")
-                            
-                            # 1. Check if precursor was already run in this loop (internal consistency)
-                            precursor_results = [p for p in accumulated_history if p["session"] == precursor]
+                    if (
+                        X is None
+                        or roster is None
+                        or (hasattr(X, "empty") and X.empty)
+                        or (hasattr(roster, "empty") and roster.empty)
+                    ):
+                        msg = f"Skipping {sess} (no data)"
+                        spinner.update(msg)
+                        spinner.set_status("skipped")
+                        logger.info(f"[predict] {msg}")
+                        continue
 
-                            if precursor_results:
-                                logger.info(f"[predict] Using {precursor} results from current run as grid")
-                                grid_map = {r["driverId"]: int(r["position"]) for r in precursor_results if r.get("position") is not None}
-                                X["grid"] = X["driverId"].map(grid_map)
-                                grid_source = f"predicted (from {precursor} in loop)"
+                    # Ensure history and calibration are ready if we actually need to predict
+                    # This must happen BEFORE the cache check because the cache key depends on calibrated weights.
+                    if all_history is None:
+                        spinner.update(f"Predicting {event_title} - {sess}: Pre-fetching history...")
+                        now = datetime.now(timezone.utc)
+                        all_history = collect_historical_results(
+                            jc, season=now.year, end_before=now, lookback_years=10, cache_dir=cfg.paths.cache_dir
+                        )
+                        if cm.check_calibration_needed(history_df=all_history):
+                            spinner.update(f"Predicting {event_title} - {sess}: Running calibration...")
+                            cm.run_calibration(jc, om, history_df=all_history)
+                            # Reload weights if they changed
+                            calibrated_weights = cm.load_weights()
+                            if "blending" in calibrated_weights:
+                                b = calibrated_weights["blending"]
+                                if hasattr(cfg, "modelling") and hasattr(cfg.modelling, "blending"):
+                                    if "gbm_weight" in b: cfg.modelling.blending.gbm_weight = b["gbm_weight"]
+                                    if "baseline_weight" in b: cfg.modelling.blending.baseline_weight = b["baseline_weight"]
+                                    if "baseline_team_factor" in b: cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
+                                    if "baseline_driver_team_factor" in b: cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
+                                    if "grid_factor" in b: cfg.modelling.blending.grid_factor = b["grid_factor"]
+                                    if "current_quali_factor" in b: cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
 
-                            else:
-                                # 2. Check for actual results of precursor
-                                spinner.update(f"Checking actual results for {precursor}...")
-                                precursor_actuals = _get_actual_positions_for_session(
-                                    jc, season_i, round_i, precursor,
-                                    roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
-                                )
+                    # 3. Cache check (if no actual results and features built)
+                    if (cached_hit := pred_cache.get(cache_inputs := {
+                        "X": X,
+                        "weather": meta.get("weather"),
+                        "model_version": cfg.app.model_version,
+                        "weights": calibrated_weights,
+                        "modelling_cfg": cfg.modelling,
+                    })):
+                        spinner.update(f"Predicting {event_title} - {sess}: Using cached result...")
+                        ranked = cached_hit["ranked"]
+                        prob_matrix = cached_hit["prob_matrix"]
+                        pairwise = cached_hit["pairwise"]
 
-                                if precursor_actuals is not None and not precursor_actuals.isna().all():
-                                    logger.info(f"[predict] Using actual results for {precursor} as grid")
-                                    # Use .fillna() to only fill missing ones, or overwrite?
-                                    # Usually if one is missing, they are all missing or it's an error.
-                                    # Let's map it via driverId to avoid index mismatch crashes.
-                                    X["grid"] = X["grid"].fillna(X["driverId"].map(precursor_actuals))
-                                    grid_source = f"actual (from {precursor})"
+                        # Reconstruction for reporting consistency
+                        p_top3 = ranked["p_top3"].values
+                        p_win = ranked["p_win"].values
+                        dnf_prob = ranked["p_dnf"].values
+                    else:
+
+                        # Universal Grid Feature logic (Race<-Quali, Sprint<-SprintQuali)
+                        # Map target session -> precursor session that determines grid
+                        grid_precursor_map = {
+                            "race": "qualifying",
+                            "sprint": "sprint_qualifying",
+                        }
+
+                        has_grid_concept = sess in grid_precursor_map
+
+                        grid_source = "actual"
+                        if has_grid_concept and "grid" in X.columns:
+                            if X["grid"].isna().any():
+                                precursor = grid_precursor_map[sess]
+                                logger.info(f"[predict] Grid not available for {sess} - looking for {precursor} results")
+
+                                # 1. Check if precursor was already run in this loop (internal consistency)
+                                precursor_results = [p for p in accumulated_history if p["session"] == precursor]
+
+                                if precursor_results:
+                                    logger.info(f"[predict] Using {precursor} results from current run as grid")
+                                    grid_map = {r["driverId"]: int(r["position"]) for r in precursor_results if r.get("position") is not None}
+                                    X["grid"] = X["driverId"].map(grid_map)
+                                    grid_source = f"predicted (from {precursor} in loop)"
 
                                 else:
-                                    # 3. Run simulation if not in loop and no actuals
-                                    logger.info(f"[predict] {precursor} not in current loop and no actuals - running simulation to estimate grid")
-                                    spinner.update(f"Simulating {precursor} for grid...")
-                                    qual_ranked = _run_single_prediction(
-                                        jc, om, season_i, round_i, precursor, ref_date, cfg
+                                    # 2. Check for actual results of precursor
+                                    spinner.update(f"Checking actual results for {precursor}...")
+                                    precursor_actuals = _get_actual_positions_for_session(
+                                        jc, season_i, round_i, precursor,
+                                        roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
                                     )
-                                    if qual_ranked is not None and not qual_ranked.empty:
-                                        grid_map = dict(zip(
-                                            qual_ranked["driverId"],
-                                            qual_ranked["predicted_position"]
-                                        ))
-                                        X["grid"] = X["grid"].fillna(X["driverId"].map(grid_map))
-                                        grid_source = f"predicted (from simulated {precursor})"
+
+                                    if precursor_actuals is not None and not precursor_actuals.isna().all():
+                                        logger.info(f"[predict] Using actual results for {precursor} as grid")
+                                        # Use .fillna() to only fill missing ones, or overwrite?
+                                        # Usually if one is missing, they are all missing or it's an error.
+                                        # Let's map it via driverId to avoid index mismatch crashes.
+                                        X["grid"] = X["grid"].fillna(X["driverId"].map(precursor_actuals))
+                                        grid_source = f"actual (from {precursor})"
+
                                     else:
-                                        # 3. Fallback
-                                        if "form_index" in X.columns:
-                                            X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
-                                            grid_source = "estimated (from form index)"
+                                        # 3. Run simulation if not in loop and no actuals
+                                        logger.info(f"[predict] {precursor} not in current loop and no actuals - running simulation to estimate grid")
+                                        spinner.update(f"Simulating {precursor} for grid...")
+                                        qual_ranked = _run_single_prediction(
+                                            jc, om, season_i, round_i, precursor, ref_date, cfg
+                                        )
+                                        if qual_ranked is not None and not qual_ranked.empty:
+                                            grid_map = dict(zip(
+                                                qual_ranked["driverId"],
+                                                qual_ranked["predicted_position"]
+                                            ))
+                                            X["grid"] = X["grid"].fillna(X["driverId"].map(grid_map))
+                                            grid_source = f"predicted (from simulated {precursor})"
                                         else:
-                                            X["grid"] = np.arange(1, len(X) + 1)
-                                            grid_source = "default (no data)"
-                        else:
-                            logger.info(f"[predict] Using actual grid for {sess}")
+                                            # 3. Fallback
+                                            if "form_index" in X.columns:
+                                                X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
+                                                grid_source = "estimated (from form index)"
+                                            else:
+                                                X["grid"] = np.arange(1, len(X) + 1)
+                                                grid_source = "default (no data)"
+                            else:
+                                logger.info(f"[predict] Using actual grid for {sess}")
 
-                    # Train pace model
-                    spinner.update("Training pace model...")
-                    pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
+                        # Train pace model
+                        spinner.update("Training pace model...")
+                        pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
 
-                    # Standardize GBM pace (z-score) but preserve variance
-                    try:
-                        mu = float(np.mean(pace_hat))
-                        sd = float(np.std(pace_hat))
-                        if not np.isfinite(sd) or sd < 1e-6:
-                            logger.warning("[predict] Pace predictions have very low variance (std=%.6f)", sd)
-                            sd = 1.0
-                        pace_hat = (pace_hat - mu) / sd
-                        logger.info("[predict] GBM pace standardized: mean=%.4f, std=%.4f", mu, sd)
-                    except Exception as e:
-                        logger.warning("[predict] Pace standardization failed: %s; using raw GBM pace", e)
-
-                    # Historical results for this roster
-                    roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
-                    hist = collect_historical_results(
-                        jc,
-                        season=season_i,
-                        end_before=ref_date,
-                        lookback_years=75,
-                        roster_driver_ids=roster_ids,
-                    )
-
-                    # --- Ensemble skill components ---
-                    spinner.update("Running ensemble models...")
-                    elo_pace = bt_pace = mixed_pace = None
-                    elo_model = bt_model = mixed_model = None
-
-                    roster_key = tuple(sorted(roster_ids))
-                    if roster_key in ensemble_cache:
-                        logger.debug(f"[predict] Using cached ensemble models for roster size {len(roster_ids)}")
-                        elo_model, bt_model, mixed_model = ensemble_cache[roster_key]
-                    else:
+                        # Standardize GBM pace (z-score) but preserve variance
                         try:
-                            elo_model = EloModel().fit(hist)
+                            mu = float(np.mean(pace_hat))
+                            sd = float(np.std(pace_hat))
+                            if not np.isfinite(sd) or sd < 1e-6:
+                                logger.warning("[predict] Pace predictions have very low variance (std=%.6f)", sd)
+                                sd = 1.0
+                            pace_hat = (pace_hat - mu) / sd
+                            logger.info("[predict] GBM pace standardized: mean=%.4f, std=%.4f", mu, sd)
                         except Exception as e:
-                            logger.info(f"[predict] Elo model fit failed: {e}")
-                        try:
-                            bt_model = BradleyTerryModel().fit(hist)
-                        except Exception as e:
-                            logger.info(f"[predict] Bradley–Terry model fit failed: {e}")
-                        try:
-                            mixed_model = MixedEffectsLikeModel().fit(hist)
-                        except Exception as e:
-                            logger.info(f"[predict] Mixed-effects-like model fit failed: {e}")
-                        ensemble_cache[roster_key] = (elo_model, bt_model, mixed_model)
+                            logger.warning("[predict] Pace standardization failed: %s; using raw GBM pace", e)
 
-                    # Predict using models
-                    if elo_model:
-                        try:
-                            elo_pace = elo_model.predict(X)
-                        except Exception as e:
-                            logger.info(f"[predict] Elo predict failed: {e}")
-                    if bt_model:
-                        try:
-                            bt_pace = bt_model.predict(X)
-                        except Exception as e:
-                            logger.info(f"[predict] BT predict failed: {e}")
-                    if mixed_model:
-                        try:
-                            mixed_pace = mixed_model.predict(X)
-                        except Exception as e:
-                            logger.info(f"[predict] Mixed predict failed: {e}")
-
-                    # Combine GBM pace with ensemble elements
-                    try:
-                        final_ens_cfg = ens_cfg_obj if ens_cfg_obj else EnsembleConfig()
-                        combined_pace = combine_pace(
-                            gbm_pace=pace_hat,
-                            elo_pace=elo_pace,
-                            bt_pace=bt_pace,
-                            mixed_pace=mixed_pace,
-                            cfg=final_ens_cfg,
+                        # Historical results for this roster
+                        roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
+                        hist = collect_historical_results(
+                            jc,
+                            season=season_i,
+                            end_before=ref_date,
+                            lookback_years=75,
+                            roster_driver_ids=roster_ids,
                         )
-                    except Exception as e:
-                        logger.info(f"[predict] Ensemble combine failed, falling back to GBM pace: {e}")
-                        combined_pace = pace_hat
 
-                    # DNF probabilities
-                    dnf_prob = np.zeros(X.shape[0], dtype=float)
-                    if sess in ("race", "sprint"):
+                        # --- Ensemble skill components ---
+                        spinner.update("Running ensemble models...")
+                        elo_pace = bt_pace = mixed_pace = None
+                        elo_model = bt_model = mixed_model = None
+
+                        roster_key = tuple(sorted(roster_ids))
+                        if roster_key in ensemble_cache:
+                            logger.debug(f"[predict] Using cached ensemble models for roster size {len(roster_ids)}")
+                            elo_model, bt_model, mixed_model = ensemble_cache[roster_key]
+                        else:
+                            try:
+                                elo_model = EloModel().fit(hist)
+                            except Exception as e:
+                                logger.info(f"[predict] Elo model fit failed: {e}")
+                            try:
+                                bt_model = BradleyTerryModel().fit(hist)
+                            except Exception as e:
+                                logger.info(f"[predict] Bradley–Terry model fit failed: {e}")
+                            try:
+                                mixed_model = MixedEffectsLikeModel().fit(hist)
+                            except Exception as e:
+                                logger.info(f"[predict] Mixed-effects-like model fit failed: {e}")
+                            ensemble_cache[roster_key] = (elo_model, bt_model, mixed_model)
+
+                        # Predict using models
+                        if elo_model:
+                            try:
+                                elo_pace = elo_model.predict(X)
+                            except Exception as e:
+                                logger.info(f"[predict] Elo predict failed: {e}")
+                        if bt_model:
+                            try:
+                                bt_pace = bt_model.predict(X)
+                            except Exception as e:
+                                logger.info(f"[predict] BT predict failed: {e}")
+                        if mixed_model:
+                            try:
+                                mixed_pace = mixed_model.predict(X)
+                            except Exception as e:
+                                logger.info(f"[predict] Mixed predict failed: {e}")
+
+                        # Combine GBM pace with ensemble elements
                         try:
-                            dnf_prob = estimate_dnf_probabilities(
-                                hist, X, cfg=cfg, event_weather=meta.get("weather"),
+                            final_ens_cfg = ens_cfg_obj if ens_cfg_obj else EnsembleConfig()
+                            combined_pace = combine_pace(
+                                gbm_pace=pace_hat,
+                                elo_pace=elo_pace,
+                                bt_pace=bt_pace,
+                                mixed_pace=mixed_pace,
+                                cfg=final_ens_cfg,
                             )
                         except Exception as e:
-                            logger.info(f"[predict] DNF estimation failed; using default 0.12: {e}")
-                            dnf_prob[:] = 0.12
+                            logger.info(f"[predict] Ensemble combine failed, falling back to GBM pace: {e}")
+                            combined_pace = pace_hat
 
-                    # Monte Carlo simulation
-                    spinner.update("Simulating Monte Carlo...")
-                    draws = cfg.modelling.monte_carlo.draws
-                    prob_matrix, mean_pos, pairwise = simulate_grid(
-                        combined_pace,
-                        dnf_prob,
-                        draws=draws,
-                        noise_factor=cfg.modelling.simulation.noise_factor,
-                        min_noise=cfg.modelling.simulation.min_noise,
-                        max_penalty_base=cfg.modelling.simulation.max_penalty_base,
-                        compute_pairwise=return_results,
-                    )
+                        # DNF probabilities
+                        dnf_prob = np.zeros(X.shape[0], dtype=float)
+                        if sess in ("race", "sprint"):
+                            try:
+                                dnf_prob = estimate_dnf_probabilities(
+                                    hist, X, cfg=cfg, event_weather=meta.get("weather"),
+                                )
+                            except Exception as e:
+                                logger.info(f"[predict] DNF estimation failed; using default 0.12: {e}")
+                                dnf_prob[:] = 0.12
 
-                    # Analytical probabilities
-                    analytical_p_win = plackett_luce_scores(-combined_pace, temperature=1.0)
-                    p_top3 = prob_matrix[:, :3].sum(axis=1)
-                    sim_p_win = prob_matrix[:, 0]
-                    p_win = 0.5 * sim_p_win + 0.5 * analytical_p_win
+                        # Monte Carlo simulation
+                        spinner.update("Simulating Monte Carlo...")
+                        draws = cfg.modelling.monte_carlo.draws
+                        prob_matrix, mean_pos, pairwise = simulate_grid(
+                            combined_pace,
+                            dnf_prob,
+                            draws=draws,
+                            noise_factor=cfg.modelling.simulation.noise_factor,
+                            min_noise=cfg.modelling.simulation.min_noise,
+                            max_penalty_base=cfg.modelling.simulation.max_penalty_base,
+                            compute_pairwise=return_results,
+                        )
 
-                    order = np.argsort(mean_pos)
-                    ranked = X.iloc[order].reset_index(drop=True)
-                    ranked["mean_pos"] = mean_pos[order]
-                    ranked["p_top3"] = p_top3[order]
-                    ranked["p_win"] = p_win[order]
-                    ranked["p_dnf"] = dnf_prob[order]
-                    ranked["predicted_position"] = np.arange(1, len(ranked) + 1)
+                        # Analytical probabilities
+                        analytical_p_win = plackett_luce_scores(-combined_pace, temperature=1.0)
+                        p_top3 = prob_matrix[:, :3].sum(axis=1)
+                        sim_p_win = prob_matrix[:, 0]
+                        p_win = 0.5 * sim_p_win + 0.5 * analytical_p_win
 
-                    # Store in cache
-                    pred_cache.set(cache_inputs, {
-                        "ranked": ranked,
-                        "prob_matrix": prob_matrix,
-                        "pairwise": pairwise
-                    })
+                        order = np.argsort(mean_pos)
+                        ranked = X.iloc[order].reset_index(drop=True)
+                        ranked["mean_pos"] = mean_pos[order]
+                        ranked["p_top3"] = p_top3[order]
+                        ranked["p_win"] = p_win[order]
+                        ranked["p_dnf"] = dnf_prob[order]
+                        ranked["predicted_position"] = np.arange(1, len(ranked) + 1)
+
+                        # Store in cache
+                        pred_cache.set(cache_inputs, {
+                            "ranked": ranked,
+                            "prob_matrix": prob_matrix,
+                            "pairwise": pairwise
+                        })
 
             # Ensure required columns exist for actuals mapping
             if "number" not in ranked.columns:
@@ -821,8 +830,8 @@ def run_predictions_for_event(
             if "code" not in ranked.columns:
                 ranked["code"] = ""
 
-            actual_positions = None
-            if sess_dt and sess_dt < datetime.now(timezone.utc):
+            # actual_positions might have been resolved early in the loop for optimization
+            if actual_positions is None and sess_dt and sess_dt < datetime.now(timezone.utc):
                 actual_positions = _get_actual_positions_for_session(
                     jc,
                     season_i,
