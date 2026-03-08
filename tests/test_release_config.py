@@ -54,7 +54,7 @@ class TestReleaseInfrastructure:
         parsed = yaml.safe_load(content)
         triggers = parsed.get(True, {})
         assert "push" in triggers, (
-            "build.yml must trigger on push"
+            "build.yml must trigger on push to ensure every commit is gated and build Docker images after tests pass"
         )
 
     def test_build_workflow_triggers_on_release(self):

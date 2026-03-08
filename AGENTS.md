@@ -34,8 +34,8 @@ All stable releases are **manual** via GitHub Actions UI:
 
 | Workflow | File | Triggers | Purpose |
 |----------|------|----------|---------|
-| Tests | `tests.yml` | `workflow_call` | Reusable sequential building block |
-| Build | `build.yml` | `push`, `pull_request`, `release` | Sequential pipeline: Tests then Build |
+| Tests | `tests.yml` | `workflow_call` | Reusable workflow to run pytest suite |
+| Build | `build.yml` | `push`, `pull_request`, `workflow_call`, `release` | Sequential pipeline: Tests then Build |
 | Release | `release.yml` | Manual dispatch only | Creates semver tag + GitHub Release |
 
 ### Docker Image Tags
