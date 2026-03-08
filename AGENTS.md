@@ -14,7 +14,7 @@ Python ML application for Formula 1 race predictions. Uses `setuptools-scm` for 
 
 ### Prerelease Builds (automatic)
 
-Every push to **main**, or any **pull request**, triggers the sequential CI/CD pipeline. The process is orchestrated within a single workflow: the `Tests` job runs first, and upon success, the `Build` job proceeds. This ensures gated builds and clear visibility within PRs without redundancy. The job builds a Docker image tagged with:
+Every push to **any branch** triggers the sequential CI/CD pipeline in `build.yml`. The process consists of two distinct jobs: `Tests` (reusing `tests.yml`) followed by `Build`. This ensures gated builds and clear visibility within PRs without redundancy. The job builds a Docker image tagged with:
 - `{next-patch}-pre.{run_number}` — numerically increasing (e.g. `0.1.1-pre.42`)
 - `prerelease` — static tag that always points to the latest dev build
 - Branch name (e.g. `main`, `feature-xyz`)
@@ -34,8 +34,8 @@ All stable releases are **manual** via GitHub Actions UI:
 
 | Workflow | File | Triggers | Purpose |
 |----------|------|----------|---------|
-| Tests | `tests.yml` | `workflow_call` | Reusable pytest suite |
-| Build | `build.yml` | `push` (main), `pull_request`, `release` | Runs tests, then builds + pushes Docker image |
+| Tests | `tests.yml` | `workflow_call` | Reusable sequential building block |
+| Build | `build.yml` | `push`, `pull_request`, `release` | Sequential pipeline: Tests then Build |
 | Release | `release.yml` | Manual dispatch only | Creates semver tag + GitHub Release |
 
 ### Docker Image Tags

@@ -47,7 +47,7 @@ class TestReleaseInfrastructure:
         )
 
     def test_build_workflow_triggers_on_push(self):
-        """build.yml must trigger on push to gate the main branch."""
+        """build.yml must trigger on push to ensure every commit is gated."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"
         assert workflow.exists(), "build.yml not found"
         content = workflow.read_text()
