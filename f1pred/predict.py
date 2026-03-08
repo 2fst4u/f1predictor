@@ -644,7 +644,7 @@ def run_predictions_for_event(
 
                             if precursor_results:
                                 logger.info(f"[predict] Using {precursor} results from current run as grid")
-                                grid_map = {r["driverId"]: int(r["position"]) for r in precursor_results}
+                                grid_map = {r["driverId"]: int(r["position"]) for r in precursor_results if r.get("position") is not None}
                                 X["grid"] = X["driverId"].map(grid_map)
                                 grid_source = f"predicted (from {precursor} in loop)"
 
@@ -660,8 +660,8 @@ def run_predictions_for_event(
                                     logger.info(f"[predict] Using actual results for {precursor} as grid")
                                     # Use .fillna() to only fill missing ones, or overwrite?
                                     # Usually if one is missing, they are all missing or it's an error.
-                                    # Let's map it.
-                                    X["grid"] = X["grid"].fillna(precursor_actuals)
+                                    # Let's map it via driverId to avoid index mismatch crashes.
+                                    X["grid"] = X["grid"].fillna(X["driverId"].map(precursor_actuals))
                                     grid_source = f"actual (from {precursor})"
 
                                 else:
