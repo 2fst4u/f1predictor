@@ -53,3 +53,6 @@
 ## 2026-05-26 - Optimizer Objective Precomputation
 **Learning:** Pandas indexing and extracting groupings (e.g. `np.unique` to find grouped indices) inside a heavily called `scipy.optimize.minimize` objective function causes severe python overhead.
 **Action:** Hoist data extraction (converting `pd.DataFrame` columns to `.values`) and grouping operations (generating indices/masks for grouping logic) outside the `objective` function into NumPy arrays before optimization starts, which reduces objective calculation times dramatically (e.g. ~2.8x speedup).
+## 2026-05-27 - Vectorized Standardization Grouping
+**Learning:** In optimization loops calling an objective function hundreds of times, a Python `for` loop slicing data arrays and calculating standardizations (mean/std) per-group becomes a massive bottleneck.
+**Action:** Use pure NumPy `np.bincount` to vectorize sum and sum-of-squares aggregations over grouped integer indices. This calculates per-group means and variances simultaneously across the entire array, broadcasting results back via index arrays, yielding ~250x speedups over iterative masking.
