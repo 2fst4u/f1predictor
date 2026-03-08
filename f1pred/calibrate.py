@@ -419,21 +419,38 @@ class CalibrationManager:
                             wb_tm * arr_base_team +
                             wb_dt * arr_base_dt)
 
-                # Array to store standardized pace
-                pace_final = np.zeros(len(raw_pace))
                 grid_imp = np.clip(wb_grid, 0.0, 1.0)
 
-                for mask in event_masks:
-                    # 1. Normalize Stage 1 Pace
-                    ev_pace = raw_pace[mask]
-                    mu_p = np.nanmean(ev_pace)
-                    sd_p = np.nanstd(ev_pace)
-                    p_z = (ev_pace - mu_p) / (sd_p + 1e-6)
+                # ⚡ Bolt: Vectorized per-event standardization using bincount instead of Python for-loop
+                # Handles NaNs implicitly if present, though calibration inputs shouldn't have NaNs here
+                valid_mask = ~np.isnan(raw_pace)
+                valid_indices = event_indices[valid_mask]
+                valid_pace = raw_pace[valid_mask]
 
-                    # 3. Stage 2: Stickiness blend using precomputed normalized grid
-                    pace_final[mask] = (1.0 - grid_imp) * p_z + grid_imp * g_z_precomputed[mask]
+                num_uevents = len(unique_events)
+                counts = np.bincount(valid_indices, minlength=num_uevents)
+                sums = np.bincount(valid_indices, weights=valid_pace, minlength=num_uevents)
 
-                pace = pace_final
+                # Avoid division by zero
+                safe_counts = counts.copy()
+                safe_counts[safe_counts == 0] = 1
+                means = sums / safe_counts
+
+                # Variance
+                sq_sums = np.bincount(valid_indices, weights=valid_pace**2, minlength=num_uevents)
+                variances = sq_sums / safe_counts - means**2
+                variances[variances < 0] = 0 # Handle floating point inaccuracies
+                stds = np.sqrt(variances)
+
+                # Broadcast back to original array shape
+                mu_p_all = means[event_indices]
+                sd_p_all = stds[event_indices]
+
+                p_z = (raw_pace - mu_p_all) / (sd_p_all + 1e-6)
+
+                # Stage 2: Stickiness blend using precomputed normalized grid
+                pace = (1.0 - grid_imp) * p_z + grid_imp * g_z_precomputed
+                # We intentionally allow NaNs to propagate here as they did in the original loop
                 
                 # Normalize pace z-score per race to be fair input to ensemble
                 # (Doing this per-row vector optimization is hard without grouping, 
