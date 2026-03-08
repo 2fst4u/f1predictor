@@ -893,21 +893,24 @@ def run_predictions_for_event(
 
                 # Check for wet session via FastF1 (only if session happened)
                 is_wet = False
-                now_utc = datetime.now(timezone.utc)
-                if sess_dt and sess_dt < now_utc:
-                    try:
-                        session_name_map = {
-                            "race": "Race",
-                            "qualifying": "Qualifying", 
-                            "sprint": "Sprint",
-                            "sprint_qualifying": "Sprint Shootout",
-                        }
-                        ff1_sess_name = session_name_map.get(sess, sess.title())
-                        weather_status = get_session_weather_status(season_i, round_i, ff1_sess_name)
-                        if weather_status:
-                            is_wet = weather_status.get("is_wet", False)
-                    except Exception:
-                        pass
+                # Optimization: Skip heavy FastF1 data load for wet status if we already have actual results
+                # This ensures the "instant" experience requested by the user.
+                if actual_positions is None:
+                    now_utc = datetime.now(timezone.utc)
+                    if sess_dt and sess_dt < now_utc:
+                        try:
+                            session_name_map = {
+                                "race": "Race",
+                                "qualifying": "Qualifying",
+                                "sprint": "Sprint",
+                                "sprint_qualifying": "Sprint Shootout",
+                            }
+                            ff1_sess_name = session_name_map.get(sess, sess.title())
+                            weather_status = get_session_weather_status(season_i, round_i, ff1_sess_name)
+                            if weather_status:
+                                is_wet = weather_status.get("is_wet", False)
+                        except Exception:
+                            pass
             
             print_session_console(
                 ranked,
