@@ -379,8 +379,9 @@
                 },
 
                 async fetchEventStatus() {
+                    this.eventSessions = [];
+                    this.results = null;
                     if (!this.params.season || !this.params.round) {
-                        this.eventSessions = [];
                         return;
                     }
                     this.statusLoading = true;
