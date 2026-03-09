@@ -129,6 +129,14 @@ async def get_event_status(season: str, round: str):
         all_possible = ["sprint_qualifying", "sprint", "qualifying", "race"]
         sessions = []
 
+        # Derive roster once for the round (Optimization: avoid redundant deep scans)
+        from .roster import derive_roster
+        import pandas as pd
+        roster_entries = derive_roster(jc, str(s_i), str(r_i))
+        roster = pd.DataFrame(roster_entries) if roster_entries else None
+        if roster is not None and "permanentNumber" in roster.columns:
+            roster["number"] = roster["permanentNumber"]
+
         # Check for each session if it exists in race_info and if results exist
         for s in all_possible:
             # Race and Qualifying always exist in F1
@@ -144,18 +152,9 @@ async def get_event_status(season: str, round: str):
                 has_results = False
                 try:
                     from .predict import _get_actual_positions_for_session
-                    from .roster import derive_roster
-                    import pandas as pd
 
-                    # Race and Qualifying always exist in F1
-                    # But we need a roster to check completeness via _get_actual_positions_for_session
-                    roster_entries = derive_roster(jc, str(s_i), str(r_i))
-                    if roster_entries:
-                        roster = pd.DataFrame(roster_entries)
-                        # Standardize columns for _get_actual_positions_for_session
-                        if "permanentNumber" in roster.columns:
-                            roster["number"] = roster["permanentNumber"]
-
+                    if roster is not None and not roster.empty:
+                        # But we need a roster to check completeness via _get_actual_positions_for_session
                         acts = _get_actual_positions_for_session(jc, s_i, r_i, s, roster)
                         has_results = acts is not None and not acts.isna().all()
                     else:

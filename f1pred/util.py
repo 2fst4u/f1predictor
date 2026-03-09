@@ -208,14 +208,21 @@ def session_with_retries(
     return s
 
 
-def http_get_json(session: requests.Session, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 30) -> Any:
+def http_get_json(
+    session: requests.Session,
+    url: str,
+    params: Optional[Dict[str, Any]] = None,
+    timeout: int = 30,
+    include_metadata: bool = False,
+) -> Any:
     """
     GET a URL and return parsed JSON; falls back safely if the payload isn't valid JSON.
     Includes protection against large responses (DoS).
 
     Returns:
-      - dict/list parsed from JSON when possible
-      - raw text string if JSON parsing fails
+      - If include_metadata=False (default): dict/list parsed from JSON when possible,
+        else raw text string.
+      - If include_metadata=True: tuple (data, from_cache).
     Raises:
       - requests.exceptions.HTTPError for non-2xx responses
       - ValueError if response size exceeds limit
@@ -248,17 +255,22 @@ def http_get_json(session: requests.Session, url: str, params: Optional[Dict[str
                  raise ValueError(f"Response too large (> {MAX_SIZE} bytes) from {url}")
 
         # Manually decode and parse
+        from_cache = getattr(resp, "from_cache", False)
         try:
              # Try to use encoding from headers, default to utf-8
              encoding = resp.encoding or "utf-8"
              text = content.decode(encoding)
-             return json.loads(text)
+             data = json.loads(text)
         except (ValueError, UnicodeDecodeError):
              # Fallback: return raw text (decoded if possible)
              try:
-                 return content.decode(resp.encoding or "utf-8", errors="replace")
+                 data = content.decode(resp.encoding or "utf-8", errors="replace")
              except Exception:
-                 return str(content)
+                 data = str(content)
+
+        if include_metadata:
+            return data, from_cache
+        return data
 
 
 def safe_float(v, default=None):
