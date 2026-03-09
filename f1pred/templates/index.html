@@ -59,7 +59,7 @@
                         <label for="input-season" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Season</label>
                         <select id="input-season" x-model="params.season" @change="fetchSchedule()"
                                 class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600">
-                            <option value="">Select Season</option>
+                            <option value="" x-text="seasons.length ? 'Select Season' : 'Loading seasons...'"></option>
                             <template x-for="s in seasons" :key="s.season">
                                 <option :value="s.season" x-text="s.season"></option>
                             </template>
@@ -69,7 +69,7 @@
                         <label for="input-round" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
                         <select id="input-round" x-model="params.round" @change="fetchEventStatus()" :disabled="!params.season || scheduleLoading"
                                 class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50">
-                            <option value="">Select Round</option>
+                            <option value="" x-text="scheduleLoading ? 'Loading rounds...' : 'Select Round'"></option>
                             <template x-for="r in schedule" :key="r.round">
                                 <option :value="r.round" x-text="'Round ' + r.round + ': ' + r.raceName"></option>
                             </template>
@@ -89,8 +89,13 @@
                                     </template>
                                 </button>
                             </template>
-                            <template x-if="!eventSessions.length">
-                                <span class="text-xs text-gray-500 italic">Select a round...</span>
+                            <template x-if="statusLoading">
+                                <span class="text-[10px] md:text-xs px-2 py-1 text-gray-400 italic flex items-center">
+                                    <i class="fas fa-circle-notch fa-spin mr-1.5" aria-hidden="true"></i> Loading...
+                                </span>
+                            </template>
+                            <template x-if="!eventSessions.length && !statusLoading">
+                                <span class="text-xs text-gray-500 italic mt-1.5">Select a round...</span>
                             </template>
                         </div>
                     </div>
