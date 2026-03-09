@@ -642,7 +642,6 @@ def run_predictions_for_event(
 
                         has_grid_concept = sess in grid_precursor_map
 
-                        grid_source = "actual"
                         if has_grid_concept and "grid" in X.columns:
                             if X["grid"].isna().any():
                                 precursor = grid_precursor_map[sess]
@@ -655,7 +654,6 @@ def run_predictions_for_event(
                                     logger.info(f"[predict] Using {precursor} results from current run as grid")
                                     grid_map = {r["driverId"]: int(r["position"]) for r in precursor_results if r.get("position") is not None}
                                     X["grid"] = X["driverId"].map(grid_map)
-                                    grid_source = f"predicted (from {precursor} in loop)"
 
                                 else:
                                     # 2. Check for actual results of precursor
@@ -671,7 +669,6 @@ def run_predictions_for_event(
                                         # Usually if one is missing, they are all missing or it's an error.
                                         # Let's map it via driverId to avoid index mismatch crashes.
                                         X["grid"] = X["grid"].fillna(X["driverId"].map(precursor_actuals))
-                                        grid_source = f"actual (from {precursor})"
 
                                     else:
                                         # 3. Run simulation if not in loop and no actuals
@@ -686,15 +683,12 @@ def run_predictions_for_event(
                                                 qual_ranked["predicted_position"]
                                             ))
                                             X["grid"] = X["grid"].fillna(X["driverId"].map(grid_map))
-                                            grid_source = f"predicted (from simulated {precursor})"
                                         else:
                                             # 3. Fallback
                                             if "form_index" in X.columns:
                                                 X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
-                                                grid_source = "estimated (from form index)"
                                             else:
                                                 X["grid"] = np.arange(1, len(X) + 1)
-                                                grid_source = "default (no data)"
                             else:
                                 logger.info(f"[predict] Using actual grid for {sess}")
 
