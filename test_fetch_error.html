@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+</head>
+<body>
+<script>
+// Simulate what might be causing JSON parse error
+// If fetch encounters a network error (like a 502/503 from a proxy, or CORS, or a timeout returning HTML),
+// `resp.json()` will fail with "JSON.parse: unexpected character at line 1 column 1 of the JSON data"
+// because it's trying to parse '<' (from <html>) as JSON.
+// Let's test what happens if fetchEventStatus() fails with 500 HTML
+console.log("JSON.parse error typically occurs on response.json() when the response is HTML/text.");
+</script>
+</body>
+</html>
