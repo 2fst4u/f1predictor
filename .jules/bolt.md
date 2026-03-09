@@ -53,6 +53,19 @@
 ## 2026-05-26 - Optimizer Objective Precomputation
 **Learning:** Pandas indexing and extracting groupings (e.g. `np.unique` to find grouped indices) inside a heavily called `scipy.optimize.minimize` objective function causes severe python overhead.
 **Action:** Hoist data extraction (converting `pd.DataFrame` columns to `.values`) and grouping operations (generating indices/masks for grouping logic) outside the `objective` function into NumPy arrays before optimization starts, which reduces objective calculation times dramatically (e.g. ~2.8x speedup).
+
 ## 2026-05-27 - Vectorized Standardization Grouping
 **Learning:** In optimization loops calling an objective function hundreds of times, a Python `for` loop slicing data arrays and calculating standardizations (mean/std) per-group becomes a massive bottleneck.
 **Action:** Use pure NumPy `np.bincount` to vectorize sum and sum-of-squares aggregations over grouped integer indices. This calculates per-group means and variances simultaneously across the entire array, broadcasting results back via index arrays, yielding ~250x speedups over iterative masking.
+
+## 2026-05-28 - Numpy standard_normal over normal
+**Learning:** In NumPy Monte Carlo simulations, generating noise using `rng.standard_normal(size) * scale` is noticeably faster than `rng.normal(0, scale, size)` because it bypasses the internal Python-to-C parsing and validation overhead associated with the mean/scale parameters in the `normal` function.
+**Action:** For high-throughput simulations, always prefer `standard_normal` multiplied by the scale scalar.
+
+## 2026-05-28 - Transposed List Comprehensions vs Slice Assignments
+**Learning:** When computing independent 1D aggregations across columns of a 2D matrix (like running `np.bincount` per column), it is ~10-20% faster to collect them in a list comprehension, wrap them in a 2D NumPy array, and transpose (`np.array([...]).T`), rather than iteratively assigning each column slice to a pre-allocated matrix (`counts[:, p] = ...`).
+**Action:** Use transposed list comprehensions to construct 2D aggregates from 1D operations instead of iteratively updating a pre-allocated zeros array.
+
+## 2026-05-28 - default_rng Breaking Reproducibility
+**Learning:** While `np.random.default_rng()` is significantly faster than the legacy `np.random.RandomState()` (due to its PCG64 algorithm), swapping them in legacy codebases inherently breaks exact reproducible sequences, rendering any strict reproducible test suites (or user expectations of seeded stability) broken.
+**Action:** Do not blindly upgrade `RandomState` to `default_rng` in performance PRs without explicitly warning that sequence stability will be broken. In strict environments, optimize around `RandomState` directly.

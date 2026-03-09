@@ -58,7 +58,8 @@ def simulate_grid(
     # ---------------------------------------------------------
 
     # 1. Generate all random events at once (Shape: draws x n)
-    noise = rng.normal(0.0, noise_scale, size=(draws, n))
+    # ⚡ Bolt: standard_normal is slightly faster than normal(0, scale) due to less C overhead
+    noise = rng.standard_normal((draws, n)) * noise_scale
     dnf_draws = rng.binomial(1, dnf_prob, size=(draws, n))
 
     # 2. Compute simulated pace for all draws
@@ -72,13 +73,14 @@ def simulate_grid(
     # 4. Compute Counts Matrix (n x n)
     # counts[driver_i, pos_j] = number of times driver i finished at pos j
 
-    counts = np.zeros((n, n), dtype=float)
-
     # Count how many times each driver finished at each position
     # Loop over positions (columns of order) and use bincount on driver indices
-    # This is significantly faster (~8x) than flattening and using np.add.at
-    for p in range(n):
-        counts[:, p] = np.bincount(order[:, p], minlength=n)
+    # ⚡ Bolt: A list comprehension assigned to array and transposed is faster
+    # than assigning column-by-column in a pre-allocated array.
+    counts = np.array(
+        [np.bincount(order[:, p], minlength=n) for p in range(n)],
+        dtype=float
+    ).T
 
     # 5. Compute Pairwise Matrix (n x n)
     # pairwise[i, j] = count of draws where driver i finished ahead of driver j
