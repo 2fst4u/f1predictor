@@ -307,3 +307,15 @@ def test_load_config_invalid_config_file_returns_errors(full_valid_config):
         assert "modelling.monte_carlo.draws must be between 100" in err_msg
     finally:
         os.remove(path)
+
+def test_load_config_missing_monte_carlo(full_valid_config):
+    """Verify missing monte_carlo section is caught."""
+    del full_valid_config["modelling"]["monte_carlo"]
+    path = _write_config(full_valid_config)
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            load_config(path)
+        err_msg = str(excinfo.value)
+        assert "Missing required key 'modelling.monte_carlo'" in err_msg
+    finally:
+        os.remove(path)
