@@ -40,7 +40,7 @@ The app fetches data from free, public APIs:
 - **[Jolpica F1](https://github.com/jolpica/jolpica-f1)** – Schedules, results, standings (Ergast-compatible)
 - **[Open-Meteo](https://open-meteo.com/)** – Weather forecasts and historical weather
 
-- **[FastF1](https://theoehrly.github.io/Fast-F1/)** – Detailed timing and telemetry fallback
+- **[FastF1](https://docs.fastf1.dev/)** – Detailed timing and telemetry fallback
 
 ## How It Works
 
