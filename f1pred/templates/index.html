@@ -68,7 +68,7 @@
                     <div>
                         <label for="input-round" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
                         <select id="input-round" x-model="params.round" @change="fetchEventStatus()" :disabled="!params.season || scheduleLoading"
-                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50">
+                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
                             <option value="" x-text="scheduleLoading ? 'Loading rounds...' : 'Select Round'"></option>
                             <template x-for="r in schedule" :key="r.round">
                                 <option :value="r.round" x-text="'Round ' + r.round + ': ' + r.raceName"></option>
@@ -100,8 +100,9 @@
                         </div>
                     </div>
                     <div class="col-span-2 md:col-span-1">
-                        <button @click="runPrediction()" :disabled="loading"
-                                class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 transition transform active:scale-95 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-900">
+                        <button @click="runPrediction()" :disabled="loading || !params.season || !params.round || params.sessions.length === 0"
+                                :title="(!params.season || !params.round) ? 'Select a season and round to predict' : (params.sessions.length === 0 ? 'Select at least one session' : '')"
+                                class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-95 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-900">
                             <span x-show="!loading">RUN PREDICTION</span>
                             <span x-show="loading" class="flex items-center justify-center">
                                 <i class="fas fa-spinner animate-spin mr-2"></i> PROCESSING...
@@ -113,8 +114,15 @@
 
             <!-- Error Message -->
             <div x-show="error" x-transition x-cloak class="bg-red-900 border-l-4 border-red-500 text-red-100 p-4 mb-8" role="alert">
-                <p class="font-bold">Error</p>
-                <p x-text="error"></p>
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="font-bold">Error</p>
+                        <p x-text="error"></p>
+                    </div>
+                    <button @click="error = null" aria-label="Dismiss error" title="Dismiss error" class="text-red-300 hover:text-white focus:outline-none focus:ring-2 focus:ring-white rounded p-1 transition">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
             </div>
 
             <!-- Progress Logs -->

@@ -49,3 +49,11 @@
 ## 2025-05-24 - Alpine.js Custom Toggle Accessibility
 **Learning:** When using custom `<button>` elements in Alpine.js (`x-data`) to act as toggleable options (like multi-select checkboxes), screen readers will not announce their state changes unless explicitly provided.
 **Action:** Always add `:aria-pressed="condition.toString()"` to Alpine.js buttons that function as state toggles, ensuring screen reader users can perceive their current selected state.
+
+## 2026-05-24 - Disabled Affordances and Explanation
+**Learning:** Users often get frustrated when a primary action button is simply grayed out with no explanation as to why. While visual indicators like `disabled:opacity-50` and `cursor-not-allowed` are necessary, explicitly telling the user what's missing (e.g., via a dynamic `title` attribute or a tooltip) drastically improves the perceived accessibility and intuitiveness of the form.
+**Action:** When disabling form submit buttons due to missing prerequisites, always provide a contextual string indicating what the user still needs to fill out (e.g. "Select a season and round to predict").
+
+## 2026-05-24 - Ephemeral Error State UX
+**Learning:** Persistent error banners that don't offer a way to be dismissed can obscure content and leave users feeling trapped in an error state. Even if an error is temporary, providing a manual escape hatch (like an accessible "X" button) improves user autonomy.
+**Action:** Always provide an explicit dismiss/close action for error alerts or toast notifications using standard recognizable icons (`fa-times`) and focusable button elements.
