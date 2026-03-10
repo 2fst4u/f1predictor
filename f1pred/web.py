@@ -6,7 +6,7 @@ import json
 import threading
 import queue
 import math
-from fastapi import FastAPI, Request, Query, HTTPException
+from fastapi import FastAPI, Request, Query, Path, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
@@ -101,7 +101,7 @@ async def get_seasons():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/schedule/{season}")
-async def get_schedule(season: str):
+async def get_schedule(season: str = Path(..., max_length=10)):
     jc = JolpicaClient(_config.data_sources.jolpica.base_url)
     try:
         races = jc.get_season_schedule(season)
@@ -111,7 +111,10 @@ async def get_schedule(season: str):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/event-status/{season}/{round}")
-async def get_event_status(season: str, round: str):
+async def get_event_status(
+    season: str = Path(..., max_length=10),
+    round: str = Path(..., max_length=10)
+):
     if not _config:
         raise HTTPException(status_code=500, detail="Application not configured")
 
@@ -186,9 +189,9 @@ async def get_event_status(season: str, round: str):
 
 @app.get("/api/predict")
 async def get_predictions(
-    season: Optional[str] = None,
-    round: str = "next",
-    sessions: List[str] = Query(None)
+    season: Optional[str] = Query(None, max_length=10),
+    round: str = Query("next", max_length=10),
+    sessions: List[str] = Query(None, max_length=20)
 ):
     if not _config:
          raise HTTPException(status_code=500, detail="Application not configured")
@@ -243,9 +246,9 @@ async def get_predictions(
 
 @app.get("/api/predict/stream")
 async def get_predictions_stream(
-    season: Optional[str] = None,
-    round: str = "next",
-    sessions: List[str] = Query(None)
+    season: Optional[str] = Query(None, max_length=10),
+    round: str = Query("next", max_length=10),
+    sessions: List[str] = Query(None, max_length=20)
 ):
     if not _config:
          raise HTTPException(status_code=500, detail="Application not configured")
