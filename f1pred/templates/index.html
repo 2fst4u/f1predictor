@@ -334,11 +334,13 @@
                     try {
                         // Load Config
                         const configResp = await fetch('/api/config');
+                        if (!configResp.ok) throw new Error(`HTTP ${configResp.status}`);
                         this.config = await configResp.json();
                         this.params.sessions = this.config.default_sessions || ['qualifying', 'race'];
 
                         // Load Seasons
                         const seasonsResp = await fetch('/api/seasons');
+                        if (!seasonsResp.ok) throw new Error(`HTTP ${seasonsResp.status}`);
                         this.seasons = await seasonsResp.json();
 
                         // Pre-select if available
@@ -362,6 +364,10 @@
                     this.scheduleLoading = true;
                     try {
                         const resp = await fetch(`/api/schedule/${this.params.season}`);
+                        if (!resp.ok) {
+                            const text = await resp.text();
+                            throw new Error(`HTTP ${resp.status}: ${text}`);
+                        }
                         const data = await resp.json();
                         this.schedule = data.races || [];
                         // Reset round if current round is not in new schedule
@@ -387,6 +393,10 @@
                     this.statusLoading = true;
                     try {
                         const resp = await fetch(`/api/event-status/${this.params.season}/${this.params.round}`);
+                        if (!resp.ok) {
+                            const text = await resp.text();
+                            throw new Error(`HTTP ${resp.status}: ${text}`);
+                        }
                         const data = await resp.json();
                         this.eventSessions = data.sessions || [];
 
