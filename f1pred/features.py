@@ -627,6 +627,43 @@ def compute_teammate_delta(
     return agg[["driverId", "teammate_delta"]]
 
 
+def compute_circuit_globals(hist: pd.DataFrame, circuit_id: str, ref_date: datetime) -> Dict[str, float]:
+    """Calculate overall circuit-specific metrics across all drivers."""
+    if hist.empty or not circuit_id:
+        return {"circuit_overtake_difficulty": 0.0, "global_circuit_dnf_rate": 0.08}
+        
+    mask = (hist["circuitId"] == circuit_id) & (hist["session"] == "race") & (hist["date"] < ref_date)
+    hist_c = hist[mask].copy()
+
+    if hist_c.empty:
+        return {"circuit_overtake_difficulty": 0.0, "global_circuit_dnf_rate": 0.08}
+        
+    hist_c = hist_c.dropna(subset=["driverId", "position"])
+    
+    # 1. Overtake Difficulty (average grid - finish)
+    if "grid" in hist_c.columns and not hist_c["grid"].isna().all():
+        valid_races = hist_c.dropna(subset=["grid"])
+        gains = valid_races["grid"].astype(float) - valid_races["position"].astype(float)
+        overtake_diff = gains.mean()
+    else:
+        overtake_diff = 0.0
+        
+    # 2. Global Circuit DNF Rate
+    if "is_dnf" in hist_c.columns:
+        dnf_mask = hist_c["is_dnf"].astype(bool)
+    else:
+        status_str = hist_c["status"].astype(str).str.lower()
+        dnf_mask = (~hist_c["position"].notna()) | status_str.str.contains(
+            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
+        )
+    global_dnf = dnf_mask.mean()
+    
+    return {
+        "circuit_overtake_difficulty": float(overtake_diff) if pd.notna(overtake_diff) else 0.0,
+        "global_circuit_dnf_rate": float(global_dnf) if pd.notna(global_dnf) else 0.08,
+    }
+
+
 def compute_grid_finish_delta(
     hist: pd.DataFrame,
     ref_date: datetime,
@@ -920,7 +957,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             if is_historical and wagg:
                 _save_weather_cache(cfg.paths.cache_dir, season, rnd, wagg)
         except Exception as e:
-            logger.info(f"[features] Weather fetch/aggregate failed: {e}")
+            logger.warning(f"[features] CRITICAL: OpenMeteo weather fetch/aggregate failed: {e}. Predictions will assume DRY conditions and may be inaccurate!")
             wagg = {}
 
     # Roster
@@ -1142,6 +1179,16 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             X = X.merge(grid_df, on="driverId", how="left")
         else:
             X["grid"] = np.nan
+            
+        # Circuit Globals
+        try:
+            c_globals = compute_circuit_globals(hist, circuit_id, ref_date)
+            X["circuit_overtake_difficulty"] = c_globals["circuit_overtake_difficulty"]
+            X["global_circuit_dnf_rate"] = c_globals["global_circuit_dnf_rate"]
+        except Exception as e:
+            logger.info(f"[features] Circuit globals failed: {e}")
+            X["circuit_overtake_difficulty"] = 0.0
+            X["global_circuit_dnf_rate"] = 0.08
 
         # Merge current weekend qualifying position (direct pace signal)
         if not quali_pos_df.empty:

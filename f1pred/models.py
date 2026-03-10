@@ -107,6 +107,7 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
     if model is None:
         try:
             import xgboost as xgb
+            logger.warning("[models] LightGBM missing, falling back to XGBoost.")
             model = xgb.XGBRegressor(
                 n_estimators=150,
                 max_depth=4,
@@ -125,6 +126,7 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
 
     # Fallback to sklearn
     if model is None:
+        logger.warning("[models] LightGBM and XGBoost missing, falling back to Sklearn GradientBoostingRegressor.")
         model = GradientBoostingRegressor(
             n_estimators=100,
             learning_rate=0.1,
@@ -243,9 +245,31 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
     # Second Stage: Incorporate grid "stickiness" for race sessions
     # This ensures starting position acts as a strong anchor for the prediction.
     if session_type in ("race", "sprint") and "grid" in X.columns:
+        # Dynamic stickiness based on circuit passability and driver skill
+        # Base stickiness
+        dynamic_w_grid = w_grid
+        
+        # 1. Circuit overtake difficulty
+        if "circuit_overtake_difficulty" in X.columns:
+            avg_circuit_diff = float(np.nanmean(X["circuit_overtake_difficulty"]))
+            if not np.isnan(avg_circuit_diff):
+                # Negative = hard to pass -> increase stickiness
+                circuit_modifier = -avg_circuit_diff * 0.05
+                dynamic_w_grid = dynamic_w_grid + circuit_modifier
+                
+        # 2. Driver overtake propensity
+        if "grid_finish_delta" in X.columns:
+            # Positive = driver gains positions -> decrease stickiness
+            driver_gfd = X["grid_finish_delta"].astype(float).values
+            driver_modifier = - (np.nan_to_num(driver_gfd) / 3.0) * 0.1
+            dynamic_w_grid = dynamic_w_grid + driver_modifier
+            
+        dynamic_w_grid = np.clip(dynamic_w_grid, 0.4, 0.95)
+
         # 1. Grid is the absolute anchor
         # Use actual grid if available, otherwise fallback to index/average
-        grid_vals = X["grid"].astype(float).fillna(15.0).values
+        grid_fallback = float(len(X)) if len(X) > 0 else 20.0
+        grid_vals = X["grid"].astype(float).fillna(grid_fallback).values
         
         # 2. Normalize pace_hat to determine pace relative advantage (z-score)
         mu = float(np.nanmean(pace_hat))
@@ -256,20 +280,16 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
             pace_z = pace_hat - mu
             
         # 3. Apply pace advantage as a Delta to the anchor
-        # w_grid = stickiness. If stickiness is 0.8, pace accounts for 20% of movement.
         # Max reasonable delta bounded to 10 positions (a 2 sigma pace advantage = ~5 grid slots)
         MAX_DELTA = 10.0
-        pace_multiplier = 1.0 - w_grid
+        pace_multiplier = 1.0 - dynamic_w_grid
         pace_delta = pace_z * pace_multiplier * MAX_DELTA
         
         # 4. Final simulated baseline is Grid + Expected Delta
-        # E.g., Starting P2 (grid=2.0) with very poor historical pace (pace_z=+1.5):
-        # pace_hat = 2.0 + (1.5 * 0.2 * 10) = 5.0 -> predicts 5th place
         pace_hat = grid_vals + pace_delta
         
         logger.info(
-            "[models] Applied Anchor-Delta grid stickiness: Max Pace Delta = ±%.1f positions",
-            pace_multiplier * MAX_DELTA * 2.5 # ~2.5 sigma max typical swing
+            "[models] Applied dynamic Anchor-Delta grid stickiness modified by circuit and driver"
         )
         
         # DEBUG PRINTS FOR UNDERSTANDING
@@ -377,37 +397,51 @@ def estimate_dnf_probabilities(
             # 5. Cleanup
             races.drop(columns=["_m_season", "_m_round", "rain_sum", "season_w", "round_w"], inplace=True, errors="ignore")
 
-    # Filter to matching weather category
+    # Ensure fallback even if current is totally missing
     weather_races = races[races["is_wet"] == current_is_wet]
+    N_weather = len(weather_races)
     
-    # Minimum samples required to use weather-specific rates
-    MIN_WEATHER_SAMPLES = 10
+    # Smooth blend weight: 0 races -> 0.0. 15+ races -> 1.0
+    weather_weight = min(1.0, N_weather / 15.0)
+
+    # Calculate overall rates
+    drv_counts = races.groupby("driverId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
+    drv_p_all = (drv_counts["k"] + alpha) / (drv_counts["n"] + alpha + beta)
     
-    # Use weather-filtered data if enough samples, otherwise fall back to all races
-    if len(weather_races) >= MIN_WEATHER_SAMPLES:
-        calc_races = weather_races
-    else:
-        calc_races = races  # Fall back to global rates
+    team_counts = races.groupby("constructorId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
+    team_p_all = (team_counts["k"] + alpha) / (team_counts["n"] + alpha + beta)
 
-    # Calculate driver-level DNF rates
-    drv_counts = calc_races.groupby("driverId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
-    drv_counts["p"] = (drv_counts["k"] + alpha) / (drv_counts["n"] + alpha + beta)
+    # Calculate weather specific rates
+    w_drv_counts = weather_races.groupby("driverId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
+    drv_p_w = (w_drv_counts["k"] + alpha) / (w_drv_counts["n"] + alpha + beta)
+    
+    w_team_counts = weather_races.groupby("constructorId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
+    team_p_w = (w_team_counts["k"] + alpha) / (w_team_counts["n"] + alpha + beta)
 
-    # Calculate team-level DNF rates
-    team_counts = calc_races.groupby("constructorId")["dnf"].agg(["sum", "count"]).rename(columns={"sum": "k", "count": "n"})
-    team_counts["p"] = (team_counts["k"] + alpha) / (team_counts["n"] + alpha + beta)
+    # Blend them
+    drv_p_blended = weather_weight * drv_p_w.reindex(drv_p_all.index).fillna(drv_p_all) + (1.0 - weather_weight) * drv_p_all
+    team_p_blended = weather_weight * team_p_w.reindex(team_p_all.index).fillna(team_p_all) + (1.0 - weather_weight) * team_p_all
 
     # Global fallback rate
-    global_k = calc_races["dnf"].sum()
-    global_n = calc_races.shape[0]
+    global_k = races["dnf"].sum()
+    global_n = races.shape[0]
     global_p = (global_k + alpha) / (global_n + alpha + beta)
+    
+    # Circuit multiplier
+    circuit_dnf = 0.08
+    if current_X is not None and "global_circuit_dnf_rate" in current_X.columns:
+        c_mean = current_X["global_circuit_dnf_rate"].mean()
+        if pd.notna(c_mean):
+            circuit_dnf = float(c_mean)
+    circuit_modifier = circuit_dnf / 0.08
 
-    drv_map = drv_counts["p"].to_dict()
-    team_map = team_counts["p"].to_dict()
+    drv_map = drv_p_blended.to_dict()
+    team_map = team_p_blended.to_dict()
 
     p_drv = current_X["driverId"].map(drv_map).astype(float).fillna(global_p)
     p_team = current_X["constructorId"].map(team_map).astype(float).fillna(global_p)
 
     p = driver_weight * p_drv.values + team_weight * p_team.values
+    p = p * circuit_modifier
     p = np.clip(p.astype(float), clip_min, clip_max)
     return p
