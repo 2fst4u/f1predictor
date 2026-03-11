@@ -156,7 +156,11 @@ def init_caches(cfg, disable_cache: bool = False) -> None:
 
     # Jolpica
     if getattr(ds.jolpica, "base_url", None):
-        urls_expire_after[ds.jolpica.base_url] = default_expire_seconds
+        base_url = ds.jolpica.base_url.rstrip("/")
+        urls_expire_after[base_url] = default_expire_seconds
+        # Shorten TTL for dynamic "next" and "last" pointers
+        urls_expire_after[f"{base_url}/current/next.json"] = forecast_expire_seconds
+        urls_expire_after[f"{base_url}/current/last.json"] = forecast_expire_seconds
 
     backend = cfg.caching.requests_cache.backend
     cache_path = Path(cfg.paths.cache_dir) / "http_cache"

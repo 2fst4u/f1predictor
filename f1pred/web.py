@@ -74,7 +74,7 @@ async def get_web_config():
     # Get next round info for pre-selection
     jc = JolpicaClient(_config.data_sources.jolpica.base_url)
     try:
-        next_s, next_r = jc.get_next_round()
+        next_s, next_r, _ = resolve_event(jc, "current", "next")
     except Exception:
         next_s, next_r = None, None
 

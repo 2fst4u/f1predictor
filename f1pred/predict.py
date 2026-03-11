@@ -32,7 +32,27 @@ def resolve_event(jc: JolpicaClient, season: Optional[str], rnd: str) -> Tuple[i
     try:
         if season is None or (isinstance(season, str) and season.lower() == "current"):
             if rnd == "next":
-                s, r = jc.get_next_round()
+                try:
+                    s, r = jc.get_next_round()
+                    # Verify if this round is actually in the future or very recent
+                    # Jolpica's "next" pointer sometimes lags behind after a race.
+                    races = jc.get_season_schedule(str(s))
+                    this_race = next((x for x in races if str(x.get("round")) == str(r)), None)
+                    if this_race:
+                        race_dt = datetime.fromisoformat(this_race["date"] + "T00:00:00+00:00")
+                        now = datetime.now(timezone.utc)
+                        # If the race was more than 1 day ago, it's likely stale
+                        if race_dt < now - timedelta(days=1):
+                            future = [x for x in races if datetime.fromisoformat(x["date"] + "T00:00:00+00:00") >= now - timedelta(days=1)]
+                            if future:
+                                r = future[0]["round"]
+                except Exception:
+                    # Fallback to schedule scan
+                    s, _ = jc.get_latest_season_and_round()
+                    races = jc.get_season_schedule(str(s))
+                    now = datetime.now(timezone.utc)
+                    future = [x for x in races if datetime.fromisoformat(x["date"] + "T00:00:00+00:00") >= now - timedelta(days=1)]
+                    r = future[0]["round"] if future else races[-1]["round"]
             elif rnd == "last":
                 s, r = jc.get_latest_season_and_round()
             else:
