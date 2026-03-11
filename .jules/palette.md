@@ -57,3 +57,7 @@
 ## 2026-05-24 - Ephemeral Error State UX
 **Learning:** Persistent error banners that don't offer a way to be dismissed can obscure content and leave users feeling trapped in an error state. Even if an error is temporary, providing a manual escape hatch (like an accessible "X" button) improves user autonomy.
 **Action:** Always provide an explicit dismiss/close action for error alerts or toast notifications using standard recognizable icons (`fa-times`) and focusable button elements.
+
+## 2026-03-11 - Screen Reader Context for Visual Indicators
+**Learning:** Using simple icons (like carets) and numbers to indicate changes (e.g., gained/lost positions) is visually efficient but completely opaque to screen readers. Adding `.sr-only` text and `aria-hidden="true"` to the icon ensures visually impaired users get the same context (e.g., "Gained 3 places") as sighted users.
+**Action:** Whenever using an icon + number pattern to show a delta or status change, always hide the icon from screen readers and provide descriptive `.sr-only` text alongside the value.

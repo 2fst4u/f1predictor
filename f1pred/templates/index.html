@@ -249,9 +249,11 @@
                                                     <div class="flex flex-col items-center">
                                                         <span class="font-bold" x-text="p.grid || '--'"></span>
                                                         <template x-if="p.grid && p.grid != p.predicted_position">
-                                                            <span class="text-[10px]" :class="p.grid > p.predicted_position ? 'text-green-500' : 'text-red-500'">
-                                                                <i class="fas" :class="p.grid > p.predicted_position ? 'fa-caret-up' : 'fa-caret-down'"></i>
+                                                            <span class="text-[10px]" :class="p.grid > p.predicted_position ? 'text-green-500' : 'text-red-500'" :title="p.grid > p.predicted_position ? 'Gained ' + Math.abs(p.grid - p.predicted_position) + ' places' : 'Lost ' + Math.abs(p.grid - p.predicted_position) + ' places'">
+                                                                <i class="fas" :class="p.grid > p.predicted_position ? 'fa-caret-up' : 'fa-caret-down'" aria-hidden="true"></i>
+                                                                <span class="sr-only" x-text="p.grid > p.predicted_position ? 'Gained ' : 'Lost '"></span>
                                                                 <span x-text="Math.abs(p.grid - p.predicted_position)"></span>
+                                                                <span class="sr-only"> places</span>
                                                             </span>
                                                         </template>
                                                     </div>
