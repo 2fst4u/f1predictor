@@ -44,8 +44,8 @@
                 <div class="flex items-center space-x-2">
                     <span class="text-[10px] font-bold text-white text-opacity-60 uppercase tracking-tighter" x-text="'M:' + config.model_version"></span>
                     <span class="text-xs font-bold bg-black bg-opacity-20 px-2 py-1 rounded" x-text="'v' + config.app_version"></span>
-                    <button @click="refreshData()" aria-label="Refresh data" title="Refresh data" class="bg-black bg-opacity-20 hover:bg-opacity-30 focus:outline-none focus:ring-2 focus:ring-white p-2 rounded-full transition">
-                        <i class="fas fa-sync-alt" :class="loading ? 'animate-spin' : ''"></i>
+                    <button @click="refreshData()" :disabled="loading" aria-label="Refresh data" :title="loading ? 'Prediction in progress' : 'Refresh data'" class="bg-black bg-opacity-20 hover:bg-opacity-30 focus:outline-none focus:ring-2 focus:ring-white p-2 rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i class="fas fa-sync-alt" :class="loading ? 'animate-spin' : ''" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
@@ -57,8 +57,8 @@
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 items-end">
                     <div>
                         <label for="input-season" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Season</label>
-                        <select id="input-season" x-model="params.season" @change="fetchSchedule()"
-                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600">
+                        <select id="input-season" x-model="params.season" @change="fetchSchedule()" :disabled="loading"
+                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
                             <option value="" x-text="seasons.length ? 'Select Season' : 'Loading seasons...'"></option>
                             <template x-for="s in seasons" :key="s.season">
                                 <option :value="s.season" x-text="s.season"></option>
@@ -67,7 +67,7 @@
                     </div>
                     <div>
                         <label for="input-round" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
-                        <select id="input-round" x-model="params.round" @change="fetchEventStatus()" :disabled="!params.season || scheduleLoading"
+                        <select id="input-round" x-model="params.round" @change="fetchEventStatus()" :disabled="!params.season || scheduleLoading || loading" :title="!params.season ? 'Select a season first' : (scheduleLoading ? 'Loading schedule...' : (loading ? 'Prediction in progress' : 'Select a round'))"
                                 class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
                             <option value="" x-text="scheduleLoading ? 'Loading rounds...' : 'Select Round'"></option>
                             <template x-for="r in schedule" :key="r.round">
@@ -80,12 +80,16 @@
                         <div class="flex flex-wrap gap-2 mt-1" role="group" aria-labelledby="sessions-label">
                             <template x-for="s in eventSessions" :key="s.id">
                                 <button @click="toggleSession(s.id)"
+                                        :disabled="loading"
                                         :aria-pressed="params.sessions.includes(s.id).toString()"
                                         :class="params.sessions.includes(s.id) ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400'"
-                                        class="text-[10px] md:text-xs px-2 py-1 rounded border border-gray-700 hover:border-red-500 transition focus:outline-none focus:ring-2 focus:ring-red-500 flex items-center space-x-1">
+                                        class="text-[10px] md:text-xs px-2 py-1 rounded border border-gray-700 hover:border-red-500 transition focus:outline-none focus:ring-2 focus:ring-red-500 flex items-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed">
                                     <span x-text="s.id.replace('_', ' ').toUpperCase()"></span>
                                     <template x-if="s.has_results">
-                                        <i class="fas fa-check-circle text-green-400 ml-1" title="Results available"></i>
+                                        <span>
+                                            <i class="fas fa-check-circle text-green-400 ml-1" aria-hidden="true"></i>
+                                            <span class="sr-only">Results available</span>
+                                        </span>
                                     </template>
                                 </button>
                             </template>
