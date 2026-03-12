@@ -66,7 +66,8 @@ def rank_from_pace(pace: np.ndarray, noise_sd: float = 0.1, random_state: int | 
     if noise_sd <= 0.0:
         noisy = pace.copy()
     else:
-        noisy = pace + rng.normal(0.0, float(noise_sd), size=n)
+        # ⚡ Bolt: standard_normal is slightly faster than normal(0, scale) due to less C overhead
+        noisy = pace + rng.standard_normal(n) * float(noise_sd)
 
     # Stable sorting (mergesort) to preserve tie order
     order = np.argsort(noisy, kind="mergesort")
