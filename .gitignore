@@ -60,3 +60,4 @@ Thumbs.db
 *.crtcache/
 cache/
 fastf1_cache/
+test_cache/
