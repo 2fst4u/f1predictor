@@ -199,7 +199,8 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
         pace_hat = w_gbm * yhat + w_base * base
     else:
         # Both flat - use baseline with small noise for tie-breaking
-        pace_hat = base + np.random.RandomState(42).normal(0, 0.01, size=len(base))
+        # ⚡ Bolt: standard_normal is slightly faster than normal(0, scale) due to less C overhead
+        pace_hat = base + np.random.RandomState(42).standard_normal(len(base)) * 0.01
 
     # Stage 1.5: Blend current weekend qualifying position if available
     # This is a direct, high-weight signal from THIS weekend's qualifying
