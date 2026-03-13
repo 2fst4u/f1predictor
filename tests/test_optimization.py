@@ -1,8 +1,6 @@
 
-import pytest
 import pandas as pd
 import numpy as np
-from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 from f1pred.predict import run_predictions_for_event
 

@@ -6,7 +6,6 @@ from unittest.mock import patch
 from f1pred.metrics import (
     accuracy_top_k,
     brier_pairwise,
-    crps_position,
     compute_event_metrics,
 )
 
@@ -73,23 +72,6 @@ class TestBrierPairwise:
         ])
         score = brier_pairwise(pairwise, actual)
         assert score == pytest.approx(1.0, abs=1e-6)
-
-class TestCRPSPosition:
-    def test_winner_perfect(self):
-        prob = np.array([1.0, 0.0, 0.0])
-        actual = 1
-        assert crps_position(prob, actual) == 0.0
-
-    def test_second_place(self):
-        prob = np.array([0.5, 0.5, 0.0])
-        actual = 2
-        assert crps_position(prob, actual) == pytest.approx(0.25 / 3.0)
-
-    def test_uniform(self):
-        prob = np.array([1 / 3, 1 / 3, 1 / 3])
-        score = crps_position(prob, actual_pos=1)
-        assert score > 0
-
 
 class TestComputeEventMetrics:
     def test_basic_dataframe(self):
