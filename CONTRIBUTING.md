@@ -42,7 +42,7 @@ Before submitting, ensure:
 
 Prerelease Docker images are built automatically on every push to any branch.
 
-For stable releases, use the **Release & Publish** workflow in GitHub Actions (manual trigger). See [AGENTS.md](AGENTS.md) for full details.
+For stable releases, use the **Release** workflow in GitHub Actions (manual trigger). See [AGENTS.md](AGENTS.md) for full details.
 
 ## Questions?
 
