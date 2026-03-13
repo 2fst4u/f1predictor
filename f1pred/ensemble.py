@@ -147,21 +147,23 @@ class BradleyTerryModel:
         ages = diff.astype('timedelta64[ns]').astype(float) / 86400000000000.0
         w = np.exp2(-ages / max(1.0, half_life_days))
         
-        races["w"] = w
-        races["weighted_pos"] = races["position"] * w
+        # Optimization: pure NumPy bincount for aggregations instead of pd.groupby().agg()
+        driver_ids, group_idx = np.unique(races["driverId"].values, return_inverse=True)
+        n_groups = len(driver_ids)
         
-        # Weighted mean: sum(pos * w) / sum(w)
-        grp = races.groupby("driverId").agg(
-            w_pos_sum=("weighted_pos", "sum"),
-            w_sum=("w", "sum")
-        )
+        w_pos = races["position"].values * w
+
+        w_sum = np.bincount(group_idx, weights=w, minlength=n_groups)
+        w_pos_sum = np.bincount(group_idx, weights=w_pos, minlength=n_groups)
+
+        # ⚡ Bolt: preserve clamping behavior to avoid div/0 with tiny weights
+        w_sum_safe = np.maximum(w_sum, 1e-6)
+        w_mean = w_pos_sum / w_sum_safe
         
         max_pos = float(races["position"].max() or 20.0)
+        str_vals = (max_pos - w_mean) / max_pos
         
-        # Optimization: Vectorized calculation instead of iterrows
-        w_mean = grp["w_pos_sum"] / grp["w_sum"].clip(lower=1e-6)
-        strengths = ((max_pos - w_mean) / max_pos).to_dict()
-        self.strength_ = {str(k): float(v) for k, v in strengths.items()}
+        self.strength_ = {str(k): float(v) for k, v in zip(driver_ids, str_vals)}
 
         logger.info("[ensemble.bt] Inferred strengths for %d drivers", len(self.strength_))
         return self
@@ -236,35 +238,40 @@ class MixedEffectsLikeModel:
         races["w"] = w
         
         # Weighted Global Mean
-        mu = float(np.average(races["perf"], weights=races["w"]))
+        perf_vals = races["perf"].values.astype(float)
+        mu = float(np.average(perf_vals, weights=w))
         
-        # Weighted Team Effect
-        # team_eff = weighted_mean(perf) - mu
-        # We need to group by team and calculate weighted mean
+        # ⚡ Bolt: pure NumPy bincount for team and driver grouped aggregations
+        # Team effects
+        team_ids, team_idx = np.unique(races["constructorId"].values, return_inverse=True)
+        n_teams = len(team_ids)
         
-        races["w_perf"] = races["perf"] * races["w"]
-        team_grp = races.groupby("constructorId").agg(
-            w_perf_sum=("w_perf", "sum"),
-            w_sum=("w", "sum")
-        )
-        team_mu = team_grp["w_perf_sum"] / team_grp["w_sum"].clip(lower=1e-6)
+        w_perf = perf_vals * w
+        team_w_sum = np.bincount(team_idx, weights=w, minlength=n_teams)
+        team_w_perf_sum = np.bincount(team_idx, weights=w_perf, minlength=n_teams)
         
-        team_eff = team_mu - mu
-        races = races.join(team_eff.rename("team_eff"), on="constructorId")
-        races["team_eff"] = races["team_eff"].fillna(0.0)
+        team_w_sum_safe = np.maximum(team_w_sum, 1e-6)
+        team_mu = team_w_perf_sum / team_w_sum_safe
+        
+        team_eff_vals = team_mu - mu
 
-        races["driver_resid"] = races["perf"] - mu - races["team_eff"]
-        
-        # Weighted Driver Effect
-        races["w_resid"] = races["driver_resid"] * races["w"]
-        drv_grp = races.groupby("driverId").agg(
-            w_resid_sum=("w_resid", "sum"),
-            w_sum=("w", "sum")
-        )
-        drv_mu = drv_grp["w_resid_sum"] / drv_grp["w_sum"].clip(lower=1e-6)
+        # Avoid pandas join; map back to rows using integer indices
+        row_team_eff = team_eff_vals[team_idx]
+        driver_resid = perf_vals - mu - row_team_eff
 
-        self.team_effect_ = {str(k): float(v) for k, v in team_eff.items()}
-        self.driver_effect_ = {str(k): float(v) for k, v in drv_mu.items()}
+        # Driver effects
+        drv_ids, drv_idx = np.unique(races["driverId"].values, return_inverse=True)
+        n_drvs = len(drv_ids)
+
+        w_resid = driver_resid * w
+        drv_w_sum = np.bincount(drv_idx, weights=w, minlength=n_drvs)
+        drv_w_resid_sum = np.bincount(drv_idx, weights=w_resid, minlength=n_drvs)
+
+        drv_w_sum_safe = np.maximum(drv_w_sum, 1e-6)
+        drv_mu = drv_w_resid_sum / drv_w_sum_safe
+
+        self.team_effect_ = {str(k): float(v) for k, v in zip(team_ids, team_eff_vals)}
+        self.driver_effect_ = {str(k): float(v) for k, v in zip(drv_ids, drv_mu)}
 
         logger.info(
             "[ensemble.mixed] Fitted %d driver effects, %d team effects",

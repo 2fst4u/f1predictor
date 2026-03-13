@@ -69,3 +69,7 @@
 ## 2026-05-28 - default_rng Breaking Reproducibility
 **Learning:** While `np.random.default_rng()` is significantly faster than the legacy `np.random.RandomState()` (due to its PCG64 algorithm), swapping them in legacy codebases inherently breaks exact reproducible sequences, rendering any strict reproducible test suites (or user expectations of seeded stability) broken.
 **Action:** Do not blindly upgrade `RandomState` to `default_rng` in performance PRs without explicitly warning that sequence stability will be broken. In strict environments, optimize around `RandomState` directly.
+
+## 2026-05-29 - Vectorizing Model Fitting with np.bincount over GroupBy
+**Learning:** When optimizing models like `BradleyTerryModel.fit` or `MixedEffectsLikeModel.fit` that rely on group aggregations (e.g., driver and team effects), `pandas` `groupby().agg()` introduces severe Python looping overhead inside the dataframe manipulation.
+**Action:** Instead of `groupby`, use `np.unique(..., return_inverse=True)` to map categorical keys to continuous integer indices, then apply `np.bincount(idx, weights=val)` to perform sum and weighted-sum aggregations in highly optimized C-code. This reduces typical method time significantly without altering the mathematical behavior.
