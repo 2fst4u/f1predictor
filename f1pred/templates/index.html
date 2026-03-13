@@ -109,7 +109,7 @@
                                 class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-95 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-900">
                             <span x-show="!loading">RUN PREDICTION</span>
                             <span x-show="loading" class="flex items-center justify-center">
-                                <i class="fas fa-spinner animate-spin mr-2"></i> PROCESSING...
+                                <i class="fas fa-spinner animate-spin mr-2" aria-hidden="true"></i> PROCESSING...
                             </span>
                         </button>
                     </div>
@@ -124,7 +124,7 @@
                         <p x-text="error"></p>
                     </div>
                     <button @click="error = null" aria-label="Dismiss error" title="Dismiss error" class="text-red-300 hover:text-white focus:outline-none focus:ring-2 focus:ring-white rounded p-1 transition">
-                        <i class="fas fa-times"></i>
+                        <i class="fas fa-times" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
@@ -132,7 +132,7 @@
             <!-- Progress Logs -->
             <div x-show="loading" x-transition x-cloak class="card p-4 mb-8 border-l-4 border-blue-500">
                 <div class="flex items-center mb-2">
-                    <i class="fas fa-terminal mr-2 text-blue-400"></i>
+                    <i class="fas fa-terminal mr-2 text-blue-400" aria-hidden="true"></i>
                     <h3 class="text-xs font-bold uppercase tracking-widest text-gray-400">Prediction Progress</h3>
                 </div>
                 <div class="bg-black bg-opacity-30 rounded p-3 font-mono text-xs h-32 overflow-y-auto space-y-1" id="log-container">
@@ -186,7 +186,7 @@
                         <div class="grid grid-cols-3 md:grid-cols-5 gap-2 sm:gap-4 mb-6">
                             <template x-if="data.weather && data.weather.temp_mean">
                                 <div class="card p-1 md:p-3 flex items-center space-x-1 md:space-x-3">
-                                    <div class="text-lg md:text-2xl text-yellow-500"><i class="fas fa-thermometer-half"></i></div>
+                                    <div class="text-lg md:text-2xl text-yellow-500"><i class="fas fa-thermometer-half" aria-hidden="true"></i></div>
                                     <div>
                                         <div class="text-[10px] md:text-xs text-gray-400 uppercase">Temp</div>
                                         <div class="font-bold text-xs md:text-base" x-text="Math.round(data.weather.temp_mean) + '°C'"></div>
@@ -195,7 +195,7 @@
                             </template>
                             <template x-if="data.weather && data.weather.rain_sum !== undefined">
                                 <div class="card p-1 md:p-3 flex items-center space-x-1 md:space-x-3">
-                                    <div class="text-lg md:text-2xl text-blue-500"><i class="fas fa-cloud-rain"></i></div>
+                                    <div class="text-lg md:text-2xl text-blue-500"><i class="fas fa-cloud-rain" aria-hidden="true"></i></div>
                                     <div>
                                         <div class="text-[10px] md:text-xs text-gray-400 uppercase">Rain</div>
                                         <div class="font-bold text-xs md:text-base" x-text="data.weather.rain_sum.toFixed(1) + 'mm'"></div>
@@ -204,7 +204,7 @@
                             </template>
                             <template x-if="data.weather && data.weather.wind_mean">
                                 <div class="card p-1 md:p-3 flex items-center space-x-1 md:space-x-3">
-                                    <div class="text-lg md:text-2xl text-gray-400"><i class="fas fa-wind"></i></div>
+                                    <div class="text-lg md:text-2xl text-gray-400"><i class="fas fa-wind" aria-hidden="true"></i></div>
                                     <div>
                                         <div class="text-[10px] md:text-xs text-gray-400 uppercase">Wind</div>
                                         <div class="font-bold text-xs md:text-base" x-text="Math.round(data.weather.wind_mean) + 'km/h'"></div>
@@ -304,7 +304,7 @@
 
             <!-- Empty State -->
             <div x-show="!results && !loading" class="flex flex-col items-center justify-center py-20 text-gray-500">
-                <i class="fas fa-flag-checkered text-6xl mb-4 opacity-20"></i>
+                <i class="fas fa-flag-checkered text-6xl mb-4 opacity-20" aria-hidden="true"></i>
                 <p class="text-xl font-light">Select a race and run prediction to start</p>
             </div>
         </main>
