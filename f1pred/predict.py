@@ -268,7 +268,7 @@ def _run_single_prediction(
     Returns None if prediction cannot be completed.
     """
     import numpy as np
-    from .features import build_session_features, collect_historical_results, build_roster
+    from .features import build_session_features, collect_historical_results
     from .models import train_pace_model, estimate_dnf_probabilities
     from .simulate import simulate_grid
     from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace

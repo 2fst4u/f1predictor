@@ -37,13 +37,6 @@ def brier_pairwise(pairwise_prob: np.ndarray, actual_positions: np.ndarray) -> f
 
     return float(np.mean(relevant_errors))
 
-def crps_position(prob_row: np.ndarray, actual_pos: int) -> float:
-    N = prob_row.shape[0]
-    F = np.cumsum(prob_row)
-    j_idx = np.arange(N)
-    H = (j_idx >= (actual_pos - 1)).astype(float)
-    return float(np.mean((F - H) ** 2))
-
 def compute_event_metrics(ranked_df: pd.DataFrame,
                           prob_matrix: Optional[np.ndarray],
                           pairwise: Optional[np.ndarray],
