@@ -73,3 +73,6 @@
 ## 2026-05-29 - Vectorizing Model Fitting with np.bincount over GroupBy
 **Learning:** When optimizing models like `BradleyTerryModel.fit` or `MixedEffectsLikeModel.fit` that rely on group aggregations (e.g., driver and team effects), `pandas` `groupby().agg()` introduces severe Python looping overhead inside the dataframe manipulation.
 **Action:** Instead of `groupby`, use `np.unique(..., return_inverse=True)` to map categorical keys to continuous integer indices, then apply `np.bincount(idx, weights=val)` to perform sum and weighted-sum aggregations in highly optimized C-code. This reduces typical method time significantly without altering the mathematical behavior.
+## 2024-05-18 - Replacing pandas groupby in loops with np.bincount
+**Learning:** Performing `pandas.groupby().agg()` operations on historical data inside an iterative event loop (such as the out-of-sample data builder in `f1pred/models.py`) causes severe overhead. When this needs to run hundreds of times per CLI command, pandas' validation and grouping logic dominates runtime.
+**Action:** When performing grouped aggregations inside a tight iterative loop, pre-extract pandas columns to pure NumPy arrays and use `pd.factorize()` once outside the loop to map group IDs (e.g. `driverId`) to integers. Then, inside the loop, use `np.bincount` to perform sums and counts, yielding 10x-15x speedups.
