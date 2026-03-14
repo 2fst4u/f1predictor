@@ -7,12 +7,13 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple, Callable
 from datetime import datetime, timezone, timedelta
 
+import numpy as np
 from colorama import Fore, Style
 
 from .util import get_logger, ensure_dirs, StatusSpinner, sanitize_for_console, PredictionCache
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
-from .data.fastf1_backend import init_fastf1, get_session_classification, get_session_weather_status
+from .data.fastf1_backend import init_fastf1, get_session_classification, get_session_weather_status, get_event
 
 __all__ = [
     "run_predictions_for_event",
@@ -172,7 +173,6 @@ def _get_actual_positions_for_session(
             pass
 
         # If Jolpica provided results, check if they are complete (at least as many as in roster)
-        # If Jolpica provided results, check if they are complete (at least as many as in roster)
         if amap and len(amap) >= len(roster_view):
             return roster_view["driverId"].map(amap)
 
@@ -202,43 +202,51 @@ def _get_actual_positions_for_session(
             return None
 
         for ff1_sess_name in ff1_names:
-            cls = get_session_classification(season_i, round_i, ff1_sess_name)
+            try:
+                cls = get_session_classification(season_i, round_i, ff1_sess_name)
+            except Exception as e:
+                logger.debug(f"[predict] Classification fetch failed for {ff1_sess_name}: {e}")
+                cls = None
+
             if cls is not None and hasattr(cls, "empty") and not cls.empty:
                 # Some sessions like Sprint Qualifying might have a classification
-                # but no actual positions yet if results are still being finalized
-                # or data is lagging.
+                # but no actual positions yet if results are still being finalized.
                 pos_cols = ["Position", "ClassifiedPosition", "GridPosition"]
                 has_any_pos = False
                 for c in pos_cols:
                     if c in cls.columns:
-                        # Check if any non-empty, non-NaN values exist
                         valid_vals = pd.to_numeric(cls[c], errors="coerce").dropna()
                         if not valid_vals.empty:
                             has_any_pos = True
                             break
 
-                # Special Case: Sprint Qualifying / Shootout sometimes populate Q1/Q2/Q3 instead of Position
-                # FastF1 often stores times as strings or timedeltas
+                # Special Case: Q-times check
                 if not has_any_pos:
                     for q_col in ["Q1", "Q2", "Q3"]:
                         if q_col in cls.columns:
-                            # Use pd.notna() check for any non-null (times/strings/etc)
-                            if cls[q_col].notna().any():
-                                has_any_pos = True
-                                logger.info(f"[predict] Classification for {ff1_sess_name} has {q_col} data - considering results available.")
-                                break
+                            c_data = cls[q_col]
+                            if hasattr(c_data, 'dt'):
+                                if not c_data.dropna().empty:
+                                    has_any_pos = True
+                                    break
+                            else:
+                                s_data = c_data.astype(str).str.strip().replace(['NaT', 'nan', ''], [np.nan, np.nan, np.nan])
+                                if s_data.notna().any():
+                                    has_any_pos = True
+                                    break
 
-                # Special Case: If laps are available, we can consider results available
-                # even if classification is empty, as we can derive positions from times.
-                if not has_any_pos and sess == "sprint_qualifying":
+                # Special Case: Lap check
+                if not has_any_pos and sess in ("sprint_qualifying", "qualifying"):
                     try:
                         ev = get_event(season_i, round_i)
-                        if ev:
-                            s = ev.get_session(ff1_sess_name)
-                            s.load(telemetry=False, laps=True, weather=False, messages=False)
-                            if s.laps is not None and not s.laps.empty:
-                                has_any_pos = True
-                                logger.info(f"[predict] Laps found for {ff1_sess_name} - considering results available.")
+                        if ev is not None:
+                            s_ff1 = ev.get_session(ff1_sess_name)
+                            s_ff1.load(telemetry=False, laps=True, weather=False, messages=False)
+                            if s_ff1.laps is not None and not s_ff1.laps.empty:
+                                l_col = 'Abbreviation' if 'Abbreviation' in s_ff1.laps.columns else 'Driver' if 'Driver' in s_ff1.laps.columns else None
+                                if l_col and not s_ff1.laps.groupby(l_col).LapTime.min().dropna().empty:
+                                    has_any_pos = True
+                                    logger.info(f"[predict] Laps found for {ff1_sess_name} - results available.")
                     except Exception:
                         pass
 
@@ -308,7 +316,8 @@ def _get_actual_positions_for_session(
 
                 # 4. Q-Time fallback (if positions are missing but times exist, rank them)
                 # 5. Lap-Time fallback (if other sources fail)
-                if (ff1_map is None or ff1_map.isna().all()) and sess == "sprint_qualifying":
+                if (ff1_map is None or ff1_map.isna().all()) and sess in ("sprint_qualifying", "qualifying", "race", "sprint"):
+                    logger.info(f"[predict] FF1 classification matches failed for {ff1_sess_name} - trying lap time derivation.")
                     try:
                         ev = get_event(season_i, round_i)
                         if ev:
@@ -317,15 +326,23 @@ def _get_actual_positions_for_session(
                             if s.laps is not None and not s.laps.empty:
                                 logger.info(f"[predict] Deriving positions from lap times for {ff1_sess_name}")
                                 # Get best lap time for each driver
-                                best_laps = s.laps.groupby('Abbreviation')['LapTime'].min().sort_values().dropna()
-                                if not best_laps.empty:
-                                    q_map = {abbr.upper(): i+1 for i, abbr in enumerate(best_laps.index)}
-                                    ff1_map = roster_view["code"].str.upper().map(q_map)
+                                # Map 'Driver' column to 'Abbreviation' if 'Abbreviation' is missing
+                                l_col = 'Abbreviation' if 'Abbreviation' in s.laps.columns else 'Driver' if 'Driver' in s.laps.columns else None
+                                if l_col:
+                                    best_laps = s.laps.groupby(l_col)['LapTime'].min().sort_values().dropna()
+                                    if not best_laps.empty:
+                                        # Use unique abbreviations from the series as keys
+                                        q_map = {str(abbr).upper(): i+1 for i, abbr in enumerate(best_laps.index)}
+                                        logger.info(f"[DEBUG] Generated q_map: {q_map}")
+                                        ff1_map = roster_view["code"].astype(str).str.strip().str.upper().map(q_map)
+                                        logger.info(f"[DEBUG] ff1_map matches: {ff1_map.count()}")
                     except Exception:
                         pass
 
                 # 4. Q-Time fallback (if positions are missing but times exist, rank them)
                 if (ff1_map is None or ff1_map.isna().all()):
+                    # Log for debugging
+                    logger.info(f"[predict] Checking Q-times for {ff1_sess_name} (columns: {cls.columns.tolist()})")
                     for q_col in ["Q3", "Q2", "Q1"]:
                         if q_col in cls.columns and cls[q_col].notna().any():
                             logger.info(f"[predict] Deriving positions from {q_col} times for {ff1_sess_name}")
@@ -339,11 +356,14 @@ def _get_actual_positions_for_session(
                                 cls_q["_pos_derived"] = cls_q["_t"].rank(method="min").astype(int)
 
                                 # Map by Abbreviation as it's most reliable for derived data
-                                if "Abbreviation" in cls_q.columns and "code" in roster_view.columns:
-                                    q_map = dict(zip(cls_q["Abbreviation"].str.upper(), cls_q["_pos_derived"]))
-                                    ff1_map = roster_view["code"].str.upper().map(q_map)
-                                    if ff1_map.notna().any():
-                                        break
+                                for abbr_col in ["Abbreviation", "Driver"]:
+                                    if abbr_col in cls_q.columns and "code" in roster_view.columns:
+                                        q_map = dict(zip(cls_q[abbr_col].astype(str).str.upper(), cls_q["_pos_derived"]))
+                                        ff1_map = roster_view["code"].str.upper().map(q_map)
+                                        if ff1_map.notna().any():
+                                            break
+                                if ff1_map is not None and ff1_map.notna().any():
+                                    break
 
                 if ff1_map is not None and not ff1_map.isna().all():
                     # If Jolpica had partial results, prefer the more complete set
