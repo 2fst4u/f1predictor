@@ -1020,7 +1020,12 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         logger.info("[features] Attempting FastF1 session timing")
         ev = get_event(season, rnd)
         st = get_session_times(ev, {"race": "Race", "qualifying": "Qualifying", "sprint": "Sprint",
-                                    "sprint_qualifying": "Sprint Shootout"}.get(session_type, "Race")) if ev else None
+                                    "sprint_qualifying": "Sprint Qualifying"}.get(session_type, "Race")) if ev else None
+
+        # Fallback for sprint qualifying if "Sprint Qualifying" returned nothing
+        if session_type == "sprint_qualifying" and st is None and ev:
+            st = get_session_times(ev, "Sprint Shootout")
+
         if st:
             start_dt, end_dt = st
             logger.info("[features] FastF1 timing resolved")

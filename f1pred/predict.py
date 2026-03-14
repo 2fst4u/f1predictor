@@ -172,14 +172,19 @@ def _get_actual_positions_for_session(
             return roster_view["driverId"].map(amap)
 
         # 2. Try FastF1 if Jolpica is missing, incomplete, or if sess is sprint_qualifying
-        ff1_sess_name = {
+        ff1_names = []
+        base_name = {
             "race": "Race",
             "qualifying": "Qualifying",
             "sprint": "Sprint",
-            "sprint_qualifying": "Sprint Shootout"
+            "sprint_qualifying": "Sprint Qualifying"
         }.get(sess)
+        if base_name:
+            ff1_names.append(base_name)
+        if sess == "sprint_qualifying":
+            ff1_names.append("Sprint Shootout")
 
-        if ff1_sess_name:
+        for ff1_sess_name in ff1_names:
             cls = get_session_classification(season_i, round_i, ff1_sess_name)
             if cls is not None and hasattr(cls, "empty") and not cls.empty:
                 ff1_map = None
@@ -191,14 +196,15 @@ def _get_actual_positions_for_session(
                         ].values
                     )
                     ff1_map = num_series.map(num_to_pos)
-                elif "Abbreviation" in cls.columns:
+
+                if (ff1_map is None or ff1_map.isna().all()) and "Abbreviation" in cls.columns:
                     code_series = roster_view["code"].astype(str)
                     abbr_to_pos = dict(
                         cls[["Abbreviation", "Position"]].values
                     )
                     ff1_map = code_series.map(abbr_to_pos)
 
-                if ff1_map is not None:
+                if ff1_map is not None and not ff1_map.isna().all():
                     # If Jolpica had partial results, prefer the more complete set
                     if amap is not None:
                         jolpica_res = roster_view["driverId"].map(amap)
@@ -924,7 +930,7 @@ def run_predictions_for_event(
                                 "race": "Race",
                                 "qualifying": "Qualifying",
                                 "sprint": "Sprint",
-                                "sprint_qualifying": "Sprint Shootout",
+                                "sprint_qualifying": "Sprint Qualifying",
                             }
                             ff1_sess_name = session_name_map.get(sess, sess.title())
                             weather_status = get_session_weather_status(season_i, round_i, ff1_sess_name)
