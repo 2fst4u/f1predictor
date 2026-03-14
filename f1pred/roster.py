@@ -214,65 +214,74 @@ def _roster_from_fastf1(season: int, rnd: int, mapping: Optional[Dict] = None) -
         if ev is None:
             return []
 
-        # Try to load session (e.g., FP1)
-        # FastF1 often requires a session to be loaded to get drivers
-        try:
-            # We don't need full data, just metadata
-            sess = ev.get_session("FP1")
-            sess.load(telemetry=False, laps=False, weather=False, messages=False)
-            results = sess.results
-            if results is None or results.empty:
-                return []
+        # Try to load a session to get the roster.
+        # We try multiple sessions in case some data is missing or hasn't occurred yet.
+        # Order: FP1 (standard), then sessions that might have occurred.
+        session_names = ["FP1", "Sprint Qualifying", "Sprint Shootout", "Qualifying", "Sprint", "Race"]
+        results = None
 
-            roster = []
-            d_map = (mapping or {}).get("drivers", {})
-            c_map = (mapping or {}).get("constructors", {})
+        for sname in session_names:
+            try:
+                sess = ev.get_session(sname)
+                sess.load(telemetry=False, laps=False, weather=False, messages=False)
+                if sess.results is not None and not sess.results.empty:
+                    results = sess.results
+                    logger.info(f"[roster] Found roster in session: {sname}")
+                    break
+            except Exception:
+                continue
 
-            for _, r in results.iterrows():
-                # Try to canonicalize driverId
-                abbr = r.get("Abbreviation")
-                num = r.get("DriverNumber")
-                gn = r.get("FirstName")
-                fn = r.get("LastName")
+        if results is None or results.empty:
+            return []
 
-                did = None
-                if abbr and abbr.upper() in d_map:
-                    did = d_map[abbr.upper()]
-                elif num and str(num) in d_map:
-                    did = d_map[str(num)]
-                elif gn and fn:
-                    name_key = f"{gn} {fn}".lower().strip()
-                    if name_key in d_map:
-                        did = d_map[name_key]
+        roster = []
+        d_map = (mapping or {}).get("drivers", {})
+        c_map = (mapping or {}).get("constructors", {})
 
-                # Fallback to abbreviation if not mapped
-                if not did:
-                    did = abbr.lower() if abbr else None
+        for _, r in results.iterrows():
+            # Try to canonicalize driverId
+            abbr = r.get("Abbreviation")
+            num = r.get("DriverNumber")
+            gn = r.get("FirstName")
+            fn = r.get("LastName")
 
-                # Try to canonicalize constructorId
-                tname = r.get("TeamName")
-                cid = None
-                if tname and tname.lower().strip() in c_map:
-                    cid = c_map[tname.lower().strip()]
+            did = None
+            if abbr and abbr.upper() in d_map:
+                did = d_map[abbr.upper()]
+            elif num and str(num) in d_map:
+                did = d_map[str(num)]
+            elif gn and fn:
+                name_key = f"{gn} {fn}".lower().strip()
+                if name_key in d_map:
+                    did = d_map[name_key]
 
-                # Fallback to normalised TeamName
-                if not cid:
-                    cid = tname.lower().replace(" ", "_") if tname else None
+            # Fallback to abbreviation if not mapped
+            if not did:
+                did = abbr.lower() if abbr else None
 
-                roster.append({
-                    "driverId": did,
-                    "code": abbr,
-                    "givenName": gn,
-                    "familyName": fn,
-                    "permanentNumber": str(num) if num else None,
-                    "constructorId": cid,
-                    "constructorName": tname,
-                })
+            # Try to canonicalize constructorId
+            tname = r.get("TeamName")
+            cid = None
+            if tname and tname.lower().strip() in c_map:
+                cid = c_map[tname.lower().strip()]
+
+            # Fallback to normalised TeamName
+            if not cid:
+                cid = tname.lower().replace(" ", "_") if tname else None
+
+            roster.append({
+                "driverId": did,
+                "code": abbr,
+                "givenName": gn,
+                "familyName": fn,
+                "permanentNumber": str(num) if num else None,
+                "constructorId": cid,
+                "constructorName": tname,
+            })
+
+        if roster:
             logger.info(f"[roster] Fetched {len(roster)} drivers from FastF1")
             return roster
-        except Exception:
-            # If FP1 fails, maybe it hasn't happened. FastF1 relies on finding data.
-            pass
     except Exception as e:
         logger.warning(f"[roster] FastF1 fetch failed: {e}")
     return []

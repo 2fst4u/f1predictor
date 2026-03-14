@@ -137,8 +137,11 @@ async def get_event_status(
         import pandas as pd
         roster_entries = derive_roster(jc, str(s_i), str(r_i))
         roster = pd.DataFrame(roster_entries) if roster_entries else None
-        if roster is not None and "permanentNumber" in roster.columns:
-            roster["number"] = roster["permanentNumber"]
+        if roster is not None:
+            if "permanentNumber" in roster.columns and "number" not in roster.columns:
+                roster["number"] = roster["permanentNumber"]
+            if "code" not in roster.columns:
+                roster["code"] = pd.Series([pd.NA] * len(roster))
 
         # Check for each session if it exists in race_info and if results exist
         for s in all_possible:
@@ -167,6 +170,10 @@ async def get_event_status(
                         elif s == "qualifying":
                             has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
                         elif s == "sprint":
+                            has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
+                        elif s == "sprint_qualifying":
+                            # Ergast doesn't have SQ results, but maybe Jolpica adds it?
+                            # Check for sprint results as a proxy for completed weekend status
                             has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
                 except Exception:
                     has_results = False

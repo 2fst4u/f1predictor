@@ -166,6 +166,10 @@ def _get_actual_positions_for_session(
         elif sess == "sprint":
             act = jc.get_sprint_results(str(season_i), str(round_i))
             amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position")}
+        elif sess == "sprint_qualifying":
+            # NOTE: Ergast/Jolpica traditionally does not have a standard 'sprint_qualifying' endpoint
+            # like /qualifying.json or /sprint.json. If it did, we'd add it here.
+            pass
 
         # If Jolpica provided results, check if they are complete (at least as many as in roster)
         if amap and len(amap) >= len(roster_view):
@@ -181,28 +185,70 @@ def _get_actual_positions_for_session(
         }.get(sess)
         if base_name:
             ff1_names.append(base_name)
-        if sess == "sprint_qualifying":
-            ff1_names.append("Sprint Shootout")
+
+        # Add common fallbacks
+        if sess == "race":
+            ff1_names.append("R")
+        elif sess == "qualifying":
+            ff1_names.append("Q")
+        elif sess == "sprint":
+            ff1_names.append("S")
+        elif sess == "sprint_qualifying":
+            ff1_names.extend(["SQ", "Sprint Shootout", "Shootout"])
 
         for ff1_sess_name in ff1_names:
             cls = get_session_classification(season_i, round_i, ff1_sess_name)
             if cls is not None and hasattr(cls, "empty") and not cls.empty:
                 ff1_map = None
-                if "DriverNumber" in cls.columns:
+                if "DriverNumber" in cls.columns and "number" in roster_view.columns:
                     num_series = pd.to_numeric(roster_view["number"], errors="coerce").astype("Int64")
-                    num_to_pos = dict(
-                        cls.astype({"DriverNumber": int})[
-                            ["DriverNumber", "Position"]
-                        ].values
-                    )
-                    ff1_map = num_series.map(num_to_pos)
+                    # Robustly convert DriverNumber and Position to numeric
+                    cls_clean = cls.copy()
+                    cls_clean["DriverNumber"] = pd.to_numeric(cls_clean.get("DriverNumber"), errors="coerce")
+                    cls_clean["Position"] = pd.to_numeric(cls_clean.get("Position"), errors="coerce")
+                    cls_clean = cls_clean.dropna(subset=["DriverNumber", "Position"])
 
-                if (ff1_map is None or ff1_map.isna().all()) and "Abbreviation" in cls.columns:
-                    code_series = roster_view["code"].astype(str)
-                    abbr_to_pos = dict(
-                        cls[["Abbreviation", "Position"]].values
-                    )
-                    ff1_map = code_series.map(abbr_to_pos)
+                    if not cls_clean.empty:
+                        num_to_pos = dict(
+                            cls_clean.astype({"DriverNumber": int, "Position": int})[
+                                ["DriverNumber", "Position"]
+                            ].values
+                        )
+                        ff1_map = num_series.map(num_to_pos)
+
+                if (ff1_map is None or ff1_map.isna().all()) and "Abbreviation" in cls.columns and "code" in roster_view.columns:
+                    # Normalize casing for robust matching
+                    code_series = roster_view["code"].astype(str).str.upper()
+                    cls_clean = cls.copy()
+                    cls_clean["Position"] = pd.to_numeric(cls_clean.get("Position"), errors="coerce")
+                    cls_clean["Abbreviation"] = cls_clean["Abbreviation"].astype(str).str.upper()
+                    cls_clean = cls_clean.dropna(subset=["Abbreviation", "Position"])
+
+                    if not cls_clean.empty:
+                        abbr_to_pos = dict(
+                            cls_clean.astype({"Position": int})[
+                                ["Abbreviation", "Position"]
+                            ].values
+                        )
+                        ff1_map = code_series.map(abbr_to_pos)
+
+                # 3. Fuzzy Name Match fallback
+                if (ff1_map is None or ff1_map.isna().all()) and "LastName" in cls.columns and "name" in roster_view.columns:
+                    cls_clean = cls.copy()
+                    cls_clean["Position"] = pd.to_numeric(cls_clean.get("Position"), errors="coerce")
+                    cls_clean["LastName"] = cls_clean["LastName"].astype(str).str.lower().str.strip()
+                    cls_clean = cls_clean.dropna(subset=["LastName", "Position"])
+
+                    if not cls_clean.empty:
+                        name_to_pos = dict(
+                            cls_clean.astype({"Position": int})[
+                                ["LastName", "Position"]
+                            ].values
+                        )
+
+                        # Match against roster last names
+                        roster_last_names = roster_view["name"].str.split().str[-1].str.lower().str.strip()
+                        ff1_map = roster_last_names.map(name_to_pos)
 
                 if ff1_map is not None and not ff1_map.isna().all():
                     # If Jolpica had partial results, prefer the more complete set
@@ -926,14 +972,19 @@ def run_predictions_for_event(
                     now_utc = datetime.now(timezone.utc)
                     if sess_dt and sess_dt < now_utc:
                         try:
-                            session_name_map = {
-                                "race": "Race",
-                                "qualifying": "Qualifying",
-                                "sprint": "Sprint",
-                                "sprint_qualifying": "Sprint Qualifying",
-                            }
-                            ff1_sess_name = session_name_map.get(sess, sess.title())
-                            weather_status = get_session_weather_status(season_i, round_i, ff1_sess_name)
+                            ff1_weather_names = {
+                                "race": ["Race", "R"],
+                                "qualifying": ["Qualifying", "Q"],
+                                "sprint": ["Sprint", "S"],
+                                "sprint_qualifying": ["Sprint Qualifying", "SQ", "Sprint Shootout", "Shootout"],
+                            }.get(sess, [sess.title()])
+
+                            weather_status = None
+                            for ff1_sess_name in ff1_weather_names:
+                                weather_status = get_session_weather_status(season_i, round_i, ff1_sess_name)
+                                if weather_status:
+                                    break
+
                             if weather_status:
                                 is_wet = weather_status.get("is_wet", False)
                         except Exception:

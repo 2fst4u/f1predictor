@@ -57,3 +57,29 @@ def test_sprint_qualifying_mapping_robustness():
         assert not results.isna().all()
         assert results.iloc[0] == 1
         assert results.iloc[1] == 2
+
+def test_sprint_qualifying_fuzzy_name_match():
+    """
+    Test that mapping succeeds via fuzzy name match if others fail.
+    """
+    jc = MagicMock()
+    # Roster has names but mismatched numbers/codes
+    roster_view = pd.DataFrame([
+        {"driverId": "max_verstappen", "number": "99", "code": "XXX", "name": "Max Verstappen"},
+        {"driverId": "lando_norris", "number": "88", "code": "YYY", "name": "Lando Norris"}
+    ])
+
+    # FastF1 has results with correct Names but different details
+    mock_cls = pd.DataFrame([
+        {"LastName": "Verstappen", "Position": 1},
+        {"LastName": "Norris", "Position": 2}
+    ])
+
+    with patch("f1pred.predict.get_session_classification", return_value=mock_cls):
+        results = _get_actual_positions_for_session(jc, 2026, 4, "sprint_qualifying", roster_view)
+
+        # Should succeed via Fuzzy Name fallback
+        assert results is not None
+        assert not results.isna().all()
+        assert results.iloc[0] == 1
+        assert results.iloc[1] == 2
