@@ -22,7 +22,8 @@ logger = get_logger(__name__)
 
 def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                           ref_date: 'datetime', half_life_days: int = 120,
-                          max_events: int = 200) -> Optional['pd.DataFrame']:
+                          max_events: int = 200,
+                          boost_factor: float = 1.0) -> Optional['pd.DataFrame']:
     """Build a lightweight training DataFrame from historical race results.
 
     Uses only columns that overlap with the current event feature matrix ``X_current``
@@ -67,6 +68,8 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         from .features import exponential_weights  # lightweight, no circular dep
 
         prior_w = exponential_weights(prior["date"], d, half_life_days)
+        if boost_factor != 1.0 and "season" in prior.columns:
+            prior_w = np.where(prior["season"] == s, prior_w * boost_factor, prior_w)
         prior["_w"] = prior_w
         prior["_wval"] = (-prior["position"].astype(float) + prior["points"].astype(float)) * prior["_w"]
         form_sums = prior.groupby("driverId")[["_wval", "_w"]].sum()
