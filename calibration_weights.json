@@ -1,17 +1,16 @@
 {
   "ensemble": {
-    "w_gbm": 0.05221722063964579,
-    "w_elo": 0.0,
-    "w_bt": 0.0,
-    "w_mixed": 0.9477827793603543
+    "w_gbm": 0.4,
+    "w_elo": 0.2,
+    "w_bt": 0.2,
+    "w_mixed": 0.2
   },
   "blending": {
-    "gbm_weight": 0.5,
-    "baseline_weight": 0.5,
-    "baseline_team_factor": 6.726813934415592,
-    "baseline_driver_team_factor": 0.0,
-    "grid_factor": 0.8,
-    "current_quali_factor": 0.5
+    "gbm_weight": 0.6,
+    "baseline_weight": 0.4,
+    "baseline_team_factor": 0.7499999999999999,
+    "baseline_driver_team_factor": 0.5,
+    "grid_factor": 0.8
   },
-  "last_race_id": "2025_24"
+  "last_race_id": "2026_1"
 }

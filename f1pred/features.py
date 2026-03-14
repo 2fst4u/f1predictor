@@ -295,6 +295,96 @@ def _parse_races_block(races: List[Dict[str, Any]], session_label: str, cutoff: 
                 })
     return rows
 
+def _fetch_current_season_per_round(
+    jc: 'JolpicaClient',
+    season_str: str,
+    build_cutoff: datetime,
+    executor: 'ThreadPoolExecutor',
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Fetch current-season results round-by-round instead of via bulk endpoint.
+
+    Each completed round's per-round response is immutable and cached permanently
+    by requests_cache.  The most recent completed round is fetched outside the
+    cache to account for late disqualifications / penalty changes.
+
+    Returns (races_blk, qual_blk, sprint_blk) in the same format as the bulk
+    season endpoints so _parse_races_block works unchanged.
+    """
+    import requests_cache as rc
+
+    now = datetime.now(timezone.utc)
+    schedule = jc.get_season_schedule(season_str)
+
+    # Identify candidate rounds (anything up to and including the current weekend)
+    # The end_before filter in collect_historical_results handles session-level pruning.
+    candidates: List[Dict[str, Any]] = []
+    for race in schedule:
+        date_str = race.get("date")
+        if not date_str:
+            continue
+        try:
+            race_dt = datetime.fromisoformat(date_str + "T00:00:00+00:00")
+        except Exception:
+            continue
+        # Fetch data for anything that has started or is upcoming; 
+        # API will return empty for future results.
+        if race_dt <= now + timedelta(days=7):
+            candidates.append(race)
+
+    if not candidates:
+        return [], [], []
+
+    # The latest round with ANY results is our "unstable" round for DSQ check
+    # We'll just bypass cache for the current/most-recent round to be safe.
+    latest_round = str(candidates[-1].get("round"))
+
+    races_blk: List[Dict[str, Any]] = []
+    qual_blk: List[Dict[str, Any]] = []
+    sprint_blk: List[Dict[str, Any]] = []
+
+    def _fetch_round(race_info: Dict[str, Any]) -> Tuple[Dict, Dict, Dict]:
+        """Fetch race/qual/sprint results for a single round."""
+        rnd = str(race_info.get("round"))
+        bypass_cache = (rnd == latest_round)
+
+        def _do_fetch():
+            r_res = jc.get_race_results(season_str, rnd)
+            q_res = jc.get_qualifying_results(season_str, rnd)
+            s_res = jc.get_sprint_results(season_str, rnd)
+            return r_res, q_res, s_res
+
+        if bypass_cache:
+            with rc.disabled():
+                r_res, q_res, s_res = _do_fetch()
+        else:
+            r_res, q_res, s_res = _do_fetch()
+
+        # Wrap in the same structure as bulk endpoints so _parse_races_block
+        # can process them unchanged
+        base = dict(race_info)  # contains season, round, date, Circuit, etc.
+        race_dict = {**base, "Results": r_res}
+        qual_dict = {**base, "QualifyingResults": q_res}
+        sprint_dict = {**base, "SprintResults": s_res}
+        return race_dict, qual_dict, sprint_dict
+
+    # Fetch candidates in parallel
+    futures = {executor.submit(_fetch_round, ri): ri for ri in candidates}
+    for fut in futures:
+        try:
+            race_d, qual_d, sprint_d = fut.result(timeout=30)
+            if any([race_d.get("Results"), qual_d.get("QualifyingResults"), sprint_d.get("SprintResults")]):
+                races_blk.append(race_d)
+                qual_blk.append(qual_d)
+                sprint_blk.append(sprint_d)
+        except Exception as e:
+            rnd_info = futures[fut]
+            logger.info(
+                f"[features] [history] {season_str} R{rnd_info.get('round')}: "
+                f"per-round fetch failed: {e}"
+            )
+
+    return races_blk, qual_blk, sprint_blk
+
 
 def collect_historical_results(
     jc: JolpicaClient,
@@ -353,17 +443,26 @@ def collect_historical_results(
 
             # Fetch from API
             try:
-                # Parallelize IO-bound requests for this season using shared executor
-                f_race = executor.submit(jc.get_season_race_results, str(yr))
-                f_qual = executor.submit(jc.get_season_qualifying_results, str(yr))
-                f_sprint = executor.submit(jc.get_season_sprint_results, str(yr))
+                if is_current_season:
+                    # Current season: fetch per-round to avoid caching the
+                    # evolving bulk endpoint.  Each completed round's result
+                    # is immutable and gets cached individually by
+                    # requests_cache.  The most recent completed round is
+                    # fetched outside the cache to account for late DSQs.
+                    races_blk, qual_blk, sprint_blk = _fetch_current_season_per_round(
+                        jc, str(yr), build_cutoff, executor,
+                    )
+                else:
+                    # Past seasons: efficient bulk fetch (fully cached)
+                    f_race = executor.submit(jc.get_season_race_results, str(yr))
+                    f_qual = executor.submit(jc.get_season_qualifying_results, str(yr))
+                    f_sprint = executor.submit(jc.get_season_sprint_results, str(yr))
 
-                # Add timeouts to prevent hanging indefinitely
-                races_blk = f_race.result(timeout=30)
-                qual_blk = f_qual.result(timeout=30)
-                sprint_blk = f_sprint.result(timeout=30)
+                    races_blk = f_race.result(timeout=30)
+                    qual_blk = f_qual.result(timeout=30)
+                    sprint_blk = f_sprint.result(timeout=30)
             except Exception as e:
-                logger.info(f"[features] [history] {yr}: bulk fetch failed: {e}; skipping year")
+                logger.info(f"[features] [history] {yr}: fetch failed: {e}; skipping year")
                 continue
 
             r_rows = _parse_races_block(races_blk, "race", build_cutoff)
