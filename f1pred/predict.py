@@ -13,7 +13,7 @@ from colorama import Fore, Style
 from .util import get_logger, ensure_dirs, StatusSpinner, sanitize_for_console, PredictionCache
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
-from .data.fastf1_backend import init_fastf1, get_session_classification, get_session_weather_status
+from .data.fastf1_backend import init_fastf1, get_session_classification, get_session_weather_status, patch_missing_positions
 
 __all__ = [
     "run_predictions_for_event",
@@ -189,13 +189,13 @@ def _get_actual_positions_for_session(
 
         # Add common fallbacks
         if sess == "race":
-            ff1_names.append("R")
+            ff1_names.extend(["Race", "R"])
         elif sess == "qualifying":
-            ff1_names.append("Q")
+            ff1_names.extend(["Qualifying", "Q"])
         elif sess == "sprint":
-            ff1_names.append("S")
+            ff1_names.extend(["Sprint", "S"])
         elif sess == "sprint_qualifying":
-            ff1_names.extend(["SQ", "Sprint Shootout", "Shootout"])
+            ff1_names.extend(["Sprint Qualifying", "SQ", "Sprint Shootout", "Shootout"])
 
         # We also need a roster to check completeness via _get_actual_positions_for_session
         if roster_view is None or roster_view.empty:
@@ -203,7 +203,11 @@ def _get_actual_positions_for_session(
 
         for ff1_sess_name in ff1_names:
             try:
+                # get_session_classification now robustly fixes and derives positions
                 cls = get_session_classification(season_i, round_i, ff1_sess_name)
+                # Final check for deriveable positions if the session just finished
+                if cls is not None:
+                     cls = patch_missing_positions(ff1_sess_name, cls)
             except Exception as e:
                 logger.debug(f"[predict] Classification fetch failed for {ff1_sess_name}: {e}")
                 cls = None
@@ -211,30 +215,10 @@ def _get_actual_positions_for_session(
             if cls is not None and hasattr(cls, "empty") and not cls.empty:
                 # Some sessions like Sprint Qualifying might have a classification
                 # but no actual positions yet if results are still being finalized.
-                pos_cols = ["Position", "ClassifiedPosition", "GridPosition"]
-                has_any_pos = False
-                for c in pos_cols:
-                    if c in cls.columns:
-                        valid_vals = pd.to_numeric(cls[c], errors="coerce").dropna()
-                        if not valid_vals.empty:
-                            has_any_pos = True
-                            break
+                pos_col = cls.get("Position")
+                has_any_pos = pos_col is not None and pd.to_numeric(pos_col, errors="coerce").notna().any()
 
                 # Special Case: Q-times check
-                if not has_any_pos:
-                    for q_col in ["Q1", "Q2", "Q3"]:
-                        if q_col in cls.columns:
-                            c_data = cls[q_col]
-                            if hasattr(c_data, 'dt'):
-                                if not c_data.dropna().empty:
-                                    has_any_pos = True
-                                    break
-                            else:
-                                s_data = c_data.astype(str).str.strip().replace(['NaT', 'nan', ''], [np.nan, np.nan, np.nan])
-                                if s_data.notna().any():
-                                    has_any_pos = True
-                                    break
-
                 if not has_any_pos:
                     logger.info(f"[predict] Classification found for {ff1_sess_name} but contains no positions yet.")
                     continue

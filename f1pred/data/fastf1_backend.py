@@ -89,20 +89,34 @@ def get_session_times(ev, session_name: str) -> Optional[Tuple[datetime, datetim
 
 
 def get_session_classification(season: int, round_no: int, session_name: str):
+    """Fetch session results/classification and apply patches/derivations if needed."""
     try:
         ev = get_event(season, round_no)
         if ev is None:
             return None
         sess = ev.get_session(session_name)
         sess.load(telemetry=False, laps=False, weather=False, messages=False)
+
+        # Try to get results from sess.results (often populated for finished sessions)
         results = getattr(sess, "results", None)
+
+        # Fallback to get_classification() if results is empty
+        if results is None or (hasattr(results, "empty") and results.empty):
+            try:
+                results = sess.get_classification()
+            except Exception:
+                results = None
+
         if results is not None and hasattr(results, "empty") and not results.empty:
             results = _patch_missing_positions(sess, results)
-            return results
-        try:
-            return sess.get_classification()
-        except Exception:
-            return None
+        elif results is not None and not hasattr(results, "empty"):
+            # Results exists but might not be a DataFrame (unexpected but possible)
+            pass
+        elif results is not None and hasattr(results, "empty") and results.empty:
+            # results exists but is empty DataFrame, still try to patch it via session object
+            results = _patch_missing_positions(sess, results)
+
+        return results
     except Exception:
         return None
 
@@ -118,26 +132,87 @@ def _patch_missing_positions(sess, results):
     import pandas as pd
 
     pos_col = results.get("Position")
-    if pos_col is None:
-        return results
-    if pd.to_numeric(pos_col, errors="coerce").notna().any():
+    if pos_col is not None and pd.to_numeric(pos_col, errors="coerce").notna().any():
         return results  # positions already populated, nothing to do
 
     try:
+        # 1. Attempt internal FastF1 fix for qualifying sessions (Deleted-column bug)
         # Laps may not have been loaded yet — reload with laps=True so we can
         # fix the Deleted column and recompute the classification.
         sess.load(telemetry=False, laps=True, weather=False, messages=False)
         laps = getattr(sess, "laps", None)
-        if laps is None or laps.empty:
+
+        if laps is not None and not laps.empty:
+            if "Deleted" in laps.columns and laps["Deleted"].isna().any():
+                laps["Deleted"] = laps["Deleted"].fillna(False).infer_objects(copy=False).astype(bool)
+                sess._calculate_quali_like_session_results(force=True)
+                results = getattr(sess, "results", results)
+
+                # Check if fix worked
+                pos_col = results.get("Position")
+                if pos_col is not None and pd.to_numeric(pos_col, errors="coerce").notna().any():
+                    logger.info("Patched FastF1 Deleted-column bug for %s; positions now available", sess.name)
+                    return results
+
+        # 2. Manual derivation as fallback (Q-times or Lap times)
+        return patch_missing_positions(sess.name, results)
+
+    except Exception as exc:
+        logger.debug("_patch_missing_positions failed: %s", exc)
+
+    return results
+
+
+def patch_missing_positions(session_name: str, results: 'pd.DataFrame') -> 'pd.DataFrame':
+    """Apply ranking derivation logic to a classification dataframe without needing a full session object."""
+    import pandas as pd
+    import numpy as np
+
+    pos_col = results.get("Position")
+    if pos_col is not None and pd.to_numeric(pos_col, errors="coerce").notna().any():
+        return results
+
+    try:
+        results = results.copy()
+        s_name = session_name.lower()
+        # SQ and Shootout are also quali-style
+        is_quali = any(x in s_name for x in ("qualifying", "shootout", "practice", "q", "sq"))
+
+        derived = False
+        if is_quali:
+            # Sort: Q3 > Q2 > Q1. Lower time is better.
+            q_cols = [c for c in ["Q3", "Q2", "Q1"] if c in results.columns]
+            if q_cols:
+                for c in q_cols:
+                    # Clean up strings like 'NaT' or empty before conversion
+                    if results[c].dtype == object:
+                         results[c] = results[c].astype(str).str.strip().replace(['NaT', 'nan', ''], [np.nan, np.nan, np.nan])
+
+                    if not pd.api.types.is_timedelta64_dtype(results[c]):
+                        results[c] = pd.to_timedelta(results[c], errors="coerce")
+
+                # We only derive if there's actual time data
+                if results[q_cols].notna().any().any():
+                    results = results.sort_values(by=q_cols, ascending=True, na_position='last')
+                    results["Position"] = np.arange(1, len(results) + 1)
+                    derived = True
+        else:
+            # Race/Sprint: Sort by Time (total) then BestLapTime. Lower is better.
+            t_cols = [c for c in ["Time", "BestLapTime"] if c in results.columns]
+            if t_cols:
+                for c in t_cols:
+                    if not pd.api.types.is_timedelta64_dtype(results[c]):
+                        results[c] = pd.to_timedelta(results[c], errors="coerce")
+
+                if results[t_cols].notna().any().any():
+                    results = results.sort_values(by=t_cols, ascending=True, na_position='last')
+                    results["Position"] = np.arange(1, len(results) + 1)
+                    derived = True
+
+        if derived:
+            logger.info("Derived rankings for %s from available session times", session_name)
             return results
 
-        if "Deleted" in laps.columns and laps["Deleted"].isna().any():
-            laps["Deleted"] = laps["Deleted"].fillna(False).infer_objects(copy=False).astype(bool)
-            sess._calculate_quali_like_session_results(force=True)
-            patched = getattr(sess, "results", None)
-            if patched is not None and not patched.empty:
-                logger.info("Patched FastF1 Deleted-column bug for %s; positions now available", sess.name)
-                return patched
     except Exception as exc:
         logger.debug("_patch_missing_positions failed: %s", exc)
 
