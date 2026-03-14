@@ -396,8 +396,8 @@ def _run_single_prediction(
         if not np.isfinite(sd) or sd < 1e-6:
             sd = 1.0
         pace_hat = (pace_hat - mu) / sd
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[predict._run_single] Pace standardization failed: %s", e)
     
     # Historical results for ensemble models
     roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
@@ -414,18 +414,18 @@ def _run_single_prediction(
     try:
         elo_model = EloModel().fit(hist)
         elo_pace = elo_model.predict(X)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[predict._run_single] Elo model failed: %s", e)
     try:
         bt_model = BradleyTerryModel().fit(hist)
         bt_pace = bt_model.predict(X)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[predict._run_single] BT model failed: %s", e)
     try:
         mixed_model = MixedEffectsLikeModel().fit(hist)
         mixed_pace = mixed_model.predict(X)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[predict._run_single] Mixed model failed: %s", e)
     
     # Combine pace
     try:
@@ -437,7 +437,8 @@ def _run_single_prediction(
             mixed_pace=mixed_pace,
             cfg=ens_cfg,
         )
-    except Exception:
+    except Exception as e:
+        logger.warning("[predict._run_single] Ensemble combine failed, using GBM pace: %s", e)
         combined_pace = pace_hat
     
     # DNF probabilities (only for race/sprint)
@@ -445,7 +446,8 @@ def _run_single_prediction(
     if sess in ("race", "sprint"):
         try:
             dnf_prob = estimate_dnf_probabilities(hist, X, cfg=cfg, event_weather=meta.get("weather"))
-        except Exception:
+        except Exception as e:
+            logger.warning("[predict._run_single] DNF estimation failed, using default 0.12: %s", e)
             dnf_prob[:] = 0.12
     
     # Monte Carlo simulation
@@ -480,11 +482,17 @@ def run_predictions_for_event(
     sessions: List[str],
     return_results: bool = False,
     progress_callback: Optional[Callable[[str], None]] = None,
+    use_actuals: bool = True,
 ):
     """Generate predictions for given event with terminal output only.
 
     Returns a dict when return_results=True for the backtester.
     Never raises on normal control flow; logs and skips sessions if necessary.
+
+    Args:
+        use_actuals: When True (default), finished sessions are short-circuited
+            with actual results for instant display.  Set to False for backtesting
+            and calibration so that the full prediction pipeline is always exercised.
     """
     import numpy as np
     import pandas as pd
@@ -639,13 +647,14 @@ def run_predictions_for_event(
 
                 # 1.5 Optimization check: Check for actual results if session is in the past
                 # We do this before heavy feature building to ensure near-instant results for finished sessions
-                if roster is not None and not roster.empty:
+                # Skip when use_actuals=False (backtesting/calibration) to exercise the full prediction pipeline
+                if use_actuals and roster is not None and not roster.empty:
                     actual_positions = _get_actual_positions_for_session(
                         jc, season_i, round_i, sess,
                         roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
                     )
 
-                if actual_positions is not None and not actual_positions.isna().all():
+                if use_actuals and actual_positions is not None and not actual_positions.isna().all():
                     spinner.update(f"Using actual results for {sess}...")
                     logger.info(f"[predict] Using actual results for {season_i} R{round_i} {sess}")
 
@@ -787,10 +796,11 @@ def run_predictions_for_event(
 
                                     if precursor_actuals is not None and not precursor_actuals.isna().all():
                                         logger.info(f"[predict] Using actual results for {precursor} as grid")
-                                        # Use .fillna() to only fill missing ones, or overwrite?
-                                        # Usually if one is missing, they are all missing or it's an error.
-                                        # Let's map it via driverId to avoid index mismatch crashes.
-                                        X["grid"] = X["grid"].fillna(X["driverId"].map(precursor_actuals))
+                                        # Build explicit driverId -> position map from roster-aligned Series.
+                                        # precursor_actuals is indexed by roster row-index, not by driverId,
+                                        # so we must zip against roster["driverId"] for correct mapping.
+                                        precursor_map = dict(zip(roster["driverId"], precursor_actuals))
+                                        X["grid"] = X["grid"].fillna(X["driverId"].map(precursor_map))
 
                                     else:
                                         # 3. Run simulation if not in loop and no actuals
@@ -814,9 +824,29 @@ def run_predictions_for_event(
                             else:
                                 logger.info(f"[predict] Using actual grid for {sess}")
 
-                        # Train pace model
+                        # Historical results for this roster (fetched before pace model
+                        # so we can build out-of-sample training data)
+                        roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
+                        hist = collect_historical_results(
+                            jc,
+                            season=season_i,
+                            end_before=ref_date,
+                            lookback_years=75,
+                            roster_driver_ids=roster_ids,
+                        )
+
+                        # Train pace model (out-of-sample when possible)
                         spinner.update("Training pace model...")
-                        _, pace_hat, _ = train_pace_model(X, session_type=sess, cfg=cfg)
+                        hist_X_train = None
+                        try:
+                            from .models import build_hist_training_X
+                            hist_X_train = build_hist_training_X(
+                                hist, X, ref_date,
+                                half_life_days=cfg.modelling.recency_half_life_days.base,
+                            )
+                        except Exception as e:
+                            logger.info(f"[predict] Could not build historical training set: {e}")
+                        _, pace_hat, _ = train_pace_model(X, session_type=sess, cfg=cfg, hist_X=hist_X_train)
 
                         # Standardize GBM pace (z-score) but preserve variance
                         try:
@@ -829,16 +859,6 @@ def run_predictions_for_event(
                             logger.info("[predict] GBM pace standardized: mean=%.4f, std=%.4f", mu, sd)
                         except Exception as e:
                             logger.warning("[predict] Pace standardization failed: %s; using raw GBM pace", e)
-
-                        # Historical results for this roster
-                        roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
-                        hist = collect_historical_results(
-                            jc,
-                            season=season_i,
-                            end_before=ref_date,
-                            lookback_years=75,
-                            roster_driver_ids=roster_ids,
-                        )
 
                         # --- Ensemble skill components ---
                         spinner.update("Running ensemble models...")
@@ -919,11 +939,13 @@ def run_predictions_for_event(
                             compute_pairwise=return_results,
                         )
 
-                        # Analytical probabilities
+                        # Analytical probabilities — blend weight is configurable
+                        # (can also be overridden by calibration weights)
                         analytical_p_win = plackett_luce_scores(-combined_pace, temperature=1.0)
                         p_top3 = prob_matrix[:, :3].sum(axis=1)
                         sim_p_win = prob_matrix[:, 0]
-                        p_win = 0.5 * sim_p_win + 0.5 * analytical_p_win
+                        aw = getattr(cfg.modelling.blending, "analytical_win_weight", 0.5)
+                        p_win = (1.0 - aw) * sim_p_win + aw * analytical_p_win
 
                         order = np.argsort(mean_pos)
                         ranked = X.iloc[order].reset_index(drop=True)

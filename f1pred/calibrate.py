@@ -293,14 +293,10 @@ class CalibrationManager:
                     continue
                 
                 # Ensemble scores
-                # History up to this race
+                # History up to this race (strict temporal cutoff — no leakage of target event)
                 hist_subset = all_hist[all_hist["date"] < d]
                 
-                elo = EloModel().fit(hist_subset).predict(X_evt)
-                bt = BradleyTerryModel().fit(hist_subset).predict(X_evt)
-                # Use recent history for training to capture current form
-                # Recency weighting (365 days) is crucial to avoid valuing 2021 results equal to 2024
-                # We fit on history < d, but with recency!
+                # Use recency weighting (365 days) to avoid valuing old results equal to recent ones
                 elo = EloModel().fit(hist_subset).predict(X_evt)
                 bt = BradleyTerryModel().fit(hist_subset, half_life_days=365).predict(X_evt)
                 mixed = MixedEffectsLikeModel().fit(hist_subset, half_life_days=365).predict(X_evt)
@@ -320,12 +316,15 @@ class CalibrationManager:
                 base_team = -X_evt.get("team_form_index", pd.Series(0, index=X_evt.index)).fillna(0).astype(float).values
                 base_dt = -X_evt.get("driver_team_form_index", pd.Series(0, index=X_evt.index)).fillna(0).astype(float).values
                 
-                # Get actual results for target
-                actuals = X_evt.merge(
-                    calib_races[calib_races["season"]==s][["driverId", "position"]],
+                # Get actual results for target — merge on (season, round, driverId) to avoid
+                # cross-round contamination when the same driver appears in multiple rounds.
+                actuals = X_evt.assign(_calib_season=s, _calib_round=r).merge(
+                    calib_races[
+                        (calib_races["season"] == s) & (calib_races["round"] == r)
+                    ][["driverId", "position"]].drop_duplicates(subset=["driverId"]),
                     on="driverId",
                     how="left"
-                )
+                ).drop(columns=["_calib_season", "_calib_round"], errors="ignore")
                 
                 # We need actual position to minimize rank error
                 # Filter to drivers who finished (or keep all and handle NaN)

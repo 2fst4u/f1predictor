@@ -35,11 +35,29 @@ def simulate_grid(
                           Defaults to True for backward compatibility.
     """
     rng = np.random.RandomState(random_seed)
+
+    # Input sanitization: ensure finite values
+    pace_index = np.asarray(pace_index, dtype=float)
+    dnf_prob = np.asarray(dnf_prob, dtype=float)
+
     n = len(pace_index)
     
     if n == 0:
         return np.array([]).reshape(0, 0), np.array([]), np.array([]).reshape(0, 0)
-    
+
+    # Replace non-finite pace values with the median of finite values
+    finite_mask = np.isfinite(pace_index)
+    if not finite_mask.all():
+        fill = float(np.median(pace_index[finite_mask])) if finite_mask.any() else 0.0
+        pace_index = np.where(finite_mask, pace_index, fill)
+
+    # Clamp DNF probabilities to [0, 1] and replace non-finite with 0
+    dnf_prob = np.where(np.isfinite(dnf_prob), dnf_prob, 0.0)
+    dnf_prob = np.clip(dnf_prob, 0.0, 1.0)
+
+    if len(dnf_prob) != n:
+        dnf_prob = np.full(n, 0.08, dtype=float)
+
     # Calculate noise scale based on pace spread
     pace_range = float(np.ptp(pace_index))  # max - min
     

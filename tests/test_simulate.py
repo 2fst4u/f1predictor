@@ -90,3 +90,30 @@ def test_simulate_grid_empty():
     assert prob_matrix.shape == (0, 0)
     assert mean_pos.shape == (0,)
     assert pairwise.shape == (0, 0)
+
+
+def test_simulate_grid_nan_inf_sanitization():
+    """Test that simulate_grid handles NaN and Inf values in inputs."""
+    n = 5
+    pace_index = np.array([1.0, np.nan, 3.0, np.inf, -np.inf])
+    dnf_prob = np.array([0.1, np.nan, 0.2, 1.5, -0.1])
+
+    prob_matrix, mean_pos, pairwise = simulate_grid(pace_index, dnf_prob, draws=1000)
+
+    assert prob_matrix.shape == (n, n)
+    assert len(mean_pos) == n
+    assert np.all(np.isfinite(mean_pos))
+    # Row sums should be ~1
+    assert np.allclose(prob_matrix.sum(axis=1), 1.0, atol=0.01)
+
+
+def test_simulate_grid_dnf_prob_length_mismatch():
+    """Test that simulate_grid handles mismatched dnf_prob length."""
+    pace_index = np.array([1.0, 2.0, 3.0])
+    dnf_prob = np.array([0.1])  # wrong length
+
+    prob_matrix, mean_pos, _ = simulate_grid(pace_index, dnf_prob, draws=500)
+
+    assert prob_matrix.shape == (3, 3)
+    assert len(mean_pos) == 3
+    assert np.all(np.isfinite(mean_pos))

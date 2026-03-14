@@ -19,6 +19,91 @@ __all__ = [
 
 logger = get_logger(__name__)
 
+
+def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
+                          ref_date: 'datetime', half_life_days: int = 120,
+                          max_events: int = 200) -> Optional['pd.DataFrame']:
+    """Build a lightweight training DataFrame from historical race results.
+
+    Uses only columns that overlap with the current event feature matrix ``X_current``
+    so that the GBM pipeline can be trained out-of-sample and then predict on
+    ``X_current`` without column mismatch.
+
+    The per-driver ``form_index`` is computed at each historical event's date so the
+    GBM can learn the relationship between features and outcome quality *across*
+    many events rather than memorising a single grid.
+
+    Returns ``None`` if insufficient history is available.
+    """
+    import numpy as np
+    import pandas as pd
+
+    if hist is None or hist.empty:
+        return None
+
+    races = hist[hist["session"] == "race"].dropna(subset=["driverId", "position", "date"]).copy()
+    if len(races) < 40:  # not enough data to meaningfully train
+        return None
+
+    races["points"] = races["points"].fillna(0.0)
+
+    # Identify the most recent events (by unique (season, round) pairs)
+    event_keys = races[["season", "round", "date"]].drop_duplicates().sort_values("date")
+    event_keys = event_keys.tail(max_events)
+
+    rows = []
+    for _, evt in event_keys.iterrows():
+        s, r, d = evt["season"], evt["round"], evt["date"]
+        evt_mask = (races["season"] == s) & (races["round"] == r)
+        evt_rows = races[evt_mask].copy()
+        if evt_rows.empty:
+            continue
+
+        # Compute per-driver form_index at the time of this event (history < event date)
+        prior = races[races["date"] < d].copy()
+        if prior.empty:
+            continue
+
+        from .features import exponential_weights  # lightweight, no circular dep
+
+        prior_w = exponential_weights(prior["date"], d, half_life_days)
+        prior["_w"] = prior_w
+        prior["_wval"] = (-prior["position"].astype(float) + prior["points"].astype(float)) * prior["_w"]
+        form_sums = prior.groupby("driverId")[["_wval", "_w"]].sum()
+        form_sums["form_index"] = form_sums["_wval"] / form_sums["_w"].clip(lower=1e-6)
+        form_map = form_sums["form_index"].to_dict()
+
+        for _, row in evt_rows.iterrows():
+            drv = row["driverId"]
+            fi = form_map.get(drv)
+            if fi is None:
+                continue
+            sample = {
+                "driverId": drv,
+                "constructorId": row.get("constructorId"),
+                "form_index": fi,
+                "grid": float(row.get("grid", np.nan)),
+                "is_race": 1,
+                "is_qualifying": 0,
+                "is_sprint": 0,
+            }
+            rows.append(sample)
+
+    if not rows:
+        return None
+
+    hist_df = pd.DataFrame(rows)
+
+    # Ensure all numeric feature columns from X_current exist (fill missing with NaN)
+    for col in X_current.columns:
+        if col not in hist_df.columns and X_current[col].dtype in ("float64", "int64", "float32", "int32"):
+            hist_df[col] = np.nan
+
+    logger.info("[models] Built historical training set: %d samples from %d events",
+                len(hist_df), len(event_keys))
+    return hist_df
+
+
 def _split_feature_columns(X: 'pd.DataFrame', exclude: List[str]) -> Tuple[List[str], List[str], List[str]]:
     """
     Returns (all_features, numeric_cols, categorical_cols), excluding provided columns.
@@ -29,7 +114,8 @@ def _split_feature_columns(X: 'pd.DataFrame', exclude: List[str]) -> Tuple[List[
     return features, num_cols, cat_cols
 
 
-def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> Tuple[Any, 'np.ndarray', list]:
+def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
+                     hist_X: Optional['pd.DataFrame'] = None) -> Tuple[Any, 'np.ndarray', list]:
     """
     Train a model producing a "pace index" (lower is better/faster) per driver.
 
@@ -38,6 +124,15 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
 
     The model learns to predict pace from features, then we blend with a baseline
     derived from form indices to ensure robust predictions even with limited features.
+
+    Args:
+        X: Feature matrix for the current event (inference target).
+        session_type: Session type ('race', 'qualifying', 'sprint', etc.).
+        cfg: Application configuration object.
+        hist_X: Optional historical feature matrix to train on (out-of-sample).
+            When provided, the GBM is trained on hist_X and predicted on X,
+            preventing train/predict leakage.  When None, falls back to fitting
+            on the current event X (legacy behaviour).
     """
     import numpy as np
     import pandas as pd
@@ -47,11 +142,20 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
     from sklearn.impute import SimpleImputer
     from sklearn.ensemble import GradientBoostingRegressor
 
-    # Target: form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
-    if "form_index" not in X.columns:
-        y = np.zeros(len(X), dtype=float)
+    # Determine training data: use historical data when available to avoid
+    # fitting and predicting on the same event (train/predict leakage).
+    if hist_X is not None and not hist_X.empty and "form_index" in hist_X.columns:
+        X_train = hist_X
+        logger.info("[models] Training GBM on %d historical samples (out-of-sample)", len(hist_X))
     else:
-        y = -X["form_index"].astype(float).values
+        X_train = X
+        logger.info("[models] Training GBM on current event (%d rows, no historical X available)", len(X))
+
+    # Target: form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
+    if "form_index" not in X_train.columns:
+        y = np.zeros(len(X_train), dtype=float)
+    else:
+        y = -X_train["form_index"].astype(float).values
 
     # Features (exclude identifiers, session meta, and target to prevent leakage)
     exclude_cols = [
@@ -59,11 +163,11 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
         "session_type", "form_index", "current_quali_pos"
     ]
     
-    # Also exclude columns that are entirely NaN (e.g., grid for qualifying)
-    all_nan_cols = [c for c in X.columns if c not in exclude_cols and X[c].isna().all()]
+    # Also exclude columns that are entirely NaN in the training set
+    all_nan_cols = [c for c in X_train.columns if c not in exclude_cols and X_train[c].isna().all()]
     exclude_cols.extend(all_nan_cols)
     
-    features, num_cols, cat_cols = _split_feature_columns(X, exclude=exclude_cols)
+    features, num_cols, cat_cols = _split_feature_columns(X_train, exclude=exclude_cols)
 
     # Build preprocessing pipeline
     num_pipe = Pipeline(steps=[
@@ -136,14 +240,20 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None) -> T
 
     pipe = Pipeline(steps=[("pre", pre), ("model", model)])
 
-    # Fit model
-    Xmat = X[features].copy()
-    if Xmat.shape[1] == 0:
-        Xmat = pd.DataFrame({"const": np.ones(len(X), dtype=float)})
+    # Fit model on training data
+    Xmat_train = X_train[features].copy()
+    if Xmat_train.shape[1] == 0:
+        Xmat_train = pd.DataFrame({"const": np.ones(len(X_train), dtype=float)})
         pipe = Pipeline(steps=[("pre", "passthrough"), ("model", model)])
     
-    pipe.fit(Xmat, y)
-    yhat = pipe.predict(Xmat)
+    pipe.fit(Xmat_train, y)
+
+    # Predict on the current event (inference target), not the training data
+    # Align inference columns to training features for consistency
+    X_infer = X[features].copy() if set(features).issubset(X.columns) else X.reindex(columns=features)
+    if Xmat_train.shape[1] == 0 or (Xmat_train.columns.tolist() == ["const"]):
+        X_infer = pd.DataFrame({"const": np.ones(len(X), dtype=float)})
+    yhat = pipe.predict(X_infer)
 
     # Build baseline from form indices (for robustness)
     # form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
