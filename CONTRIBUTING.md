@@ -25,6 +25,7 @@ Thank you for your interest in contributing to F1 Predictor!
 ## Code Standards
 
 - Follow PEP 8 style guidelines where possible
+- Run `ruff check .` to perform code linting and style checking
 - Use type hints for function signatures
 - Keep functions focused and readable
 - Add docstrings for complex functions
@@ -35,6 +36,7 @@ Thank you for your interest in contributing to F1 Predictor!
 Before submitting, ensure:
 
 - The tool runs without errors (`python main.py --round next`)
+- Code passes linting (`ruff check .`)
 - All tests pass locally (`make test`)
 - Code coverage does not drop below the required threshold
 
