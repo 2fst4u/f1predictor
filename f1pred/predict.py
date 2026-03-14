@@ -199,6 +199,9 @@ def _get_actual_positions_for_session(
         for ff1_sess_name in ff1_names:
             cls = get_session_classification(season_i, round_i, ff1_sess_name)
             if cls is not None and hasattr(cls, "empty") and not cls.empty:
+                # Log success for tracking
+                logger.info(f"[predict] Found classification results for {season_i} R{round_i} {ff1_sess_name}")
+
                 ff1_map = None
                 if "DriverNumber" in cls.columns and "number" in roster_view.columns:
                     num_series = pd.to_numeric(roster_view["number"], errors="coerce").astype("Int64")

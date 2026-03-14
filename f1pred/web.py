@@ -166,7 +166,10 @@ async def get_event_status(
                         elif s == "sprint":
                             has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
                         elif s == "sprint_qualifying":
-                            # proxy check
+                            # proxy check: sprint results usually aren't available until after the sprint race.
+                            # We can also check if a roster was found as a weak signal, but the
+                            # primary check (Step 1 above) using FastF1 should have handled this
+                            # if the session actually happened and data is live.
                             has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
                 except Exception:
                     has_results = False
