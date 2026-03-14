@@ -133,12 +133,8 @@ async def get_event_status(
         sessions = []
 
         # Derive roster once for the round (Optimization: avoid redundant deep scans)
-        from .roster import derive_roster
-        import pandas as pd
-        roster_entries = derive_roster(jc, str(s_i), str(r_i))
-        roster = pd.DataFrame(roster_entries) if roster_entries else None
-        if roster is not None and "permanentNumber" in roster.columns:
-            roster["number"] = roster["permanentNumber"]
+        from .features import build_roster
+        roster = build_roster(jc, str(s_i), str(r_i), event_dt=None)
 
         # Check for each session if it exists in race_info and if results exist
         for s in all_possible:
@@ -156,18 +152,23 @@ async def get_event_status(
                 try:
                     from .predict import _get_actual_positions_for_session
 
+                    # 1. Primary check: Use FastF1 results if roster is available
                     if roster is not None and not roster.empty:
-                        # But we need a roster to check completeness via _get_actual_positions_for_session
                         acts = _get_actual_positions_for_session(jc, s_i, r_i, s, roster)
                         has_results = acts is not None and not acts.isna().all()
-                    else:
-                        # Fallback to simple Jolpica check if roster fails
+
+                    # 2. Secondary check: Fallback to Jolpica if FastF1 didn't have data
+                    if not has_results:
                         if s == "race":
                             has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
                         elif s == "qualifying":
                             has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
                         elif s == "sprint":
                             has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
+                        elif s == "sprint_qualifying":
+                            # No Jolpica endpoint for sprint qualifying; rely on
+                            # the FastF1 primary check above.
+                            pass
                 except Exception:
                     has_results = False
 

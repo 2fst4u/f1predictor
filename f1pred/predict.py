@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple, Callable
 from datetime import datetime, timezone, timedelta
 
+import numpy as np
 from colorama import Fore, Style
 
 from .util import get_logger, ensure_dirs, StatusSpinner, sanitize_for_console, PredictionCache
@@ -159,46 +160,146 @@ def _get_actual_positions_for_session(
         amap = None
         if sess == "race":
             act = jc.get_race_results(str(season_i), str(round_i))
-            amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position")}
+            amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position") and str(r.get("position")).isdigit()}
         elif sess == "qualifying":
             act = jc.get_qualifying_results(str(season_i), str(round_i))
-            amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position")}
+            amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position") and str(r.get("position")).isdigit()}
         elif sess == "sprint":
             act = jc.get_sprint_results(str(season_i), str(round_i))
-            amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position")}
+            amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position") and str(r.get("position")).isdigit()}
+        elif sess == "sprint_qualifying":
+            # NOTE: Ergast/Jolpica traditionally does not have a standard 'sprint_qualifying' endpoint
+            # like /qualifying.json or /sprint.json. If it did, we'd add it here.
+            pass
 
         # If Jolpica provided results, check if they are complete (at least as many as in roster)
         if amap and len(amap) >= len(roster_view):
             return roster_view["driverId"].map(amap)
 
         # 2. Try FastF1 if Jolpica is missing, incomplete, or if sess is sprint_qualifying
-        ff1_sess_name = {
+        ff1_names = []
+        base_name = {
             "race": "Race",
             "qualifying": "Qualifying",
             "sprint": "Sprint",
-            "sprint_qualifying": "Sprint Shootout"
+            "sprint_qualifying": "Sprint Qualifying"
         }.get(sess)
+        if base_name:
+            ff1_names.append(base_name)
 
-        if ff1_sess_name:
-            cls = get_session_classification(season_i, round_i, ff1_sess_name)
+        # Add common fallbacks
+        if sess == "race":
+            ff1_names.append("R")
+        elif sess == "qualifying":
+            ff1_names.append("Q")
+        elif sess == "sprint":
+            ff1_names.append("S")
+        elif sess == "sprint_qualifying":
+            ff1_names.extend(["SQ", "Sprint Shootout", "Shootout"])
+
+        # We also need a roster to check completeness via _get_actual_positions_for_session
+        if roster_view is None or roster_view.empty:
+            return None
+
+        for ff1_sess_name in ff1_names:
+            try:
+                cls = get_session_classification(season_i, round_i, ff1_sess_name)
+            except Exception as e:
+                logger.debug(f"[predict] Classification fetch failed for {ff1_sess_name}: {e}")
+                cls = None
+
             if cls is not None and hasattr(cls, "empty") and not cls.empty:
-                ff1_map = None
-                if "DriverNumber" in cls.columns:
-                    num_series = pd.to_numeric(roster_view["number"], errors="coerce").astype("Int64")
-                    num_to_pos = dict(
-                        cls.astype({"DriverNumber": int})[
-                            ["DriverNumber", "Position"]
-                        ].values
-                    )
-                    ff1_map = num_series.map(num_to_pos)
-                elif "Abbreviation" in cls.columns:
-                    code_series = roster_view["code"].astype(str)
-                    abbr_to_pos = dict(
-                        cls[["Abbreviation", "Position"]].values
-                    )
-                    ff1_map = code_series.map(abbr_to_pos)
+                # Some sessions like Sprint Qualifying might have a classification
+                # but no actual positions yet if results are still being finalized.
+                pos_cols = ["Position", "ClassifiedPosition", "GridPosition"]
+                has_any_pos = False
+                for c in pos_cols:
+                    if c in cls.columns:
+                        valid_vals = pd.to_numeric(cls[c], errors="coerce").dropna()
+                        if not valid_vals.empty:
+                            has_any_pos = True
+                            break
 
-                if ff1_map is not None:
+                # Special Case: Q-times check
+                if not has_any_pos:
+                    for q_col in ["Q1", "Q2", "Q3"]:
+                        if q_col in cls.columns:
+                            c_data = cls[q_col]
+                            if hasattr(c_data, 'dt'):
+                                if not c_data.dropna().empty:
+                                    has_any_pos = True
+                                    break
+                            else:
+                                s_data = c_data.astype(str).str.strip().replace(['NaT', 'nan', ''], [np.nan, np.nan, np.nan])
+                                if s_data.notna().any():
+                                    has_any_pos = True
+                                    break
+
+                if not has_any_pos:
+                    logger.info(f"[predict] Classification found for {ff1_sess_name} but contains no positions yet.")
+                    continue
+
+                # Robustness check: Ensure results actually exist in the classification
+                # FastF1 sometimes returns a dataframe with columns but 0 rows before the session
+                if cls.shape[0] == 0:
+                    continue
+
+                # Log success for tracking
+                logger.info(f"[predict] Found classification results for {season_i} R{round_i} {ff1_sess_name}")
+
+                ff1_map = None
+                if "DriverNumber" in cls.columns and "number" in roster_view.columns:
+                    num_series = pd.to_numeric(roster_view["number"], errors="coerce").astype("Int64")
+                    # Robustly convert DriverNumber and Position to numeric
+                    cls_clean = cls.copy()
+                    cls_clean["DriverNumber"] = pd.to_numeric(cls_clean.get("DriverNumber"), errors="coerce")
+                    cls_clean["Position"] = pd.to_numeric(cls_clean.get("Position"), errors="coerce")
+                    cls_clean = cls_clean.dropna(subset=["DriverNumber", "Position"])
+
+                    if not cls_clean.empty:
+                        num_to_pos = dict(
+                            cls_clean.astype({"DriverNumber": int, "Position": int})[
+                                ["DriverNumber", "Position"]
+                            ].values
+                        )
+                        ff1_map = num_series.map(num_to_pos)
+
+                if (ff1_map is None or ff1_map.isna().all()) and "Abbreviation" in cls.columns and "code" in roster_view.columns:
+                    # Normalize casing and whitespace for robust matching
+                    code_series = roster_view["code"].astype(str).str.strip().str.upper()
+                    cls_clean = cls.copy()
+                    cls_clean["Position"] = pd.to_numeric(cls_clean.get("Position"), errors="coerce")
+                    cls_clean["Abbreviation"] = cls_clean["Abbreviation"].astype(str).str.strip().str.upper()
+                    cls_clean = cls_clean.dropna(subset=["Abbreviation", "Position"])
+
+                    if not cls_clean.empty:
+                        abbr_to_pos = dict(
+                            cls_clean.astype({"Position": int})[
+                                ["Abbreviation", "Position"]
+                            ].values
+                        )
+                        ff1_map = code_series.map(abbr_to_pos)
+
+                # 3. Fuzzy Name Match fallback
+                if (ff1_map is None or ff1_map.isna().all()) and "LastName" in cls.columns and "name" in roster_view.columns:
+                    cls_clean = cls.copy()
+                    cls_clean["Position"] = pd.to_numeric(cls_clean.get("Position"), errors="coerce")
+                    cls_clean["LastName"] = cls_clean["LastName"].astype(str).str.lower().str.strip()
+                    cls_clean = cls_clean.dropna(subset=["LastName", "Position"])
+
+                    if not cls_clean.empty:
+                        name_to_pos = dict(
+                            cls_clean.astype({"Position": int})[
+                                ["LastName", "Position"]
+                            ].values
+                        )
+
+                        # Match against roster last names
+                        # Handle potential multipart last names by taking the last part
+                        roster_last_names = roster_view["name"].astype(str).str.split().str[-1].str.lower().str.strip()
+                        ff1_map = roster_last_names.map(name_to_pos)
+
+                if ff1_map is not None and not ff1_map.isna().all():
                     # If Jolpica had partial results, prefer the more complete set
                     if amap is not None:
                         jolpica_res = roster_view["driverId"].map(amap)
@@ -212,7 +313,8 @@ def _get_actual_positions_for_session(
             return roster_view["driverId"].map(amap)
 
         return None
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[_get_actual_positions_for_session] Error: {e}")
         return None
 
 
@@ -920,14 +1022,19 @@ def run_predictions_for_event(
                     now_utc = datetime.now(timezone.utc)
                     if sess_dt and sess_dt < now_utc:
                         try:
-                            session_name_map = {
-                                "race": "Race",
-                                "qualifying": "Qualifying",
-                                "sprint": "Sprint",
-                                "sprint_qualifying": "Sprint Shootout",
-                            }
-                            ff1_sess_name = session_name_map.get(sess, sess.title())
-                            weather_status = get_session_weather_status(season_i, round_i, ff1_sess_name)
+                            ff1_weather_names = {
+                                "race": ["Race", "R"],
+                                "qualifying": ["Qualifying", "Q"],
+                                "sprint": ["Sprint", "S"],
+                                "sprint_qualifying": ["Sprint Qualifying", "SQ", "Sprint Shootout", "Shootout"],
+                            }.get(sess, [sess.title()])
+
+                            weather_status = None
+                            for ff1_sess_name in ff1_weather_names:
+                                weather_status = get_session_weather_status(season_i, round_i, ff1_sess_name)
+                                if weather_status:
+                                    break
+
                             if weather_status:
                                 is_wet = weather_status.get("is_wet", False)
                         except Exception:

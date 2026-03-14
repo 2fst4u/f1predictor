@@ -97,6 +97,7 @@ def get_session_classification(season: int, round_no: int, session_name: str):
         sess.load(telemetry=False, laps=False, weather=False, messages=False)
         results = getattr(sess, "results", None)
         if results is not None and hasattr(results, "empty") and not results.empty:
+            results = _patch_missing_positions(sess, results)
             return results
         try:
             return sess.get_classification()
@@ -104,6 +105,43 @@ def get_session_classification(season: int, round_no: int, session_name: str):
             return None
     except Exception:
         return None
+
+
+def _patch_missing_positions(sess, results):
+    """Work around FastF1 bug where laps 'Deleted' column contains None instead
+    of bool, causing ``_calculate_quali_like_session_results`` to silently fail
+    and leave Position/Q1/Q2/Q3 as NaN even though lap data exists.
+
+    If positions are missing we coerce 'Deleted' to bool and re-trigger the
+    internal classification calculation.  This is a no-op when FastF1 already
+    computed positions correctly."""
+    import pandas as pd
+
+    pos_col = results.get("Position")
+    if pos_col is None:
+        return results
+    if pd.to_numeric(pos_col, errors="coerce").notna().any():
+        return results  # positions already populated, nothing to do
+
+    try:
+        # Laps may not have been loaded yet — reload with laps=True so we can
+        # fix the Deleted column and recompute the classification.
+        sess.load(telemetry=False, laps=True, weather=False, messages=False)
+        laps = getattr(sess, "laps", None)
+        if laps is None or laps.empty:
+            return results
+
+        if "Deleted" in laps.columns and laps["Deleted"].isna().any():
+            laps["Deleted"] = laps["Deleted"].fillna(False).infer_objects(copy=False).astype(bool)
+            sess._calculate_quali_like_session_results(force=True)
+            patched = getattr(sess, "results", None)
+            if patched is not None and not patched.empty:
+                logger.info("Patched FastF1 Deleted-column bug for %s; positions now available", sess.name)
+                return patched
+    except Exception as exc:
+        logger.debug("_patch_missing_positions failed: %s", exc)
+
+    return results
 
 
 def get_session_weather_status(season: int, round_no: int, session_name: str) -> Optional[dict]:

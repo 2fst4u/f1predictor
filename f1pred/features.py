@@ -1020,7 +1020,12 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         logger.info("[features] Attempting FastF1 session timing")
         ev = get_event(season, rnd)
         st = get_session_times(ev, {"race": "Race", "qualifying": "Qualifying", "sprint": "Sprint",
-                                    "sprint_qualifying": "Sprint Shootout"}.get(session_type, "Race")) if ev else None
+                                    "sprint_qualifying": "Sprint Qualifying"}.get(session_type, "Race")) if ev else None
+
+        # Fallback for sprint qualifying if "Sprint Qualifying" returned nothing
+        if session_type == "sprint_qualifying" and st is None and ev:
+            st = get_session_times(ev, "Sprint Shootout")
+
         if st:
             start_dt, end_dt = st
             logger.info("[features] FastF1 timing resolved")
@@ -1110,8 +1115,13 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             s_int = int(season) if str(season) != "current" else datetime.now().year
             r_int = int(rnd)
             
-            # Fetch Sprint Qualifying Results via FastF1 (Session 'SQ')
-            fast_sq = get_session_classification(s_int, r_int, "SQ")
+            # Fetch Sprint Qualifying Results via FastF1
+            fast_sq = None
+            for sq_name in ("Sprint Qualifying", "SQ", "Sprint Shootout"):
+                fast_sq = get_session_classification(s_int, r_int, sq_name)
+                if fast_sq is not None and not fast_sq.empty:
+                    break
+
             if fast_sq is not None and not fast_sq.empty:
                 fast_rows = []
                 for _, r in fast_sq.iterrows():
@@ -1128,7 +1138,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
                 if fast_rows:
                     grid_df = pd.DataFrame(fast_rows)[["driverId", "grid"]]
                     quali_pos_df = pd.DataFrame(fast_rows)[["driverId", "current_quali_pos"]]
-                    logger.info(f"[features] Fetched actual grid from FastF1 Sprint Qualifying (SQ) for {len(grid_df)} drivers")
+                    logger.info(f"[features] Fetched actual grid from FastF1 Sprint Qualifying for {len(grid_df)} drivers")
             else:
                 logger.info("[features] FastF1 Sprint Qualifying classification not available or empty.")
 
