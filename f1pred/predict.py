@@ -285,7 +285,7 @@ def _run_single_prediction(
         return None
     
     # Train pace model
-    pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
+    _, pace_hat, _ = train_pace_model(X, session_type=sess, cfg=cfg)
     
     # Standardize pace
     try:
@@ -714,7 +714,7 @@ def run_predictions_for_event(
 
                         # Train pace model
                         spinner.update("Training pace model...")
-                        pace_model, pace_hat, feat_cols = train_pace_model(X, session_type=sess, cfg=cfg)
+                        _, pace_hat, _ = train_pace_model(X, session_type=sess, cfg=cfg)
 
                         # Standardize GBM pace (z-score) but preserve variance
                         try:
