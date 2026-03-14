@@ -353,7 +353,6 @@ def _run_single_prediction(
     If X_override is provided, use it instead of building features.
     Returns None if prediction cannot be completed.
     """
-    import numpy as np
     from .features import build_session_features, collect_historical_results
     from .models import train_pace_model, estimate_dnf_probabilities
     from .simulate import simulate_grid
@@ -478,7 +477,6 @@ def run_predictions_for_event(
             with actual results for instant display.  Set to False for backtesting
             and calibration so that the full prediction pipeline is always exercised.
     """
-    import numpy as np
     import pandas as pd
     from .features import build_session_features, collect_historical_results, build_roster
     from .models import train_pace_model, estimate_dnf_probabilities
@@ -532,12 +530,18 @@ def run_predictions_for_event(
             # Ensure target config structure exists (it should from config.yaml)
             if hasattr(cfg, "modelling") and hasattr(cfg.modelling, "blending"):
                 # Update attributes in-place
-                if "gbm_weight" in b: cfg.modelling.blending.gbm_weight = b["gbm_weight"]
-                if "baseline_weight" in b: cfg.modelling.blending.baseline_weight = b["baseline_weight"]
-                if "baseline_team_factor" in b: cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
-                if "baseline_driver_team_factor" in b: cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
-                if "grid_factor" in b: cfg.modelling.blending.grid_factor = b["grid_factor"]
-                if "current_quali_factor" in b: cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
+                if "gbm_weight" in b:
+                    cfg.modelling.blending.gbm_weight = b["gbm_weight"]
+                if "baseline_weight" in b:
+                    cfg.modelling.blending.baseline_weight = b["baseline_weight"]
+                if "baseline_team_factor" in b:
+                    cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
+                if "baseline_driver_team_factor" in b:
+                    cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
+                if "grid_factor" in b:
+                    cfg.modelling.blending.grid_factor = b["grid_factor"]
+                if "current_quali_factor" in b:
+                    cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
                 logger.info(f"[predict] Applied calibrated blending weights (gbm={b.get('gbm_weight', 0):.2f})")
                 print(f"    [Predict] Using calibrated weights (GBM={b.get('gbm_weight', 0):.2f}, Baseline={b.get('baseline_weight', 0):.2f})")
 
@@ -722,12 +726,18 @@ def run_predictions_for_event(
                             if "blending" in calibrated_weights:
                                 b = calibrated_weights["blending"]
                                 if hasattr(cfg, "modelling") and hasattr(cfg.modelling, "blending"):
-                                    if "gbm_weight" in b: cfg.modelling.blending.gbm_weight = b["gbm_weight"]
-                                    if "baseline_weight" in b: cfg.modelling.blending.baseline_weight = b["baseline_weight"]
-                                    if "baseline_team_factor" in b: cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
-                                    if "baseline_driver_team_factor" in b: cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
-                                    if "grid_factor" in b: cfg.modelling.blending.grid_factor = b["grid_factor"]
-                                    if "current_quali_factor" in b: cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
+                                    if "gbm_weight" in b:
+                                        cfg.modelling.blending.gbm_weight = b["gbm_weight"]
+                                    if "baseline_weight" in b:
+                                        cfg.modelling.blending.baseline_weight = b["baseline_weight"]
+                                    if "baseline_team_factor" in b:
+                                        cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
+                                    if "baseline_driver_team_factor" in b:
+                                        cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
+                                    if "grid_factor" in b:
+                                        cfg.modelling.blending.grid_factor = b["grid_factor"]
+                                    if "current_quali_factor" in b:
+                                        cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
 
                     # 3. Cache check (if no actual results and features built)
                     if (cached_hit := pred_cache.get(cache_inputs := {
@@ -1097,14 +1107,19 @@ def _get_prob_color(value: float, is_dnf: bool = False) -> str:
     """Return color code based on probability value (0-100)."""
     if is_dnf:
         # Lower is better for DNF
-        if value < 5: return Fore.GREEN
-        if value < 15: return Fore.YELLOW
+        if value < 5:
+            return Fore.GREEN
+        if value < 15:
+            return Fore.YELLOW
         return Fore.RED
 
     # Higher is better for Win/Top3
-    if value < 10: return Style.DIM
-    if value < 40: return Fore.CYAN
-    if value < 70: return Fore.GREEN
+    if value < 10:
+        return Style.DIM
+    if value < 40:
+        return Fore.CYAN
+    if value < 70:
+        return Fore.GREEN
     return Fore.YELLOW
 
 
@@ -1116,26 +1131,36 @@ def _get_team_color(team_name: str) -> str:
     t = team_name.lower()
 
     # Ferrari (Red)
-    if "ferrari" in t: return Fore.RED
+    if "ferrari" in t:
+        return Fore.RED
 
     # Red Bull / RB / AlphaTauri (Blue)
-    if "red bull" in t: return Fore.BLUE
-    if "rb" in t or "alpha" in t: return Fore.BLUE
-    if "alpine" in t: return Fore.MAGENTA  # Pink/Blue mix
-    if "williams" in t: return Fore.BLUE + Style.BRIGHT
+    if "red bull" in t:
+        return Fore.BLUE
+    if "rb" in t or "alpha" in t:
+        return Fore.BLUE
+    if "alpine" in t:
+        return Fore.MAGENTA  # Pink/Blue mix
+    if "williams" in t:
+        return Fore.BLUE + Style.BRIGHT
 
     # Mercedes (Cyan/Silver)
-    if "mercedes" in t: return Fore.CYAN
+    if "mercedes" in t:
+        return Fore.CYAN
 
     # McLaren (Yellow/Orange)
-    if "mclaren" in t: return Fore.YELLOW
+    if "mclaren" in t:
+        return Fore.YELLOW
 
     # Aston Martin (Green)
-    if "aston martin" in t: return Fore.GREEN
-    if "kick" in t or "sauber" in t: return Fore.GREEN + Style.BRIGHT
+    if "aston martin" in t:
+        return Fore.GREEN
+    if "kick" in t or "sauber" in t:
+        return Fore.GREEN + Style.BRIGHT
 
     # Haas (White)
-    if "haas" in t: return Fore.WHITE
+    if "haas" in t:
+        return Fore.WHITE
 
     return Style.DIM
 
@@ -1318,9 +1343,12 @@ def print_session_console(
                 # Color wind: yellow if strong (>20km/h)
                 # normalize to kmh for coloring threshold
                 w_kmh = w
-                if wind_unit_cfg == "ms": w_kmh = w * 3.6
-                elif wind_unit_cfg == "mph": w_kmh = w * 1.60934
-                elif wind_unit_cfg == "kn": w_kmh = w * 1.852
+                if wind_unit_cfg == "ms":
+                    w_kmh = w * 3.6
+                elif wind_unit_cfg == "mph":
+                    w_kmh = w * 1.60934
+                elif wind_unit_cfg == "kn":
+                    w_kmh = w * 1.852
 
                 wind_color = Fore.YELLOW if w_kmh > 20 else Fore.RESET
                 w_parts.append(f"{wind_color}Wind: {w:.0f}{wind_label}{Style.RESET_ALL}")
@@ -1411,7 +1439,8 @@ def print_session_console(
 
         name = sanitize_for_console(r.get("name") or "")[:max_name]
         code = sanitize_for_console(r.get("code") or "")[:3].upper()
-        if not code: code = "???"
+        if not code:
+            code = "???"
 
         team = sanitize_for_console(r.get("constructorName") or "")[:max_team]
         mp = float(r["mean_pos"])

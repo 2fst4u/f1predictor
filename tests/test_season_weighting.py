@@ -1,5 +1,4 @@
 
-import pytest
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 from f1pred.features import compute_form_indices

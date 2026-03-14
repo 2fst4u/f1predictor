@@ -53,39 +53,90 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     event_keys = event_keys.tail(max_events)
 
     rows = []
-    for _, evt in event_keys.iterrows():
-        s, r, d = evt["season"], evt["round"], evt["date"]
-        evt_mask = (races["season"] == s) & (races["round"] == r)
-        evt_rows = races[evt_mask].copy()
-        if evt_rows.empty:
+
+    # ⚡ Bolt: Pre-extract numpy arrays to avoid pandas overhead in the loop
+    # Optimization: Factorize driver IDs once to use np.bincount for aggregations
+    driver_ids = races["driverId"].values
+    d_codes, uniques = pd.factorize(driver_ids)
+    n_drivers = len(uniques)
+
+    # Pre-calculate base values (position and points)
+    races_pos = races["position"].values.astype(float)
+    races_pts = races["points"].values.astype(float)
+    races_val_base = -races_pos + races_pts
+
+    # Extract keys and other required data
+    races_dates = pd.to_datetime(races["date"], utc=True).values
+    races_seasons = races["season"].values
+    races_rounds = races["round"].values
+
+    # Safely extract constructorId (might not exist in mocked training data)
+    if "constructorId" in races.columns:
+        races_cons = races["constructorId"].values
+    else:
+        races_cons = np.array([None] * len(races))
+
+    # Handle NaN grids gracefully in numpy arrays
+    races_grid = races["grid"].values
+    races_grid_float = np.array([float(x) if pd.notna(x) else np.nan for x in races_grid])
+
+    # O(N) loop over events, using highly vectorized numpy operations
+    for evt_row in event_keys.itertuples(index=False):
+        s = getattr(evt_row, "season")
+        r = getattr(evt_row, "round")
+        d = getattr(evt_row, "date")
+
+        d_val = pd.Timestamp(d).to_datetime64()
+
+        # Mask for current event
+        evt_mask = (races_seasons == s) & (races_rounds == r)
+        if not np.any(evt_mask):
             continue
 
-        # Compute per-driver form_index at the time of this event (history < event date)
-        prior = races[races["date"] < d].copy()
-        if prior.empty:
+        # Mask for prior history (strictly before the event date)
+        prior_mask = races_dates < d_val
+        if not np.any(prior_mask):
             continue
 
-        from .features import exponential_weights  # lightweight, no circular dep
+        # Extract prior history arrays
+        p_dates = races_dates[prior_mask]
+        p_season = races_seasons[prior_mask]
+        p_val = races_val_base[prior_mask]
+        p_dcodes = d_codes[prior_mask]
 
-        prior_w = exponential_weights(prior["date"], d, half_life_days)
-        if boost_factor != 1.0 and "season" in prior.columns:
-            prior_w = np.where(prior["season"] == s, prior_w * boost_factor, prior_w)
-        prior["_w"] = prior_w
-        prior["_wval"] = (-prior["position"].astype(float) + prior["points"].astype(float)) * prior["_w"]
-        form_sums = prior.groupby("driverId")[["_wval", "_w"]].sum()
-        form_sums["form_index"] = form_sums["_wval"] / form_sums["_w"].clip(lower=1e-6)
-        form_map = form_sums["form_index"].to_dict()
+        # Calculate exponential recency weights
+        diff = d_val - p_dates
+        ages = diff.astype('timedelta64[ns]').astype(float) / 86400000000000.0
+        w = np.exp2(-ages / max(1.0, float(half_life_days)))
 
-        for _, row in evt_rows.iterrows():
-            drv = row["driverId"]
-            fi = form_map.get(drv)
-            if fi is None:
+        # Apply current season boost if needed
+        if boost_factor != 1.0:
+            boost_mask = p_season == s
+            w[boost_mask] *= boost_factor
+
+        # Aggregate by driver using pure numpy bincount (~10x faster than pandas groupby)
+        wval = p_val * w
+        w_sum = np.bincount(p_dcodes, weights=w, minlength=n_drivers)
+        wval_sum = np.bincount(p_dcodes, weights=wval, minlength=n_drivers)
+
+        # Compute form index safely
+        valid = w_sum > 0
+        form_index = np.zeros(n_drivers, dtype=float)
+        form_index[valid] = wval_sum[valid] / np.maximum(w_sum[valid], 1e-6)
+
+        # Build samples for the current event
+        evt_indices = np.where(evt_mask)[0]
+
+        for idx in evt_indices:
+            code = d_codes[idx]
+            if not valid[code]:
                 continue
+
             sample = {
-                "driverId": drv,
-                "constructorId": row.get("constructorId"),
-                "form_index": fi,
-                "grid": float(row.get("grid", np.nan)),
+                "driverId": uniques[code],
+                "constructorId": races_cons[idx],
+                "form_index": float(form_index[code]),
+                "grid": float(races_grid_float[idx]),
                 "is_race": 1,
                 "is_qualifying": 0,
                 "is_sprint": 0,
