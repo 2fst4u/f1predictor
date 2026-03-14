@@ -61,3 +61,7 @@
 ## 2026-03-11 - Screen Reader Context for Visual Indicators
 **Learning:** Using simple icons (like carets) and numbers to indicate changes (e.g., gained/lost positions) is visually efficient but completely opaque to screen readers. Adding `.sr-only` text and `aria-hidden="true"` to the icon ensures visually impaired users get the same context (e.g., "Gained 3 places") as sighted users.
 **Action:** Whenever using an icon + number pattern to show a delta or status change, always hide the icon from screen readers and provide descriptive `.sr-only` text alongside the value.
+
+## $(date +%Y-%m-%d) - Table Header Abbreviations with Visual Affordance
+**Learning:** Dense data tables often use abbreviations (like "Pos", "Grid", "DNF") to save horizontal space, especially on mobile. While visually efficient, these are often ambiguous to new users and lack clarity for screen readers. Using the semantic `<abbr>` tag solves both: it provides the full text on hover/focus (via the `title` attribute) and can be styled (e.g., dotted underline) to indicate it's interactive.
+**Action:** When abbreviating column headers to save space, wrap the text in an `<abbr>` tag with a descriptive `title` attribute. Style it with a dotted underline and a help cursor to provide a clear affordance that more information is available on hover.
