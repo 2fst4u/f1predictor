@@ -42,7 +42,8 @@ def run_backtests(cfg) -> None:
             try:
                 res = run_predictions_for_event(cfg, season=str(season), rnd=str(rnd),
                                                 sessions=cfg.modelling.targets.session_types,
-                                                return_results=True)
+                                                return_results=True,
+                                                use_actuals=False)
                 if not res:
                     continue
                 for sess, sdata in res["sessions"].items():

@@ -525,9 +525,10 @@ def collect_historical_results(
                 )
 
     _HIST_CACHE[cache_key] = df.copy()
-    alias_key = (season, tuple())
-    if alias_key not in _HIST_CACHE:
-        _HIST_CACHE[alias_key] = df.copy()
+    # NOTE: We intentionally do NOT alias to (season, tuple()) because a
+    # roster-filtered cache payload may have fewer rows than an unfiltered one.
+    # Aliasing would silently truncate history for later unfiltered callers,
+    # altering training depth and prediction outputs.
 
     return df[df["date"] < end_before].copy()
 
@@ -736,18 +737,12 @@ def compute_circuit_globals(hist: pd.DataFrame, circuit_id: str, ref_date: datet
 
     if hist_c.empty:
         return {"circuit_overtake_difficulty": 0.0, "global_circuit_dnf_rate": 0.08}
-        
-    hist_c = hist_c.dropna(subset=["driverId", "position"])
-    
-    # 1. Overtake Difficulty (average grid - finish)
-    if "grid" in hist_c.columns and not hist_c["grid"].isna().all():
-        valid_races = hist_c.dropna(subset=["grid"])
-        gains = valid_races["grid"].astype(float) - valid_races["position"].astype(float)
-        overtake_diff = gains.mean()
-    else:
-        overtake_diff = 0.0
-        
-    # 2. Global Circuit DNF Rate
+
+    # Filter to rows that at least have a driverId (but keep NaN positions for DNF calc)
+    hist_c = hist_c.dropna(subset=["driverId"])
+
+    # 2. Global Circuit DNF Rate — compute BEFORE dropping NaN positions so that
+    #    DNF entries (which often have position=NaN) are counted correctly.
     if "is_dnf" in hist_c.columns:
         dnf_mask = hist_c["is_dnf"].astype(bool)
     else:
@@ -755,7 +750,18 @@ def compute_circuit_globals(hist: pd.DataFrame, circuit_id: str, ref_date: datet
         dnf_mask = (~hist_c["position"].notna()) | status_str.str.contains(
             "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
         )
-    global_dnf = dnf_mask.mean()
+    global_dnf = dnf_mask.mean() if len(hist_c) > 0 else 0.08
+
+    # Now drop NaN positions for metrics that require a finishing position
+    hist_c = hist_c.dropna(subset=["position"])
+
+    # 1. Overtake Difficulty (average grid - finish)
+    if not hist_c.empty and "grid" in hist_c.columns and not hist_c["grid"].isna().all():
+        valid_races = hist_c.dropna(subset=["grid"])
+        gains = valid_races["grid"].astype(float) - valid_races["position"].astype(float)
+        overtake_diff = gains.mean()
+    else:
+        overtake_diff = 0.0
     
     return {
         "circuit_overtake_difficulty": float(overtake_diff) if pd.notna(overtake_diff) else 0.0,
@@ -1141,7 +1147,9 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
     t3 = time.time()
     try:
         roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
-        hist = collect_historical_results(jc, season=season, end_before=ref_date + timedelta(seconds=1),
+        # Strict temporal cutoff: use ref_date directly (no epsilon) to prevent the
+        # target event's own results from leaking into the feature history.
+        hist = collect_historical_results(jc, season=season, end_before=ref_date,
                                           lookback_years=75, roster_driver_ids=roster_ids,
                                           cache_dir=cfg.paths.cache_dir)
         
