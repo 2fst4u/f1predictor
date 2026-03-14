@@ -13,7 +13,7 @@ from colorama import Fore, Style
 from .util import get_logger, ensure_dirs, StatusSpinner, sanitize_for_console, PredictionCache
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
-from .data.fastf1_backend import init_fastf1, get_session_classification, get_session_weather_status, get_event
+from .data.fastf1_backend import init_fastf1, get_session_classification, get_session_weather_status
 
 __all__ = [
     "run_predictions_for_event",
@@ -235,21 +235,6 @@ def _get_actual_positions_for_session(
                                     has_any_pos = True
                                     break
 
-                # Special Case: Lap check
-                if not has_any_pos and sess in ("sprint_qualifying", "qualifying"):
-                    try:
-                        ev = get_event(season_i, round_i)
-                        if ev is not None:
-                            s_ff1 = ev.get_session(ff1_sess_name)
-                            s_ff1.load(telemetry=False, laps=True, weather=False, messages=False)
-                            if s_ff1.laps is not None and not s_ff1.laps.empty:
-                                l_col = 'Abbreviation' if 'Abbreviation' in s_ff1.laps.columns else 'Driver' if 'Driver' in s_ff1.laps.columns else None
-                                if l_col and not s_ff1.laps.groupby(l_col).LapTime.min().dropna().empty:
-                                    has_any_pos = True
-                                    logger.info(f"[predict] Laps found for {ff1_sess_name} - results available.")
-                    except Exception:
-                        pass
-
                 if not has_any_pos:
                     logger.info(f"[predict] Classification found for {ff1_sess_name} but contains no positions yet.")
                     continue
@@ -313,57 +298,6 @@ def _get_actual_positions_for_session(
                         # Handle potential multipart last names by taking the last part
                         roster_last_names = roster_view["name"].astype(str).str.split().str[-1].str.lower().str.strip()
                         ff1_map = roster_last_names.map(name_to_pos)
-
-                # 4. Q-Time fallback (if positions are missing but times exist, rank them)
-                # 5. Lap-Time fallback (if other sources fail)
-                if (ff1_map is None or ff1_map.isna().all()) and sess in ("sprint_qualifying", "qualifying", "race", "sprint"):
-                    logger.info(f"[predict] FF1 classification matches failed for {ff1_sess_name} - trying lap time derivation.")
-                    try:
-                        ev = get_event(season_i, round_i)
-                        if ev:
-                            s = ev.get_session(ff1_sess_name)
-                            s.load(telemetry=False, laps=True, weather=False, messages=False)
-                            if s.laps is not None and not s.laps.empty:
-                                logger.info(f"[predict] Deriving positions from lap times for {ff1_sess_name}")
-                                # Get best lap time for each driver
-                                # Map 'Driver' column to 'Abbreviation' if 'Abbreviation' is missing
-                                l_col = 'Abbreviation' if 'Abbreviation' in s.laps.columns else 'Driver' if 'Driver' in s.laps.columns else None
-                                if l_col:
-                                    best_laps = s.laps.groupby(l_col)['LapTime'].min().sort_values().dropna()
-                                    if not best_laps.empty:
-                                        # Use unique abbreviations from the series as keys
-                                        q_map = {str(abbr).upper(): i+1 for i, abbr in enumerate(best_laps.index)}
-                                        logger.info(f"[DEBUG] Generated q_map: {q_map}")
-                                        ff1_map = roster_view["code"].astype(str).str.strip().str.upper().map(q_map)
-                                        logger.info(f"[DEBUG] ff1_map matches: {ff1_map.count()}")
-                    except Exception:
-                        pass
-
-                # 4. Q-Time fallback (if positions are missing but times exist, rank them)
-                if (ff1_map is None or ff1_map.isna().all()):
-                    # Log for debugging
-                    logger.info(f"[predict] Checking Q-times for {ff1_sess_name} (columns: {cls.columns.tolist()})")
-                    for q_col in ["Q3", "Q2", "Q1"]:
-                        if q_col in cls.columns and cls[q_col].notna().any():
-                            logger.info(f"[predict] Deriving positions from {q_col} times for {ff1_sess_name}")
-                            # Get best time for each driver in this session
-                            # Note: we assume smaller time = better position
-                            cls_q = cls.copy()
-                            cls_q["_t"] = cls_q[q_col]
-                            cls_q = cls_q.dropna(subset=["_t"])
-                            if not cls_q.empty:
-                                # Rank times (ascending)
-                                cls_q["_pos_derived"] = cls_q["_t"].rank(method="min").astype(int)
-
-                                # Map by Abbreviation as it's most reliable for derived data
-                                for abbr_col in ["Abbreviation", "Driver"]:
-                                    if abbr_col in cls_q.columns and "code" in roster_view.columns:
-                                        q_map = dict(zip(cls_q[abbr_col].astype(str).str.upper(), cls_q["_pos_derived"]))
-                                        ff1_map = roster_view["code"].str.upper().map(q_map)
-                                        if ff1_map.notna().any():
-                                            break
-                                if ff1_map is not None and ff1_map.notna().any():
-                                    break
 
                 if ff1_map is not None and not ff1_map.isna().all():
                     # If Jolpica had partial results, prefer the more complete set

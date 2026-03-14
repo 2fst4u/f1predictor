@@ -1115,8 +1115,13 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             s_int = int(season) if str(season) != "current" else datetime.now().year
             r_int = int(rnd)
             
-            # Fetch Sprint Qualifying Results via FastF1 (Session 'SQ')
-            fast_sq = get_session_classification(s_int, r_int, "SQ")
+            # Fetch Sprint Qualifying Results via FastF1
+            fast_sq = None
+            for sq_name in ("Sprint Qualifying", "SQ", "Sprint Shootout"):
+                fast_sq = get_session_classification(s_int, r_int, sq_name)
+                if fast_sq is not None and not fast_sq.empty:
+                    break
+
             if fast_sq is not None and not fast_sq.empty:
                 fast_rows = []
                 for _, r in fast_sq.iterrows():
@@ -1133,7 +1138,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
                 if fast_rows:
                     grid_df = pd.DataFrame(fast_rows)[["driverId", "grid"]]
                     quali_pos_df = pd.DataFrame(fast_rows)[["driverId", "current_quali_pos"]]
-                    logger.info(f"[features] Fetched actual grid from FastF1 Sprint Qualifying (SQ) for {len(grid_df)} drivers")
+                    logger.info(f"[features] Fetched actual grid from FastF1 Sprint Qualifying for {len(grid_df)} drivers")
             else:
                 logger.info("[features] FastF1 Sprint Qualifying classification not available or empty.")
 
