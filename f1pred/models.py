@@ -60,7 +60,7 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
             continue
 
         # Compute per-driver form_index at the time of this event (history < event date)
-        prior = races[races["date"] < d]
+        prior = races[races["date"] < d].copy()
         if prior.empty:
             continue
 
