@@ -219,19 +219,19 @@
                                 <table class="w-full text-left">
                                     <thead>
                                         <tr class="bg-gray-800 text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-wider">
-                                            <th class="px-0.5 py-2 sm:p-4 w-7 sm:w-12 text-center">Pos</th>
-                                            <th class="px-0.5 py-2 sm:p-4">Driver</th>
-                                            <th class="px-0.5 py-2 sm:p-4 hidden md:table-cell">Team</th>
-                                            <th class="px-0.5 py-2 sm:p-4 text-center" x-show="hasGrid(sess)">Grid</th>
-                                            <th class="px-0.5 py-2 sm:p-4">
+                                            <th scope="col" class="px-0.5 py-2 sm:p-4 w-7 sm:w-12 text-center"><abbr title="Predicted Position" class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">Pos</abbr></th>
+                                            <th scope="col" class="px-0.5 py-2 sm:p-4">Driver</th>
+                                            <th scope="col" class="px-0.5 py-2 sm:p-4 hidden md:table-cell">Team</th>
+                                            <th scope="col" class="px-0.5 py-2 sm:p-4 text-center" x-show="hasGrid(sess)"><abbr title="Starting Grid Position" class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">Grid</abbr></th>
+                                            <th scope="col" class="px-0.5 py-2 sm:p-4">
                                                 <span class="hidden sm:inline">Win Prob</span>
                                                 <span class="sm:hidden">Win %</span>
                                             </th>
-                                            <th class="px-0.5 py-2 sm:p-4">
+                                            <th scope="col" class="px-0.5 py-2 sm:p-4">
                                                 <span class="hidden sm:inline">Podium</span>
                                                 <span class="sm:hidden">Top 3</span>
                                             </th>
-                                            <th class="px-0.5 py-2 sm:p-4 text-right">DNF</th>
+                                            <th scope="col" class="px-0.5 py-2 sm:p-4 text-right"><abbr title="Did Not Finish Probability" class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">DNF</abbr></th>
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-gray-800">
