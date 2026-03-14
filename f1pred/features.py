@@ -533,7 +533,8 @@ def collect_historical_results(
     return df[df["date"] < end_before].copy()
 
 
-def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: int) -> pd.DataFrame:
+def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: int,
+                         current_season: Optional[int] = None, boost_factor: float = 1.0) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=["driverId", "form_index"])
     dfg = df[df["session"] == "race"].copy()
@@ -542,6 +543,8 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
     dfg["pos_score"] = -dfg["position"].astype(float)
     dfg["pts_score"] = dfg["points"].astype(float)
     w = exponential_weights(dfg["date"], ref_date, half_life_days)
+    if current_season is not None and boost_factor != 1.0 and "season" in dfg.columns:
+        w = np.where(dfg["season"] == current_season, w * boost_factor, w)
     dfg["w"] = w
     dfg["weighted_val"] = (dfg["pos_score"] + dfg["pts_score"]) * dfg["w"]
     sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
@@ -549,7 +552,8 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
     return sums[["driverId", "form_index"]]
 
 
-def compute_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days: int) -> pd.DataFrame:
+def compute_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days: int,
+                            current_season: Optional[int] = None, boost_factor: float = 1.0) -> pd.DataFrame:
     """Recency-weighted qualifying performance index."""
     if df.empty:
         return pd.DataFrame(columns=["driverId", "qualifying_form_index"])
@@ -568,6 +572,8 @@ def compute_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days
     dfg["pos_score"] = -dfg["qpos"].astype(float)
 
     w = exponential_weights(dfg["date"], ref_date, half_life_days)
+    if current_season is not None and boost_factor != 1.0 and "season" in dfg.columns:
+        w = np.where(dfg["season"] == current_season, w * boost_factor, w)
     dfg["w"] = w
     dfg["weighted_val"] = dfg["pos_score"] * dfg["w"]
 
@@ -639,6 +645,8 @@ def compute_driver_team_form(
     ref_date: datetime,
     half_life_days: int,
     window_days: int = 730,
+    current_season: Optional[int] = None,
+    boost_factor: float = 1.0,
 ) -> pd.DataFrame:
     """Driver-team specific form for current constructor."""
     if df.empty or roster.empty:
@@ -657,6 +665,8 @@ def compute_driver_team_form(
     races["pos_score"] = -races["position"].astype(float).fillna(0.0)
     races["pts_score"] = races["points"].astype(float).fillna(0.0)
     w = exponential_weights(races["date"], ref_date, half_life_days)
+    if current_season is not None and boost_factor != 1.0 and "season" in races.columns:
+        w = np.where(races["season"] == current_season, w * boost_factor, w)
     races["w"] = w
 
     races["weighted_val"] = (races["pos_score"] + races["pts_score"]) * races["w"]
@@ -677,6 +687,8 @@ def compute_teammate_delta(
     hist: pd.DataFrame,
     ref_date: datetime,
     half_life_days: int,
+    current_season: Optional[int] = None,
+    boost_factor: float = 1.0,
 ) -> pd.DataFrame:
     """Recency-weighted average qualifying advantage vs team-mate.
 
@@ -698,6 +710,8 @@ def compute_teammate_delta(
 
     q["qpos"] = q["qpos"].astype(float)
     w = exponential_weights(q["date"], ref_date, half_life_days)
+    if current_season is not None and boost_factor != 1.0 and "season" in q.columns:
+        w = np.where(q["season"] == current_season, w * boost_factor, w)
     q["w"] = w
 
     # Count drivers per team-race group
@@ -773,6 +787,8 @@ def compute_grid_finish_delta(
     hist: pd.DataFrame,
     ref_date: datetime,
     half_life_days: int,
+    current_season: Optional[int] = None,
+    boost_factor: float = 1.0,
 ) -> pd.DataFrame:
     """Recency-weighted average (grid - finish) in races.
 
@@ -788,6 +804,8 @@ def compute_grid_finish_delta(
 
     races["gain"] = races["grid"].astype(float) - races["position"].astype(float)
     w = exponential_weights(races["date"], ref_date, half_life_days)
+    if current_season is not None and boost_factor != 1.0 and "season" in races.columns:
+        w = np.where(races["season"] == current_season, w * boost_factor, w)
     races["w"] = w
 
     races["weighted_gain"] = races["gain"] * races["w"]
@@ -1174,8 +1192,13 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         logger.info(f"[features] Historical results fetch failed: {e}")
         hist = pd.DataFrame(columns=["driverId", "position", "date", "session", "constructorId", "points"])
 
+    # Current season weight boost
+    boost = getattr(cfg.modelling.blending, "current_season_weight", 1.0)
+    s_int = int(season)
+
     # Form indices
-    form = compute_form_indices(hist, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.base)
+    form = compute_form_indices(hist, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.base,
+                                current_season=s_int, boost_factor=boost)
 
     # Ensure 'session' column exists
     if 'session' not in hist.columns:
@@ -1190,9 +1213,12 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         for col in missing_columns:
             hist[col] = pd.Series(dtype='str')  # Add missing columns with appropriate dtype
 
-    team_form = hist[hist["session"] == "race"].dropna(subset=["constructorId", "date", "points"])
+    team_form = hist[hist["session"] == "race"].dropna(subset=["constructorId", "date", "points"]).copy()
     if not team_form.empty:
-        team_form["w"] = exponential_weights(team_form["date"], ref_date, cfg.modelling.recency_half_life_days.team)
+        w = exponential_weights(team_form["date"], ref_date, cfg.modelling.recency_half_life_days.team)
+        if boost != 1.0 and "season" in team_form.columns:
+            w = np.where(team_form["season"] == s_int, w * boost, w)
+        team_form["w"] = w
         team_form["weighted_points"] = team_form["points"] * team_form["w"]
 
         sums = team_form.groupby("constructorId")[["weighted_points", "w"]].sum().reset_index()
@@ -1202,7 +1228,8 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         team_idx = pd.DataFrame(columns=["constructorId", "team_form_index"])
 
     drv_team_form = compute_driver_team_form(
-        hist, roster, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.team, window_days=730
+        hist, roster, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.team, window_days=730,
+        current_season=s_int, boost_factor=boost
     )
 
     # New dynamic features: teammate_delta & grid_finish_delta
@@ -1211,6 +1238,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             hist,
             ref_date=ref_date,
             half_life_days=cfg.modelling.recency_half_life_days.base,
+            current_season=s_int, boost_factor=boost
         )
         logger.info("[features] teammate_delta computed for %d drivers", len(tm_delta))
     except Exception as e:
@@ -1222,6 +1250,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             hist,
             ref_date=ref_date,
             half_life_days=cfg.modelling.recency_half_life_days.base,
+            current_season=s_int, boost_factor=boost
         )
         logger.info("[features] grid_finish_delta computed for %d drivers", len(gf_delta))
     except Exception as e:
@@ -1266,7 +1295,8 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
 
     # Qualifying Form
     try:
-        qual_form = compute_qualifying_form(hist, ref_date, cfg.modelling.recency_half_life_days.base)
+        qual_form = compute_qualifying_form(hist, ref_date, cfg.modelling.recency_half_life_days.base,
+                                            current_season=s_int, boost_factor=boost)
         logger.info(f"[features] Qualifying form computed for {len(qual_form)} drivers")
     except Exception as e:
         logger.info(f"[features] Qualifying form failed: {e}")
