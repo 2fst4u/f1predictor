@@ -58,6 +58,42 @@ def test_sprint_qualifying_mapping_robustness():
         assert results.iloc[0] == 1
         assert results.iloc[1] == 2
 
+def test_get_event_status_with_fastf1_sq():
+    """
+    Verify that get_event_status correctly identifies SQ results via FastF1.
+    """
+    from f1pred.web import get_event_status
+    from f1pred.config import load_config
+    import f1pred.web
+
+    # Mock config
+    f1pred.web._config = load_config("config.yaml")
+
+    with patch("f1pred.web.resolve_event") as mock_resolve, \
+         patch("f1pred.web.build_roster", create=True) as mock_roster, \
+         patch("f1pred.predict._get_actual_positions_for_session") as mock_acts, \
+         patch("f1pred.web.JolpicaClient") as mock_jc_class:
+
+        mock_resolve.return_value = (2026, 4, {
+            "raceName": "Chinese GP",
+            "SprintQualifying": {"date": "2026-04-17"}
+        })
+
+        # Standardized roster from build_roster
+        roster = pd.DataFrame([
+            {"driverId": "max_verstappen", "number": "1", "code": "VER", "name": "Max Verstappen"},
+            {"driverId": "lando_norris", "number": "4", "code": "NOR", "name": "Lando Norris"}
+        ])
+        mock_roster.return_value = roster
+
+        # Results available via FastF1
+        mock_acts.return_value = pd.Series([1, 2], index=[0, 1])
+
+        status = pytest.importorskip("asyncio").run(get_event_status("2026", "4"))
+
+        sq_session = next(s for s in status["sessions"] if s["id"] == "sprint_qualifying")
+        assert sq_session["has_results"] is True
+
 def test_sprint_qualifying_fuzzy_name_match():
     """
     Test that mapping succeeds via fuzzy name match if others fail.
