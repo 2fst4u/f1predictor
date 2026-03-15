@@ -65,3 +65,11 @@
 ## $(date +%Y-%m-%d) - Table Header Abbreviations with Visual Affordance
 **Learning:** Dense data tables often use abbreviations (like "Pos", "Grid", "DNF") to save horizontal space, especially on mobile. While visually efficient, these are often ambiguous to new users and lack clarity for screen readers. Using the semantic `<abbr>` tag solves both: it provides the full text on hover/focus (via the `title` attribute) and can be styled (e.g., dotted underline) to indicate it's interactive.
 **Action:** When abbreviating column headers to save space, wrap the text in an `<abbr>` tag with a descriptive `title` attribute. Style it with a dotted underline and a help cursor to provide a clear affordance that more information is available on hover.
+
+## $(date +%Y-%m-%d) - Simulating Terminal UIs in HTML
+**Learning:** When building simulated terminal interfaces in the browser, decorative characters like the command prompt `>` or progress indicators `...` create immense noise for screen reader users, who will hear them read literally (e.g., "greater than"). Additionally, visually pulsed or appended text won't be announced automatically.
+**Action:** Always add `aria-hidden="true"` to literal terminal syntax characters. Wrap the dynamic log container or specific lines with `aria-live="polite"` (or `"assertive"`) so that screen readers proactively read the simulated terminal output updates without requiring manual user navigation.
+
+## $(date +%Y-%m-%d) - Abbreviated Badges and Screen Readers
+**Learning:** Tiny prefixes used in UI badges (like "v" for version or "M:" for model) lack context and are read confusingly by screen readers as standalone letters.
+**Action:** For single-letter or abbreviated visual badges, hide the abbreviation using `aria-hidden="true"` and provide the full context in an adjacent `<span class="sr-only">` (e.g., "App Version").
