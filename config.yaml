@@ -10,7 +10,6 @@ app:
 
 paths:
   cache_dir: "cache"
-  fastf1_cache: "fastf1_cache"
 
 data_sources:
   jolpica:

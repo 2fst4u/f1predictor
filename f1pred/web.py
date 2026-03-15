@@ -50,7 +50,7 @@ def init_web(cfg: AppConfig):
     _config = cfg
 
     # Initialize directories
-    ensure_dirs(cfg.paths.cache_dir, cfg.paths.fastf1_cache)
+    ensure_dirs(cfg.paths.cache_dir)
 
     # Initialize FastF1 before requests_cache to avoid MRO conflicts
     try:

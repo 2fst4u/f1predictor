@@ -15,8 +15,7 @@ class TestConfigSecurity(unittest.TestCase):
                 "log_level": "WARNING"
             },
             "paths": {
-                "cache_dir": ".cache/test",
-                "fastf1_cache": ".cache/test_ff1"
+                "cache_dir": ".cache/test"
             },
             "data_sources": {
                 "jolpica": {

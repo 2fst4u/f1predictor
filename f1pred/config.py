@@ -20,7 +20,11 @@ class AppSettings:
 @dataclass
 class Paths:
     cache_dir: str
-    fastf1_cache: str
+
+    @property
+    def fastf1_cache(self) -> str:
+        """FastF1 cache lives under the main cache directory."""
+        return str(Path(self.cache_dir) / "fastf1")
 
 
 @dataclass
@@ -220,11 +224,11 @@ def load_config(path: str) -> AppConfig:
 
     # Paths
     paths_in = cfg["paths"]
-    for k in ("cache_dir", "fastf1_cache"):
-        if k not in paths_in:
-            errors.append(f"Missing paths.{k}")
+    if "cache_dir" not in paths_in:
+        errors.append("Missing paths.cache_dir")
     if not errors:
-        paths_in = {k: _norm_path(v, base_dir) for k, v in paths_in.items()}
+        # Only normalise cache_dir; fastf1_cache is derived via property
+        paths_in = {"cache_dir": _norm_path(paths_in["cache_dir"], base_dir)}
 
     # Data source URL sanity and unit checks
     ds_in = cfg["data_sources"]

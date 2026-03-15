@@ -196,7 +196,7 @@ def main() -> None:
         cfg.app.live_refresh_seconds = args.refresh
 
     # Ensure dirs
-    ensure_dirs(cfg.paths.cache_dir, cfg.paths.fastf1_cache)
+    ensure_dirs(cfg.paths.cache_dir)
 
     # Auto-initialise FastF1 cache if enabled (no-op if not installed)
     # Important: FastF1 must be initialized BEFORE requests_cache to avoid MRO conflicts
