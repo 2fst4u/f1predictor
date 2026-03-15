@@ -43,7 +43,7 @@ def test_jolpica_retry_after_dos_prevention():
     """
     # 1. Test with a reasonable Retry-After value (should be respected)
     headers_ok = {"Retry-After": "120"}
-    val_ok = JolpicaClient._retry_after_seconds(headers_ok, attempt=0, base=1.0, cap=30.0)
+    JolpicaClient._retry_after_seconds(headers_ok, attempt=0, base=1.0, cap=30.0)
     # Currently, it respects it fully. After fix, it should still be 120 (if we cap at say 300)
     # or if we cap at 30, it will be 30.
     # The current code returns 120.

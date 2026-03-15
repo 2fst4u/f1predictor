@@ -31,7 +31,7 @@ class TestSecurityPagination(unittest.TestCase):
         # Run the method
         # If the fix works, this returns quickly.
         # If not, it runs 1000 times (which is still fast in mock, but strictly > 20).
-        results = client.get_season_race_results("2023")
+        client.get_season_race_results("2023")
 
         # Verify call count
         # We assume MAX_PAGINATION_PAGES = 20
