@@ -65,6 +65,8 @@ def _latest_completed_round_in_season(jc: JolpicaClient, season: str) -> Optiona
     try:
         races = jc.get_season_schedule(season)
         for r in reversed(races):
+            if not r.get("round"):
+                continue
             rnd = str(r.get("round"))
             if jc.get_race_results(season, rnd):
                 return rnd
