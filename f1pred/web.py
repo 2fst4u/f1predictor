@@ -49,8 +49,8 @@ def init_web(cfg: AppConfig):
     global _config
     _config = cfg
 
-    # Initialize directories
-    ensure_dirs(cfg.paths.cache_dir)
+    # Initialize directories (include fastf1_cache so init_fastf1 finds it)
+    ensure_dirs(cfg.paths.cache_dir, cfg.paths.fastf1_cache)
 
     # Initialize FastF1 before requests_cache to avoid MRO conflicts
     try:
@@ -83,8 +83,8 @@ async def get_web_config():
         "app_version": __version__,
         "default_sessions": _config.modelling.targets.session_types,
         "next_event": {
-            "season": next_s,
-            "round": next_r
+            "season": str(next_s) if next_s is not None else None,
+            "round": str(next_r) if next_r is not None else None,
         }
     }
 
@@ -149,28 +149,34 @@ async def get_event_status(
 
             if exists:
                 has_results = False
+
+                # 1. Primary check: Use prediction engine results (Jolpica + FastF1)
                 try:
                     from .predict import _get_actual_positions_for_session
-
-                    # 1. Primary check: Use FastF1 results if roster is available
                     if roster is not None and not roster.empty:
                         acts = _get_actual_positions_for_session(jc, s_i, r_i, s, roster)
                         has_results = acts is not None and not acts.isna().all()
-
-                    # 2. Secondary check: Fallback to Jolpica if FastF1 didn't have data
-                    if not has_results:
-                        if s == "race":
-                            has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
-                        elif s == "qualifying":
-                            has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
-                        elif s == "sprint":
-                            has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
-                        elif s == "sprint_qualifying":
-                            # No Jolpica endpoint for sprint qualifying; rely on
-                            # the FastF1 primary check above.
-                            pass
                 except Exception:
-                    has_results = False
+                    pass
+
+                # 2. Secondary check: Fresh Jolpica query (bypass cache to
+                #    avoid stale empty responses from before results were posted)
+                if not has_results:
+                    try:
+                        import requests_cache as rc
+                        with rc.disabled():
+                            if s == "race":
+                                has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
+                            elif s == "qualifying":
+                                has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
+                            elif s == "sprint":
+                                has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
+                            elif s == "sprint_qualifying":
+                                # No Jolpica endpoint for sprint qualifying; rely on
+                                # the primary check above.
+                                pass
+                    except Exception:
+                        pass
 
                 sessions.append({
                     "id": s,

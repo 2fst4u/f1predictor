@@ -187,15 +187,15 @@ def _get_actual_positions_for_session(
         if base_name:
             ff1_names.append(base_name)
 
-        # Add common fallbacks
+        # Add short-name fallbacks (base_name is already in the list)
         if sess == "race":
-            ff1_names.extend(["Race", "R"])
+            ff1_names.append("R")
         elif sess == "qualifying":
-            ff1_names.extend(["Qualifying", "Q"])
+            ff1_names.append("Q")
         elif sess == "sprint":
-            ff1_names.extend(["Sprint", "S"])
+            ff1_names.append("S")
         elif sess == "sprint_qualifying":
-            ff1_names.extend(["Sprint Qualifying", "SQ", "Sprint Shootout", "Shootout"])
+            ff1_names.extend(["SQ", "Sprint Shootout", "Shootout"])
 
         # We also need a roster to check completeness via _get_actual_positions_for_session
         if roster_view is None or roster_view.empty:
@@ -248,40 +248,54 @@ def _get_actual_positions_for_session(
                         )
                         ff1_map = num_series.map(num_to_pos)
 
-                if (ff1_map is None or ff1_map.isna().all()) and "Abbreviation" in cls.columns and "code" in roster_view.columns:
-                    # Normalize casing and whitespace for robust matching
-                    code_series = roster_view["code"].astype(str).str.strip().str.upper()
-                    cls_clean = cls.copy()
-                    cls_clean["Position"] = pd.to_numeric(cls_clean.get("Position"), errors="coerce")
-                    cls_clean["Abbreviation"] = cls_clean["Abbreviation"].astype(str).str.strip().str.upper()
-                    cls_clean = cls_clean.dropna(subset=["Abbreviation", "Position"])
+                # 2b. Abbreviation mapping — fills gaps left by DriverNumber mismatch
+                #     (e.g. driver changed number between seasons)
+                if "Abbreviation" in cls.columns and "code" in roster_view.columns:
+                    needs_abbr = ff1_map is None or ff1_map.isna().any()
+                    if needs_abbr:
+                        code_series = roster_view["code"].astype(str).str.strip().str.upper()
+                        cls_clean = cls.copy()
+                        cls_clean["Position"] = pd.to_numeric(cls_clean.get("Position"), errors="coerce")
+                        cls_clean["Abbreviation"] = cls_clean["Abbreviation"].astype(str).str.strip().str.upper()
+                        cls_clean = cls_clean.dropna(subset=["Abbreviation", "Position"])
 
-                    if not cls_clean.empty:
-                        abbr_to_pos = dict(
-                            cls_clean.astype({"Position": int})[
-                                ["Abbreviation", "Position"]
-                            ].values
-                        )
-                        ff1_map = code_series.map(abbr_to_pos)
+                        if not cls_clean.empty:
+                            abbr_to_pos = dict(
+                                cls_clean.astype({"Position": int})[
+                                    ["Abbreviation", "Position"]
+                                ].values
+                            )
+                            abbr_map = code_series.map(abbr_to_pos)
+                            if ff1_map is None:
+                                ff1_map = abbr_map
+                            else:
+                                # Fill only the NaN gaps from the DriverNumber mapping
+                                ff1_map = ff1_map.fillna(abbr_map)
 
-                # 3. Fuzzy Name Match fallback
-                if (ff1_map is None or ff1_map.isna().all()) and "LastName" in cls.columns and "name" in roster_view.columns:
-                    cls_clean = cls.copy()
-                    cls_clean["Position"] = pd.to_numeric(cls_clean.get("Position"), errors="coerce")
-                    cls_clean["LastName"] = cls_clean["LastName"].astype(str).str.lower().str.strip()
-                    cls_clean = cls_clean.dropna(subset=["LastName", "Position"])
+                # 3. Fuzzy Name Match fallback — fills any remaining gaps
+                if "LastName" in cls.columns and "name" in roster_view.columns:
+                    needs_name = ff1_map is None or ff1_map.isna().any()
+                    if needs_name:
+                        cls_clean = cls.copy()
+                        cls_clean["Position"] = pd.to_numeric(cls_clean.get("Position"), errors="coerce")
+                        cls_clean["LastName"] = cls_clean["LastName"].astype(str).str.lower().str.strip()
+                        cls_clean = cls_clean.dropna(subset=["LastName", "Position"])
 
-                    if not cls_clean.empty:
-                        name_to_pos = dict(
-                            cls_clean.astype({"Position": int})[
-                                ["LastName", "Position"]
-                            ].values
-                        )
+                        if not cls_clean.empty:
+                            name_to_pos = dict(
+                                cls_clean.astype({"Position": int})[
+                                    ["LastName", "Position"]
+                                ].values
+                            )
 
-                        # Match against roster last names
-                        # Handle potential multipart last names by taking the last part
-                        roster_last_names = roster_view["name"].astype(str).str.split().str[-1].str.lower().str.strip()
-                        ff1_map = roster_last_names.map(name_to_pos)
+                            # Match against roster last names
+                            # Handle potential multipart last names by taking the last part
+                            roster_last_names = roster_view["name"].astype(str).str.split().str[-1].str.lower().str.strip()
+                            name_map = roster_last_names.map(name_to_pos)
+                            if ff1_map is None:
+                                ff1_map = name_map
+                            else:
+                                ff1_map = ff1_map.fillna(name_map)
 
                 if ff1_map is not None and not ff1_map.isna().all():
                     # If Jolpica had partial results, prefer the more complete set
