@@ -157,7 +157,7 @@ def _roster_from_round(jc: JolpicaClient, season: str, rnd: str) -> List[Dict]:
     return []
 
 
-def _get_canonical_mapping(jc: JolpicaClient, season: str) -> Dict[str, Any]:
+def _get_canonical_mapping(jc: JolpicaClient, season: str) -> Dict[str, 'Any']:  # noqa: F821
     """Build lookup tables to map various identities to canonical Jolpica/Ergast IDs."""
     try:
         raw_entries = jc.get_season_entry_list(season)

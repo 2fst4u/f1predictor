@@ -125,17 +125,21 @@ def _get_session_datetime(race_info: Dict[str, Any], sess: str) -> Optional[date
             "practice_3": "ThirdPractice", "qualifying": "Qualifying",
             "sprint": "Sprint", "sprint_qualifying": "SprintQualifying"
         }.get(sess)
-        if not key or key not in race_info: return None
+        if not key or key not in race_info:
+            return None
 
         # Ensure session data is a dict (API might return null/None)
         s_data = race_info[key]
-        if not isinstance(s_data, dict): return None
+        if not isinstance(s_data, dict):
+            return None
         d, t = s_data.get("date"), s_data.get("time")
 
-    if not d: return None
+    if not d:
+        return None
     t = t or "00:00:00Z"
     # Ensure timezone offset exists
-    if not t.endswith("Z") and "+" not in t and "-" not in t[-5:]: t += "+00:00"
+    if not t.endswith("Z") and "+" not in t and "-" not in t[-5:]:
+        t += "+00:00"
     try:
         dt = datetime.fromisoformat(f"{d}T{t.replace('Z', '+00:00')}")
         return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
@@ -587,7 +591,8 @@ def run_predictions_for_event(
 
 
     # Resolve event
-    if progress_callback: progress_callback("Resolving event details...")
+    if progress_callback:
+        progress_callback("Resolving event details...")
     season_i, round_i, race_info = resolve_event(jc, season, rnd)
     event_title = f"{race_info.get('raceName') or 'Event'} {season_i} (Round {round_i})"
 
@@ -767,9 +772,69 @@ def run_predictions_for_event(
                                     if "current_quali_factor" in b:
                                         cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
 
+                    # Universal Grid Feature logic (Race<-Quali, Sprint<-SprintQuali)
+                    # Map target session -> precursor session that determines grid
+                    grid_precursor_map = {
+                        "race": "qualifying",
+                        "sprint": "sprint_qualifying",
+                    }
+
+                    has_grid_concept = sess in grid_precursor_map
+
+                    if has_grid_concept and "grid" in X.columns:
+                        if X["grid"].isna().any():
+                            precursor = grid_precursor_map[sess]
+                            logger.info(f"[predict] Grid not available for {sess} - looking for {precursor} results")
+
+                            # 1. Check if precursor was already run in this loop (internal consistency)
+                            precursor_results = [p for p in accumulated_history if p["session"] == precursor]
+
+                            if precursor_results:
+                                logger.info(f"[predict] Using {precursor} results from current run as grid")
+                                grid_map = {r["driverId"]: int(r["position"]) for r in precursor_results if r.get("position") is not None}
+                                X["grid"] = X["driverId"].map(grid_map)
+
+                            else:
+                                # 2. Check for actual results of precursor
+                                spinner.update(f"Checking actual results for {precursor}...")
+                                precursor_actuals = _get_actual_positions_for_session(
+                                    jc, season_i, round_i, precursor,
+                                    roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
+                                )
+
+                                if precursor_actuals is not None and not precursor_actuals.isna().all():
+                                    logger.info(f"[predict] Using actual results for {precursor} as grid")
+                                    # Build explicit driverId -> position map from roster-aligned Series.
+                                    # precursor_actuals is indexed by roster row-index, not by driverId,
+                                    # so we must zip against roster["driverId"] for correct mapping.
+                                    precursor_map = dict(zip(roster["driverId"], precursor_actuals))
+                                    X["grid"] = X["grid"].fillna(X["driverId"].map(precursor_map))
+
+                                else:
+                                    # 3. Run simulation if not in loop and no actuals
+                                    logger.info(f"[predict] {precursor} not in current loop and no actuals - running simulation to estimate grid")
+                                    spinner.update(f"Simulating {precursor} for grid...")
+                                    qual_ranked = _run_single_prediction(
+                                        jc, om, season_i, round_i, precursor, ref_date, cfg
+                                    )
+                                    if qual_ranked is not None and not qual_ranked.empty:
+                                        grid_map = dict(zip(
+                                            qual_ranked["driverId"],
+                                            qual_ranked["predicted_position"]
+                                        ))
+                                        X["grid"] = X["grid"].fillna(X["driverId"].map(grid_map))
+                                    else:
+                                        # 3. Fallback
+                                        if "form_index" in X.columns:
+                                            X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
+                                        else:
+                                            X["grid"] = np.arange(1, len(X) + 1)
+                        else:
+                            logger.info(f"[predict] Using actual grid for {sess}")
+
                     # 3. Cache check (if no actual results and features built)
                     if (cached_hit := pred_cache.get(cache_inputs := {
-                        "X": X,
+                        "X": X.copy(),
                         "weather": meta.get("weather"),
                         "model_version": cfg.app.model_version,
                         "weights": calibrated_weights,
@@ -785,66 +850,6 @@ def run_predictions_for_event(
                         p_win = ranked["p_win"].values
                         dnf_prob = ranked["p_dnf"].values
                     else:
-
-                        # Universal Grid Feature logic (Race<-Quali, Sprint<-SprintQuali)
-                        # Map target session -> precursor session that determines grid
-                        grid_precursor_map = {
-                            "race": "qualifying",
-                            "sprint": "sprint_qualifying",
-                        }
-
-                        has_grid_concept = sess in grid_precursor_map
-
-                        if has_grid_concept and "grid" in X.columns:
-                            if X["grid"].isna().any():
-                                precursor = grid_precursor_map[sess]
-                                logger.info(f"[predict] Grid not available for {sess} - looking for {precursor} results")
-
-                                # 1. Check if precursor was already run in this loop (internal consistency)
-                                precursor_results = [p for p in accumulated_history if p["session"] == precursor]
-
-                                if precursor_results:
-                                    logger.info(f"[predict] Using {precursor} results from current run as grid")
-                                    grid_map = {r["driverId"]: int(r["position"]) for r in precursor_results if r.get("position") is not None}
-                                    X["grid"] = X["driverId"].map(grid_map)
-
-                                else:
-                                    # 2. Check for actual results of precursor
-                                    spinner.update(f"Checking actual results for {precursor}...")
-                                    precursor_actuals = _get_actual_positions_for_session(
-                                        jc, season_i, round_i, precursor,
-                                        roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
-                                    )
-
-                                    if precursor_actuals is not None and not precursor_actuals.isna().all():
-                                        logger.info(f"[predict] Using actual results for {precursor} as grid")
-                                        # Build explicit driverId -> position map from roster-aligned Series.
-                                        # precursor_actuals is indexed by roster row-index, not by driverId,
-                                        # so we must zip against roster["driverId"] for correct mapping.
-                                        precursor_map = dict(zip(roster["driverId"], precursor_actuals))
-                                        X["grid"] = X["grid"].fillna(X["driverId"].map(precursor_map))
-
-                                    else:
-                                        # 3. Run simulation if not in loop and no actuals
-                                        logger.info(f"[predict] {precursor} not in current loop and no actuals - running simulation to estimate grid")
-                                        spinner.update(f"Simulating {precursor} for grid...")
-                                        qual_ranked = _run_single_prediction(
-                                            jc, om, season_i, round_i, precursor, ref_date, cfg
-                                        )
-                                        if qual_ranked is not None and not qual_ranked.empty:
-                                            grid_map = dict(zip(
-                                                qual_ranked["driverId"],
-                                                qual_ranked["predicted_position"]
-                                            ))
-                                            X["grid"] = X["grid"].fillna(X["driverId"].map(grid_map))
-                                        else:
-                                            # 3. Fallback
-                                            if "form_index" in X.columns:
-                                                X["grid"] = X["form_index"].rank(ascending=False, method="first").astype(int)
-                                            else:
-                                                X["grid"] = np.arange(1, len(X) + 1)
-                            else:
-                                logger.info(f"[predict] Using actual grid for {sess}")
 
                         # Historical results for this roster (fetched before pace model
                         # so we can build out-of-sample training data)
