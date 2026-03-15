@@ -4,8 +4,13 @@ This module provides pace prediction and DNF probability estimation using
 gradient boosting models. Supports LightGBM, XGBoost, or sklearn fallback.
 """
 from __future__ import annotations
-from typing import Tuple, Any, List, Optional, Dict
+from typing import Tuple, Any, List, Optional, Dict, TYPE_CHECKING
 import warnings
+
+if TYPE_CHECKING:
+    import pandas as pd
+    import numpy as np
+    from datetime import datetime
 
 from .util import get_logger
 
@@ -23,7 +28,8 @@ logger = get_logger(__name__)
 def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                           ref_date: 'datetime', half_life_days: int = 120,
                           max_events: int = 200,
-                          boost_factor: float = 1.0) -> Optional['pd.DataFrame']:
+                          boost_factor: float = 1.0,
+                          qual_boost_factor: float = 1.0) -> Optional['pd.DataFrame']:
     """Build a lightweight training DataFrame from historical race results.
 
     Uses only columns that overlap with the current event feature matrix ``X_current``
@@ -42,7 +48,8 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     if hist is None or hist.empty:
         return None
 
-    races = hist[hist["session"] == "race"].dropna(subset=["driverId", "position", "date"]).copy()
+    # Include both race and sprint for general pace training
+    races = hist[hist["session"].isin(["race", "sprint"])].dropna(subset=["driverId", "position", "date"]).copy()
     if len(races) < 40:  # not enough data to meaningfully train
         return None
 
@@ -69,6 +76,19 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     races_dates = pd.to_datetime(races["date"], utc=True).values
     races_seasons = races["season"].values
     races_rounds = races["round"].values
+    races_sessions = races["session"].values
+
+    # Extract qualifying data for qualifying_form_index calculation
+    # Ensure qpos column exists for dropna subset check
+    if "qpos" not in hist.columns:
+        hist = hist.assign(qpos=np.nan)
+
+    qual = hist[hist["session"].isin(["qualifying", "sprint_qualifying"])].dropna(subset=["driverId", "qpos", "date"]).copy()
+    qual_driver_ids = qual["driverId"].values
+    q_dcodes = pd.Series(range(n_drivers), index=uniques).reindex(qual_driver_ids).fillna(-1).astype(int).values
+    qual_pos = qual["qpos"].values.astype(float)
+    qual_dates = pd.to_datetime(qual["date"], utc=True).values
+    qual_seasons = qual["season"].values
 
     # Safely extract constructorId (might not exist in mocked training data)
     if "constructorId" in races.columns:
@@ -109,12 +129,20 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         ages = diff.astype('timedelta64[ns]').astype(float) / 86400000000000.0
         w = np.exp2(-ages / max(1.0, float(half_life_days)))
 
-        # Apply current season boost if needed
-        if boost_factor != 1.0:
-            boost_mask = p_season == s
-            w[boost_mask] *= boost_factor
-
         # Aggregate by driver using pure numpy bincount (~10x faster than pandas groupby)
+        # Apply session-specific boosts within the current season
+        p_sess = races_sessions[prior_mask]
+
+        # Boost current season races
+        is_p_cur_race = (p_season == s) & (p_sess == "race")
+        if np.any(is_p_cur_race):
+            w[is_p_cur_race] *= boost_factor
+
+        # Boost current season sprints (use qual boost for sprints to match features.py)
+        is_p_cur_sprint = (p_season == s) & (p_sess == "sprint")
+        if np.any(is_p_cur_sprint):
+            w[is_p_cur_sprint] *= qual_boost_factor
+
         wval = p_val * w
         w_sum = np.bincount(p_dcodes, weights=w, minlength=n_drivers)
         wval_sum = np.bincount(p_dcodes, weights=wval, minlength=n_drivers)
@@ -123,6 +151,38 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         valid = w_sum > 0
         form_index = np.zeros(n_drivers, dtype=float)
         form_index[valid] = wval_sum[valid] / np.maximum(w_sum[valid], 1e-6)
+
+        # --- Calculate qualifying_form_index for these samples ---
+        q_form_index = np.zeros(n_drivers, dtype=float)
+        prior_q_mask = qual_dates < d_val
+        if np.any(prior_q_mask):
+            pq_dates = qual_dates[prior_q_mask]
+            pq_season = qual_seasons[prior_q_mask]
+            pq_pos = qual_pos[prior_q_mask]
+            pq_dcodes_sub = q_dcodes[prior_q_mask]
+
+            # Remove any drivers not in our main unique set
+            valid_pq = pq_dcodes_sub >= 0
+            pq_dates = pq_dates[valid_pq]
+            pq_season = pq_season[valid_pq]
+            pq_pos = pq_pos[valid_pq]
+            pq_dcodes_sub = pq_dcodes_sub[valid_pq]
+
+            if len(pq_pos) > 0:
+                diff_q = d_val - pq_dates
+                ages_q = diff_q.astype('timedelta64[ns]').astype(float) / 86400000000000.0
+                wq = np.exp2(-ages_q / max(1.0, float(half_life_days)))
+
+                # Apply qual boost for current season
+                boost_q_mask = pq_season == s
+                wq[boost_q_mask] *= qual_boost_factor
+
+                wqval = -pq_pos * wq
+                wq_sum = np.bincount(pq_dcodes_sub, weights=wq, minlength=n_drivers)
+                wqval_sum = np.bincount(pq_dcodes_sub, weights=wqval, minlength=n_drivers)
+
+                valid_q = wq_sum > 0
+                q_form_index[valid_q] = wqval_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
 
         # Build samples for the current event
         evt_indices = np.where(evt_mask)[0]
@@ -136,10 +196,11 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                 "driverId": uniques[code],
                 "constructorId": races_cons[idx],
                 "form_index": float(form_index[code]),
+                "qualifying_form_index": float(q_form_index[code]),
                 "grid": float(races_grid_float[idx]),
-                "is_race": 1,
+                "is_race": 1 if races_sessions[idx] == "race" else 0,
                 "is_qualifying": 0,
-                "is_sprint": 0,
+                "is_sprint": 1 if races_sessions[idx] == "sprint" else 0,
             }
             rows.append(sample)
 
@@ -205,16 +266,25 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
         X_train = X
         logger.info("[models] Training GBM on current event (%d rows, no historical X available)", len(X))
 
-    # Target: form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
-    if "form_index" not in X_train.columns:
+    # Target: use appropriate form index for the session type
+    # form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
+    is_quali_session = session_type in ("qualifying", "sprint_qualifying")
+    target_col = "qualifying_form_index" if is_quali_session else "form_index"
+
+    if target_col not in X_train.columns:
+        # Fallback to general form if specific form is missing
+        target_col = "form_index" if target_col == "qualifying_form_index" else "qualifying_form_index"
+
+    if target_col not in X_train.columns:
         y = np.zeros(len(X_train), dtype=float)
     else:
-        y = -X_train["form_index"].astype(float).values
+        y = -X_train[target_col].astype(float).values
 
     # Features (exclude identifiers, session meta, and target to prevent leakage)
+    # Note: we only exclude the current target column so the other index can be used as a feature
     exclude_cols = [
         "driverId", "name", "code", "constructorId", "constructorName", "number",
-        "session_type", "form_index", "current_quali_pos"
+        "session_type", target_col, "current_quali_pos"
     ]
     
     # Also exclude columns that are entirely NaN in the training set
@@ -310,10 +380,16 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     yhat = pipe.predict(X_infer)
 
     # Build baseline from form indices (for robustness)
-    # form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
+    # Use appropriate form index as the baseline for this session type
     base = np.zeros(len(X), dtype=float)
-    if "form_index" in X.columns:
-        base = -X["form_index"].astype(float).values
+    is_inference_quali = session_type in ("qualifying", "sprint_qualifying")
+    infer_base_col = "qualifying_form_index" if is_inference_quali else "form_index"
+
+    if infer_base_col not in X.columns:
+         infer_base_col = "form_index" if infer_base_col == "qualifying_form_index" else "qualifying_form_index"
+
+    if infer_base_col in X.columns:
+        base = -X[infer_base_col].astype(float).values
     
     # Blending weights from config or defaults
     w_base_team = 0.3
