@@ -281,9 +281,10 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
         y = -X_train[target_col].astype(float).values
 
     # Features (exclude identifiers, session meta, and target to prevent leakage)
+    # Note: we only exclude the current target column so the other index can be used as a feature
     exclude_cols = [
         "driverId", "name", "code", "constructorId", "constructorName", "number",
-        "session_type", "form_index", "qualifying_form_index", "current_quali_pos"
+        "session_type", target_col, "current_quali_pos"
     ]
     
     # Also exclude columns that are entirely NaN in the training set
