@@ -43,11 +43,11 @@ def resolve_event(jc: JolpicaClient, season: Optional[str], rnd: str) -> Tuple[i
                     races = jc.get_season_schedule(str(s))
                     this_race = next((x for x in races if str(x.get("round")) == str(r)), None)
                     if this_race:
-                        race_dt = datetime.fromisoformat(this_race["date"] + "T00:00:00+00:00")
+                        race_dt = _get_session_datetime(this_race, "race") or datetime.fromisoformat(this_race["date"] + "T00:00:00+00:00")
                         now = datetime.now(timezone.utc)
-                        # If the race was more than 1 day ago, it's likely stale
-                        if race_dt < now - timedelta(days=1):
-                            future = [x for x in races if datetime.fromisoformat(x["date"] + "T00:00:00+00:00") >= now - timedelta(days=1)]
+                        # If the race was more than 4 hours ago, it's likely stale
+                        if race_dt < now - timedelta(hours=4):
+                            future = [x for x in races if (_get_session_datetime(x, "race") or datetime.fromisoformat(x["date"] + "T00:00:00+00:00")) >= now - timedelta(hours=4)]
                             if future:
                                 r = future[0]["round"]
                 except Exception:
@@ -55,7 +55,7 @@ def resolve_event(jc: JolpicaClient, season: Optional[str], rnd: str) -> Tuple[i
                     s, _ = jc.get_latest_season_and_round()
                     races = jc.get_season_schedule(str(s))
                     now = datetime.now(timezone.utc)
-                    future = [x for x in races if datetime.fromisoformat(x["date"] + "T00:00:00+00:00") >= now - timedelta(days=1)]
+                    future = [x for x in races if (_get_session_datetime(x, "race") or datetime.fromisoformat(x["date"] + "T00:00:00+00:00")) >= now - timedelta(hours=4)]
                     r = future[0]["round"] if future else races[-1]["round"]
             elif rnd == "last":
                 s, r = jc.get_latest_season_and_round()
@@ -79,7 +79,7 @@ def resolve_event(jc: JolpicaClient, season: Optional[str], rnd: str) -> Tuple[i
                         r = races[-1]["round"]
                 else:
                     now = datetime.now(timezone.utc)
-                    future = [x for x in races if datetime.fromisoformat(x["date"] + "T00:00:00+00:00") >= now]
+                    future = [x for x in races if (_get_session_datetime(x, "race") or datetime.fromisoformat(x["date"] + "T00:00:00+00:00")) >= now - timedelta(hours=4)]
                     r = future[0]["round"] if future else races[-1]["round"]
             else:
                 r = rnd
