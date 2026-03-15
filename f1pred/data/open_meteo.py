@@ -64,7 +64,7 @@ class OpenMeteoClient:
                 norm[k] = v
         return norm
 
-    def _fetch_hourly_df(self, base_url: str, params: Dict[str, Any]) -> 'pd.DataFrame':
+    def _fetch_hourly_df(self, base_url: str, params: Dict[str, Any]) -> 'pd.DataFrame':  # noqa: F821
         """Fetch hourly data; return empty DataFrame on any HTTP/shape error (never raise)."""
         import pandas as pd
         try:
@@ -86,7 +86,7 @@ class OpenMeteoClient:
             logger.info(f"OpenMeteoClient: hourly fetch failed for {base_url}: {e}")
             return pd.DataFrame(columns=["time"])
 
-    def get_forecast(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "UTC") -> 'pd.DataFrame':
+    def get_forecast(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "UTC") -> 'pd.DataFrame':  # noqa: F821
         import pandas as pd
         if not _valid_lat_lon(lat, lon):
             logger.info(f"OpenMeteoClient.get_forecast: invalid coordinates lat={repr(lat)}, lon={repr(lon)}")
@@ -127,7 +127,7 @@ class OpenMeteoClient:
         forecast_days = min(forecast_days, 16)
         return past_days, forecast_days
 
-    def get_historical_weather(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "auto") -> 'pd.DataFrame':
+    def get_historical_weather(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "auto") -> 'pd.DataFrame':  # noqa: F821
         import pandas as pd
         if not _valid_lat_lon(lat, lon):
             logger.info(f"OpenMeteoClient.get_historical_weather: invalid coordinates lat={repr(lat)}, lon={repr(lon)}")
@@ -154,7 +154,7 @@ class OpenMeteoClient:
         }
         return self._fetch_hourly_df(self.historical_weather_url, params)
 
-    def get_historical_forecast(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "UTC") -> 'pd.DataFrame':
+    def get_historical_forecast(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "UTC") -> 'pd.DataFrame':  # noqa: F821
         import pandas as pd
         if not _valid_lat_lon(lat, lon):
             logger.info(f"OpenMeteoClient.get_historical_forecast: invalid coordinates lat={repr(lat)}, lon={repr(lon)}")
@@ -182,7 +182,7 @@ class OpenMeteoClient:
         return self._fetch_hourly_df(self.historical_forecast_url, params)
 
     @staticmethod
-    def aggregate_for_session(weather_df: 'pd.DataFrame', session_start: datetime, session_end: datetime) -> Dict[str, float]:
+    def aggregate_for_session(weather_df: 'pd.DataFrame', session_start: datetime, session_end: datetime) -> Dict[str, float]:  # noqa: F821
         if weather_df is None or weather_df.empty:
             return {}
         if "time" not in weather_df.columns:

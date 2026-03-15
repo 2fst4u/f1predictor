@@ -163,7 +163,7 @@ def _patch_missing_positions(sess, results):
     return results
 
 
-def patch_missing_positions(session_name: str, results: 'pd.DataFrame') -> 'pd.DataFrame':
+def patch_missing_positions(session_name: str, results: 'pd.DataFrame') -> 'pd.DataFrame':  # noqa: F821
     """Apply ranking derivation logic to a classification dataframe without needing a full session object."""
     import pandas as pd
     import numpy as np

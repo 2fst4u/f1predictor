@@ -78,7 +78,7 @@ class CalibrationManager:
         except Exception as e:
             logger.error(f"[calibrate] Failed to save weights: {e}")
 
-    def check_calibration_needed(self, history_df: Optional['pd.DataFrame'] = None) -> bool:
+    def check_calibration_needed(self, history_df: Optional['pd.DataFrame'] = None) -> bool:  # noqa: F821
         """Check if calibration is needed based on new race results or missing file."""
         if not self.cfg.calibration.enabled:
             return False
@@ -117,7 +117,7 @@ class CalibrationManager:
             
         return False
 
-    def run_calibration(self, jc: JolpicaClient, om: OpenMeteoClient, history_df: Optional['pd.DataFrame'] = None):
+    def run_calibration(self, jc: JolpicaClient, om: OpenMeteoClient, history_df: Optional['pd.DataFrame'] = None):  # noqa: F821
         """Run the full calibration process."""
         # Import heavy deps here
         import numpy as np

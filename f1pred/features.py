@@ -15,14 +15,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 import pandas as pd
 
-# Disable pandas warning about silent downcasting on fillna/ffill/bfill
-pd.set_option("future.no_silent_downcasting", True)
-
 from .util import get_logger, ensure_dirs
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.fastf1_backend import get_event, get_session_times
 from .roster import derive_roster  # single source of truth for roster
+
+# Disable pandas warning about silent downcasting on fillna/ffill/bfill
+pd.set_option("future.no_silent_downcasting", True)
 
 __all__ = [
     "build_session_features",
