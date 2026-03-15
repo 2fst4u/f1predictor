@@ -561,6 +561,8 @@ def run_predictions_for_event(
                     cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
                 if "grid_factor" in b:
                     cfg.modelling.blending.grid_factor = b["grid_factor"]
+                if "current_season_qualifying_weight" in b:
+                    cfg.modelling.blending.current_season_qualifying_weight = b["current_season_qualifying_weight"]
                 if "current_quali_factor" in b:
                     cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
                 logger.info(f"[predict] Applied calibrated blending weights (gbm={b.get('gbm_weight', 0):.2f})")
@@ -757,6 +759,8 @@ def run_predictions_for_event(
                                         cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
                                     if "grid_factor" in b:
                                         cfg.modelling.blending.grid_factor = b["grid_factor"]
+                                    if "current_season_qualifying_weight" in b:
+                                        cfg.modelling.blending.current_season_qualifying_weight = b["current_season_qualifying_weight"]
                                     if "current_quali_factor" in b:
                                         cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
 
@@ -858,7 +862,8 @@ def run_predictions_for_event(
                             hist_X_train = build_hist_training_X(
                                 hist, X, ref_date,
                                 half_life_days=cfg.modelling.recency_half_life_days.base,
-                                boost_factor=getattr(cfg.modelling.blending, "current_season_weight", 1.0)
+                                boost_factor=getattr(cfg.modelling.blending, "current_season_weight", 1.0),
+                                qual_boost_factor=getattr(cfg.modelling.blending, "current_season_qualifying_weight", 1.0)
                             )
                         except Exception as e:
                             logger.info(f"[predict] Could not build historical training set: {e}")

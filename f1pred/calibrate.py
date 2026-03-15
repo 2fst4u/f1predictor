@@ -39,6 +39,7 @@ class CalibrationManager:
                 "baseline_team_factor": 0.3,
                 "baseline_driver_team_factor": 0.2,
                 "grid_factor": 0.8,
+                "current_season_qualifying_weight": 3.0,
                 "current_quali_factor": 0.5
             }
         }

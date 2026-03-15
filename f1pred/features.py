@@ -538,17 +538,24 @@ def collect_historical_results(
 
 
 def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: int,
-                         current_season: Optional[int] = None, boost_factor: float = 1.0) -> pd.DataFrame:
+                         current_season: Optional[int] = None, boost_factor: float = 1.0,
+                         sprint_boost_factor: float = 1.0) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=["driverId", "form_index"])
-    dfg = df[df["session"] == "race"].copy()
+    # Include both race and sprint results for overall form
+    dfg = df[df["session"].isin(["race", "sprint"])].copy()
     dfg = dfg.dropna(subset=["driverId", "position", "date"])
     dfg["points"] = dfg["points"].fillna(0.0)
     dfg["pos_score"] = -dfg["position"].astype(float)
     dfg["pts_score"] = dfg["points"].astype(float)
     w = exponential_weights(dfg["date"], ref_date, half_life_days)
-    if current_season is not None and boost_factor != 1.0 and "season" in dfg.columns:
-        w = np.where(dfg["season"] == current_season, w * boost_factor, w)
+    if current_season is not None and "season" in dfg.columns:
+        # Boost current season races
+        is_cur_race = (dfg["season"] == current_season) & (dfg["session"] == "race")
+        w = np.where(is_cur_race, w * boost_factor, w)
+        # Boost current season sprints
+        is_cur_sprint = (dfg["season"] == current_season) & (dfg["session"] == "sprint")
+        w = np.where(is_cur_sprint, w * sprint_boost_factor, w)
     dfg["w"] = w
     dfg["weighted_val"] = (dfg["pos_score"] + dfg["pts_score"]) * dfg["w"]
     sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
@@ -562,10 +569,8 @@ def compute_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days
     if df.empty:
         return pd.DataFrame(columns=["driverId", "qualifying_form_index"])
 
-    # Use qualifying results
-    dfg = df[df["session"] == "qualifying"].copy()
-    # Also include Sprint Shootout/Qualifying if present and mapped appropriately
-    # (assuming they are labelled as 'qualifying' or handled similarly)
+    # Use qualifying results (including sprint qualifying)
+    dfg = df[df["session"].isin(["qualifying", "sprint_qualifying"])].copy()
 
     if "qpos" not in dfg.columns:
         return pd.DataFrame(columns=["driverId", "qualifying_form_index"])
@@ -704,7 +709,7 @@ def compute_teammate_delta(
     if hist.empty:
         return pd.DataFrame(columns=["driverId", "teammate_delta"])
 
-    q = hist[hist["session"] == "qualifying"].copy()
+    q = hist[hist["session"].isin(["qualifying", "sprint_qualifying"])].copy()
     if q.empty:
         return pd.DataFrame(columns=["driverId", "teammate_delta"])
 
@@ -1199,11 +1204,12 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
 
     # Current season weight boost
     boost = getattr(cfg.modelling.blending, "current_season_weight", 1.0)
+    qual_boost = getattr(cfg.modelling.blending, "current_season_qualifying_weight", boost)
     s_int = int(season)
 
     # Form indices
     form = compute_form_indices(hist, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.base,
-                                current_season=s_int, boost_factor=boost)
+                                current_season=s_int, boost_factor=boost, sprint_boost_factor=qual_boost)
 
     # Ensure 'session' column exists
     if 'session' not in hist.columns:
@@ -1243,7 +1249,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             hist,
             ref_date=ref_date,
             half_life_days=cfg.modelling.recency_half_life_days.base,
-            current_season=s_int, boost_factor=boost
+            current_season=s_int, boost_factor=qual_boost
         )
         logger.info("[features] teammate_delta computed for %d drivers", len(tm_delta))
     except Exception as e:
@@ -1301,7 +1307,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
     # Qualifying Form
     try:
         qual_form = compute_qualifying_form(hist, ref_date, cfg.modelling.recency_half_life_days.base,
-                                            current_season=s_int, boost_factor=boost)
+                                            current_season=s_int, boost_factor=qual_boost)
         logger.info(f"[features] Qualifying form computed for {len(qual_form)} drivers")
     except Exception as e:
         logger.info(f"[features] Qualifying form failed: {e}")
