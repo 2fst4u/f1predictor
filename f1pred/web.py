@@ -105,6 +105,8 @@ async def get_schedule(season: str = Path(..., max_length=10)):
     jc = JolpicaClient(_config.data_sources.jolpica.base_url)
     try:
         races = jc.get_season_schedule(season)
+        # Filter out races without a round number to prevent issues in the UI
+        races = [r for r in races if r.get("round")]
         return {"season": season, "races": races}
     except Exception:
         logger.exception("Failed to get schedule")

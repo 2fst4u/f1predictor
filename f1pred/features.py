@@ -213,6 +213,8 @@ def build_roster(jc: JolpicaClient, season: str, rnd: str, event_dt: Optional[da
 def _parse_races_block(races: List[Dict[str, Any]], session_label: str, cutoff: datetime) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for r in races or []:
+        if not r.get("round"):
+            continue
         date_str = r.get("date")
         time_str = r.get("time", "00:00:00Z")
         try:
@@ -319,6 +321,8 @@ def _fetch_current_season_per_round(
     # The end_before filter in collect_historical_results handles session-level pruning.
     candidates: List[Dict[str, Any]] = []
     for race in schedule:
+        if not race.get("round"):
+            continue
         date_str = race.get("date")
         if not date_str:
             continue
@@ -1014,7 +1018,8 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
     # Schedule; if missing, return empty features (never raise)
     try:
         schedule = jc.get_season_schedule(str(season))
-        sched_row = [r for r in schedule if int(r.get("round")) == int(rnd)]
+        # Filter and resolve the target round robustly
+        sched_row = [r for r in schedule if r.get("round") and int(r.get("round")) == int(rnd)]
         if not sched_row:
             logger.info(f"[features] No schedule row for {season} R{rnd}; returning empty features")
             meta = {

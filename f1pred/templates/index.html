@@ -70,8 +70,8 @@
                         <select id="input-round" x-model="params.round" @change="fetchEventStatus()" :disabled="!params.season || scheduleLoading || loading" :title="!params.season ? 'Select a season first' : (scheduleLoading ? 'Loading schedule...' : (loading ? 'Prediction in progress' : 'Select a round'))"
                                 class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
                             <option value="" x-text="scheduleLoading ? 'Loading rounds...' : 'Select Round'"></option>
-                            <template x-for="r in schedule" :key="r.round">
-                                <option :value="r.round" x-text="'Round ' + r.round + ': ' + r.raceName"></option>
+                            <template x-for="(r, index) in schedule" :key="r.round || index">
+                                <option :value="r.round" x-text="'Round ' + (r.round || index + 1) + ': ' + r.raceName"></option>
                             </template>
                         </select>
                     </div>
@@ -154,13 +154,13 @@
             <div x-show="results && !loading" x-transition x-cloak>
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-xl font-bold italic uppercase">
-                        Results for <span class="f1-red-text" x-text="results.season"></span> Round <span class="f1-red-text" x-text="results.round"></span>
+                        Results for <span class="f1-red-text" x-text="results?.season"></span> Round <span class="f1-red-text" x-text="results?.round"></span>
                     </h2>
                 </div>
 
                 <!-- Session Tabs -->
                 <div class="flex border-b border-gray-700 mb-6 overflow-x-auto" role="tablist" aria-label="Session Results">
-                    <template x-for="(data, sess) in results.sessions" :key="sess">
+                    <template x-for="(data, sess) in (results?.sessions || {})" :key="sess">
                         <button @click="activeSession = sess"
                                 role="tab"
                                 :aria-selected="(activeSession === sess).toString()"
@@ -174,7 +174,7 @@
                 </div>
 
                 <!-- Session Content -->
-                <template x-for="(data, sess) in results.sessions" :key="sess">
+                <template x-for="(data, sess) in (results?.sessions || {})" :key="sess">
                     <div x-show="activeSession === sess" x-transition
                          role="tabpanel"
                          :id="'panel-' + sess"
