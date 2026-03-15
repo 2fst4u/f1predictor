@@ -82,6 +82,7 @@ class Caching:
 class RecencyHalfLives:
     base: int
     team: int
+    weather: Optional[int] = 30
 
 
 @dataclass

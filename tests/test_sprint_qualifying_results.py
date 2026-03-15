@@ -72,7 +72,7 @@ def test_get_event_status_with_fastf1_sq():
     with patch("f1pred.web.resolve_event") as mock_resolve, \
          patch("f1pred.features.build_roster") as mock_roster, \
          patch("f1pred.predict._get_actual_positions_for_session") as mock_acts, \
-         patch("f1pred.web.JolpicaClient") as mock_jc_class:
+         patch("f1pred.web.JolpicaClient"):
 
         mock_resolve.return_value = (2026, 4, {
             "raceName": "Chinese GP",
