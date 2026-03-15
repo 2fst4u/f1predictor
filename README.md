@@ -122,6 +122,15 @@ Evaluate model accuracy across historical seasons:
 python main.py --backtest
 ```
 
+### Testing
+
+Run the local test suite (requires installing test dependencies first):
+
+```bash
+pip install pytest pytest-cov httpx
+make test
+```
+
 ## Known Limitations
 
 - **Weather is approximate** – Forecasts are aggregated around session windows
