@@ -410,9 +410,15 @@ def _run_single_prediction(
     except Exception as e:
         logger.warning("[predict._run_single] Mixed model failed: %s", e)
     
-    # Combine pace
+    # Combine pace (use config ensemble weights, not hardcoded defaults)
     try:
-        ens_cfg = EnsembleConfig()
+        ens_cfg = EnsembleConfig(
+            w_elo=cfg.modelling.ensemble.w_elo,
+            w_bt=cfg.modelling.ensemble.w_bt,
+            w_mixed=cfg.modelling.ensemble.w_mixed,
+            w_gbm=cfg.modelling.ensemble.w_gbm,
+            min_std=cfg.modelling.ensemble.min_std,
+        )
         combined_pace = combine_pace(
             gbm_pace=pace_hat,
             elo_pace=elo_pace,
@@ -439,6 +445,7 @@ def _run_single_prediction(
         combined_pace,
         dnf_prob,
         draws=draws,
+        random_seed=cfg.app.random_seed,
         noise_factor=cfg.modelling.simulation.noise_factor,
         min_noise=cfg.modelling.simulation.min_noise,
         max_penalty_base=cfg.modelling.simulation.max_penalty_base,
@@ -897,8 +904,15 @@ def run_predictions_for_event(
                                 logger.info(f"[predict] Mixed predict failed: {e}")
 
                         # Combine GBM pace with ensemble elements
+                        # Prefer calibrated weights; fall back to config.yaml ensemble weights
                         try:
-                            final_ens_cfg = ens_cfg_obj if ens_cfg_obj else EnsembleConfig()
+                            final_ens_cfg = ens_cfg_obj if ens_cfg_obj else EnsembleConfig(
+                                w_elo=cfg.modelling.ensemble.w_elo,
+                                w_bt=cfg.modelling.ensemble.w_bt,
+                                w_mixed=cfg.modelling.ensemble.w_mixed,
+                                w_gbm=cfg.modelling.ensemble.w_gbm,
+                                min_std=cfg.modelling.ensemble.min_std,
+                            )
                             combined_pace = combine_pace(
                                 gbm_pace=pace_hat,
                                 elo_pace=elo_pace,
@@ -928,6 +942,7 @@ def run_predictions_for_event(
                             combined_pace,
                             dnf_prob,
                             draws=draws,
+                            random_seed=cfg.app.random_seed,
                             noise_factor=cfg.modelling.simulation.noise_factor,
                             min_noise=cfg.modelling.simulation.min_noise,
                             max_penalty_base=cfg.modelling.simulation.max_penalty_base,

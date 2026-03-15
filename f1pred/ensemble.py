@@ -18,14 +18,15 @@ class EnsembleConfig:
     """Weights for combining individual pace components.
 
     All weights are relative and are re-normalised to sum to 1.0 at combine-time.
+    Defaults match config.yaml so that uncalibrated runs behave consistently.
     """
 
-    w_elo: float = 0.25
-    w_bt: float = 0.25
-    w_mixed: float = 0.25
-    w_gbm: float = 0.25
-    # Guard rail for std-dev normalisation
-    min_std: float = 1e-6
+    w_elo: float = 0.2
+    w_bt: float = 0.2
+    w_mixed: float = 0.2
+    w_gbm: float = 0.4
+    # Guard rail for std-dev normalisation (matches config.yaml modelling.ensemble.min_std)
+    min_std: float = 0.05
 
 
 class EloModel:

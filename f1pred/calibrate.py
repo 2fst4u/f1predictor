@@ -296,10 +296,11 @@ class CalibrationManager:
                 # History up to this race (strict temporal cutoff — no leakage of target event)
                 hist_subset = all_hist[all_hist["date"] < d]
                 
-                # Use recency weighting (365 days) to avoid valuing old results equal to recent ones
+                # Use recency weighting from config to avoid valuing old results equal to recent ones
+                half_life = self.cfg.modelling.recency_half_life_days.team
                 elo = EloModel().fit(hist_subset).predict(X_evt)
-                bt = BradleyTerryModel().fit(hist_subset, half_life_days=365).predict(X_evt)
-                mixed = MixedEffectsLikeModel().fit(hist_subset, half_life_days=365).predict(X_evt)
+                bt = BradleyTerryModel().fit(hist_subset, half_life_days=half_life).predict(X_evt)
+                mixed = MixedEffectsLikeModel().fit(hist_subset, half_life_days=half_life).predict(X_evt)
                 
                 # Baseline info (from X_evt)
                 # Form index is already in X_evt, usually negative of what we want for 'pace'

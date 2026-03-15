@@ -46,7 +46,7 @@ class TestConfigSecurity(unittest.TestCase):
                 }
             },
             "modelling": {
-                "recency_half_life_days": {"base": 120, "weather": 180, "team": 240},
+                "recency_half_life_days": {"base": 120, "team": 240},
                 "monte_carlo": {"draws": 5000},
                 "features": {
                     "include_fastf1_fill": True,
@@ -68,12 +68,6 @@ class TestConfigSecurity(unittest.TestCase):
                     "alpha": 2.0, "beta": 8.0, "driver_weight": 0.6,
                     "team_weight": 0.4, "clip_min": 0.02, "clip_max": 0.35
                 }
-            },
-            "calibration": {
-                "enabled": True,
-                "lookback_window_days": 1095,
-                "frequency_hours": 24,
-                "weights_file": "calibration_weights.json"
             },
             "backtesting": {
                 "enabled": False,

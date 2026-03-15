@@ -77,7 +77,6 @@ class Caching:
 @dataclass
 class RecencyHalfLives:
     base: int
-    weather: int
     team: int
 
 

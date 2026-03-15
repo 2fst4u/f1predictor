@@ -49,7 +49,7 @@ def full_valid_config():
             }
         },
         "modelling": {
-            "recency_half_life_days": {"base": 120, "weather": 180, "team": 240},
+            "recency_half_life_days": {"base": 120, "team": 240},
             "monte_carlo": {"draws": 5000},
             "features": {
                 "include_fastf1_fill": True,

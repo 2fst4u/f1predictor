@@ -45,7 +45,6 @@ caching:
 modelling:
   recency_half_life_days:
     base: 120  # reduced for more reactivity to recent form
-    weather: 180
     team: 240  # reduced for team perf to be more current
   monte_carlo:
     draws: 5000
