@@ -14,11 +14,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
+from .util import get_logger, ensure_dirs
 
 # Disable pandas warning about silent downcasting on fillna/ffill/bfill
 pd.set_option("future.no_silent_downcasting", True)
-
-from .util import get_logger, ensure_dirs
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.fastf1_backend import get_event, get_session_times
@@ -558,8 +557,17 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
         w = np.where(is_cur_sprint, w * sprint_boost_factor, w)
     dfg["w"] = w
     dfg["weighted_val"] = (dfg["pos_score"] + dfg["pts_score"]) * dfg["w"]
-    sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
-    sums["form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
+
+    # ⚡ Bolt: pure NumPy bincount for aggregations instead of pd.groupby().agg()
+    dfg_clean = dfg.dropna(subset=["driverId"])
+    codes, uniques = pd.factorize(dfg_clean["driverId"])
+    w_sum = np.bincount(codes, weights=dfg_clean["w"].values)
+    val_sum = np.bincount(codes, weights=dfg_clean["weighted_val"].values)
+
+    sums = pd.DataFrame({
+        "driverId": uniques,
+        "form_index": val_sum / np.maximum(w_sum, 1e-6)
+    })
     return sums[["driverId", "form_index"]]
 
 
@@ -586,8 +594,16 @@ def compute_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days
     dfg["w"] = w
     dfg["weighted_val"] = dfg["pos_score"] * dfg["w"]
 
-    sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
-    sums["qualifying_form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
+    # ⚡ Bolt: pure NumPy bincount for aggregations instead of pd.groupby().agg()
+    dfg_clean = dfg.dropna(subset=["driverId"])
+    codes, uniques = pd.factorize(dfg_clean["driverId"])
+    w_sum = np.bincount(codes, weights=dfg_clean["w"].values)
+    val_sum = np.bincount(codes, weights=dfg_clean["weighted_val"].values)
+
+    sums = pd.DataFrame({
+        "driverId": uniques,
+        "qualifying_form_index": val_sum / np.maximum(w_sum, 1e-6)
+    })
     return sums[["driverId", "qualifying_form_index"]]
 
 
@@ -680,14 +696,18 @@ def compute_driver_team_form(
 
     races["weighted_val"] = (races["pos_score"] + races["pts_score"]) * races["w"]
 
-    # We need both the weighted sum/sum of weights AND the count of rows
-    agg = races.groupby("driverId").agg(
-        weighted_val_sum=("weighted_val", "sum"),
-        w_sum=("w", "sum"),
-        team_tenure_events=("driverId", "count")
-    ).reset_index()
+    # ⚡ Bolt: pure NumPy bincount for aggregations instead of pd.groupby().agg()
+    races_clean = races.dropna(subset=["driverId"])
+    codes, uniques = pd.factorize(races_clean["driverId"])
+    w_sum = np.bincount(codes, weights=races_clean["w"].values)
+    val_sum = np.bincount(codes, weights=races_clean["weighted_val"].values)
+    count = np.bincount(codes)
 
-    agg["driver_team_form_index"] = agg["weighted_val_sum"] / agg["w_sum"].clip(lower=1e-6)
+    agg = pd.DataFrame({
+        "driverId": uniques,
+        "team_tenure_events": count,
+        "driver_team_form_index": val_sum / np.maximum(w_sum, 1e-6)
+    })
 
     return agg[["driverId", "driver_team_form_index", "team_tenure_events"]]
 
@@ -818,8 +838,17 @@ def compute_grid_finish_delta(
     races["w"] = w
 
     races["weighted_gain"] = races["gain"] * races["w"]
-    sums = races.groupby("driverId")[["weighted_gain", "w"]].sum().reset_index()
-    sums["grid_finish_delta"] = sums["weighted_gain"] / sums["w"].clip(lower=1e-6)
+
+    # ⚡ Bolt: pure NumPy bincount for aggregations instead of pd.groupby().agg()
+    races_clean = races.dropna(subset=["driverId"])
+    codes, uniques = pd.factorize(races_clean["driverId"])
+    w_sum = np.bincount(codes, weights=races_clean["w"].values)
+    val_sum = np.bincount(codes, weights=races_clean["weighted_gain"].values)
+
+    sums = pd.DataFrame({
+        "driverId": uniques,
+        "grid_finish_delta": val_sum / np.maximum(w_sum, 1e-6)
+    })
     return sums[["driverId", "grid_finish_delta"]]
 
 
