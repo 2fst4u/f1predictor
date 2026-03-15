@@ -4,8 +4,11 @@ This module orchestrates feature building, model training, simulation, and
 output generation for F1 race predictions.
 """
 from __future__ import annotations
-from typing import List, Dict, Any, Optional, Tuple, Callable
+from typing import List, Dict, Any, Optional, Tuple, Callable, TYPE_CHECKING
 from datetime import datetime, timezone, timedelta
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 import numpy as np
 from colorama import Fore, Style

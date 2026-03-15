@@ -4,8 +4,13 @@ This module provides pace prediction and DNF probability estimation using
 gradient boosting models. Supports LightGBM, XGBoost, or sklearn fallback.
 """
 from __future__ import annotations
-from typing import Tuple, Any, List, Optional, Dict
+from typing import Tuple, Any, List, Optional, Dict, TYPE_CHECKING
 import warnings
+
+if TYPE_CHECKING:
+    import pandas as pd
+    import numpy as np
+    from datetime import datetime
 
 from .util import get_logger
 
@@ -130,11 +135,13 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
 
         # Boost current season races
         is_p_cur_race = (p_season == s) & (p_sess == "race")
-        w[is_p_cur_race] *= boost_factor
+        if np.any(is_p_cur_race):
+            w[is_p_cur_race] *= boost_factor
 
         # Boost current season sprints (use qual boost for sprints to match features.py)
         is_p_cur_sprint = (p_season == s) & (p_sess == "sprint")
-        w[is_p_cur_sprint] *= qual_boost_factor
+        if np.any(is_p_cur_sprint):
+            w[is_p_cur_sprint] *= qual_boost_factor
 
         wval = p_val * w
         w_sum = np.bincount(p_dcodes, weights=w, minlength=n_drivers)

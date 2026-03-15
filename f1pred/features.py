@@ -1414,10 +1414,14 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         w_mean = float(wt.get("wind_mean", 0.0))
         r_sum = float(wt.get("rain_sum", 0.0))
         
-        if t_mean != t_mean: t_mean = 0.0
-        if p_mean != p_mean: p_mean = 0.0
-        if w_mean != w_mean: w_mean = 0.0
-        if r_sum != r_sum: r_sum = 0.0
+        if t_mean != t_mean:
+            t_mean = 0.0
+        if p_mean != p_mean:
+            p_mean = 0.0
+        if w_mean != w_mean:
+            w_mean = 0.0
+        if r_sum != r_sum:
+            r_sum = 0.0
 
         X["weather_effect"] = (
             X.get("weather_beta_temp", 0.0) * t_mean +
