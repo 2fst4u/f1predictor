@@ -1203,7 +1203,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         hist = pd.DataFrame(columns=["driverId", "position", "date", "session", "constructorId", "points"])
 
     # Current season weight boost
-    boost = getattr(cfg.modelling.blending, "current_season_weight", 4.0)
+    boost = getattr(cfg.modelling.blending, "current_season_weight", 8.0)
     qual_boost = getattr(cfg.modelling.blending, "current_season_qualifying_weight", boost)
     s_int = int(season)
 

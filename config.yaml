@@ -64,8 +64,8 @@ modelling:
     baseline_team_factor: 0.3
     baseline_driver_team_factor: 0.2
     grid_factor: 0.8
-    current_season_weight: 4.0
-    current_season_qualifying_weight: 10.0
+    current_season_weight: 8.0
+    current_season_qualifying_weight: 20.0
     current_quali_factor: 0.5  # weight of current weekend qualifying position in race pace
     analytical_win_weight: 0.5  # weight of analytical (Plackett-Luce) vs simulation p_win (0=all sim, 1=all analytical)
   dnf:

@@ -870,8 +870,8 @@ def run_predictions_for_event(
                             hist_X_train = build_hist_training_X(
                                 hist, X, ref_date,
                                 half_life_days=cfg.modelling.recency_half_life_days.base,
-                                boost_factor=getattr(cfg.modelling.blending, "current_season_weight", 4.0),
-                                qual_boost_factor=getattr(cfg.modelling.blending, "current_season_qualifying_weight", 10.0)
+                                boost_factor=getattr(cfg.modelling.blending, "current_season_weight", 8.0),
+                                qual_boost_factor=getattr(cfg.modelling.blending, "current_season_qualifying_weight", 20.0)
                             )
                         except Exception as e:
                             logger.info(f"[predict] Could not build historical training set: {e}")
