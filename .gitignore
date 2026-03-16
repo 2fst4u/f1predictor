@@ -61,3 +61,4 @@ Thumbs.db
 cache/
 fastf1_cache/
 test_cache/
+http_cache.sqlite
