@@ -39,8 +39,8 @@ class CalibrationManager:
                 "baseline_team_factor": 0.3,
                 "baseline_driver_team_factor": 0.2,
                 "grid_factor": 0.8,
-                "current_season_weight": 4.0,
-                "current_season_qualifying_weight": 10.0,
+                "current_season_weight": 100.0,
+                "current_season_qualifying_weight": 100.0,
                 "current_quali_factor": 0.5
             }
         }
@@ -549,8 +549,8 @@ class CalibrationManager:
                     "baseline_team_factor": float(w_team_opt / w_form_opt),
                     "baseline_driver_team_factor": float(w_dt_opt / w_form_opt),
                     "grid_factor": w_grid_stickiness,
-                    "current_season_weight": self.current_weights["blending"].get("current_season_weight", 8.0),
-                    "current_season_qualifying_weight": self.current_weights["blending"].get("current_season_qualifying_weight", 20.0),
+                    "current_season_weight": self.current_weights["blending"].get("current_season_weight", 100.0),
+                    "current_season_qualifying_weight": self.current_weights["blending"].get("current_season_qualifying_weight", 100.0),
                     "current_quali_factor": self.current_weights["blending"].get("current_quali_factor", 0.5)
                 }
             }
