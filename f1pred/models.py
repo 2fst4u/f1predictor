@@ -486,25 +486,28 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     # Second Stage: Incorporate grid "stickiness" for race sessions
     # This ensures starting position acts as a strong anchor for the prediction.
     if session_type in ("race", "sprint") and "grid" in X.columns:
-        # Dynamic stickiness based on circuit passability and driver skill
-        # Base stickiness
+        # Dynamic stickiness based on circuit passability and driver skill.
+        # The base w_grid is calibrated; circuit and driver adjustments scale
+        # proportionally to the flexibility budget (1 - w_grid) so they
+        # automatically adapt when the calibrated grid factor changes.
         dynamic_w_grid = w_grid
-        
+        flexibility = max(1.0 - w_grid, 0.05)  # how much non-grid signal is allowed
+
         # 1. Circuit overtake difficulty
         if "circuit_overtake_difficulty" in X.columns:
             avg_circuit_diff = float(np.nanmean(X["circuit_overtake_difficulty"]))
             if not np.isnan(avg_circuit_diff):
                 # Negative = hard to pass -> increase stickiness
-                circuit_modifier = -avg_circuit_diff * 0.05
+                circuit_modifier = -avg_circuit_diff * flexibility * 0.15
                 dynamic_w_grid = dynamic_w_grid + circuit_modifier
-                
+
         # 2. Driver overtake propensity
         if "grid_finish_delta" in X.columns:
             # Positive = driver gains positions -> decrease stickiness
             driver_gfd = X["grid_finish_delta"].astype(float).values
-            driver_modifier = - (np.nan_to_num(driver_gfd) / 3.0) * 0.1
+            driver_modifier = -np.nan_to_num(driver_gfd) * flexibility * 0.08
             dynamic_w_grid = dynamic_w_grid + driver_modifier
-            
+
         dynamic_w_grid = np.clip(dynamic_w_grid, 0.4, 0.95)
 
         # 1. Grid is the absolute anchor

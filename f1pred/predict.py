@@ -26,6 +26,68 @@ __all__ = [
 logger = get_logger(__name__)
 
 
+def _apply_calibrated_weights(cfg, calibrated_weights: Dict[str, Any]) -> None:
+    """Apply ALL calibrated parameter groups to the live config object in-place.
+
+    This covers blending, DNF, simulation, recency half-lives, and Elo K.
+    Ensemble weights are handled separately as an EnsembleConfig object.
+    """
+    if not hasattr(cfg, "modelling"):
+        return
+
+    # 1. Blending
+    if "blending" in calibrated_weights:
+        b = calibrated_weights["blending"]
+        bl = cfg.modelling.blending
+        for key in ("gbm_weight", "baseline_weight", "baseline_team_factor",
+                     "baseline_driver_team_factor", "grid_factor",
+                     "current_season_weight", "current_season_qualifying_weight",
+                     "current_quali_factor", "analytical_win_weight"):
+            if key in b:
+                setattr(bl, key, b[key])
+        logger.info("[predict] Applied calibrated blending weights (gbm=%.2f)", b.get("gbm_weight", 0))
+        print(f"    [Predict] Using calibrated weights (GBM={b.get('gbm_weight', 0):.2f}, "
+              f"Baseline={b.get('baseline_weight', 0):.2f})")
+
+    # 2. DNF parameters
+    if "dnf" in calibrated_weights:
+        dn = calibrated_weights["dnf"]
+        dnf_cfg = cfg.modelling.dnf
+        for key in ("alpha", "beta", "driver_weight", "team_weight"):
+            if key in dn:
+                setattr(dnf_cfg, key, dn[key])
+        logger.info("[predict] Applied calibrated DNF params (alpha=%.2f, beta=%.2f)",
+                     dn.get("alpha", 0), dn.get("beta", 0))
+
+    # 3. Simulation parameters
+    if "simulation" in calibrated_weights:
+        sim = calibrated_weights["simulation"]
+        sim_cfg = cfg.modelling.simulation
+        for key in ("noise_factor", "min_noise"):
+            if key in sim:
+                setattr(sim_cfg, key, sim[key])
+        logger.info("[predict] Applied calibrated simulation params (noise=%.3f)",
+                     sim.get("noise_factor", 0))
+
+    # 4. Recency half-lives
+    if "recency" in calibrated_weights:
+        rec = calibrated_weights["recency"]
+        rhl = cfg.modelling.recency_half_life_days
+        if "half_life_base" in rec:
+            rhl.base = int(round(rec["half_life_base"]))
+        if "half_life_team" in rec:
+            rhl.team = int(round(rec["half_life_team"]))
+        logger.info("[predict] Applied calibrated half-lives (base=%d, team=%d)", rhl.base, rhl.team)
+
+    # 5. Elo K-factor (stored on cfg for downstream use)
+    if "elo" in calibrated_weights:
+        elo = calibrated_weights["elo"]
+        if "k" in elo:
+            # Store on modelling for downstream access; EloModel reads it at fit time.
+            cfg.modelling._calibrated_elo_k = elo["k"]
+            logger.info("[predict] Applied calibrated Elo K=%.1f", elo["k"])
+
+
 def resolve_event(jc: JolpicaClient, season: Optional[str], rnd: str) -> Tuple[int, int, Dict[str, Any]]:
     """Resolve season/round to use. Falls back to current/last if needed."""
     # Explicitly validate inputs before the fallback try-block to catch fundamentally invalid requests
@@ -415,18 +477,20 @@ def _run_single_prediction(
     
     # Ensemble skill components
     elo_pace = bt_pace = mixed_pace = None
+    elo_k = getattr(cfg.modelling, "_calibrated_elo_k", 20.0)
+    hl_team = cfg.modelling.recency_half_life_days.team
     try:
-        elo_model = EloModel().fit(hist)
+        elo_model = EloModel(k=elo_k).fit(hist)
         elo_pace = elo_model.predict(X)
     except Exception as e:
         logger.warning("[predict._run_single] Elo model failed: %s", e)
     try:
-        bt_model = BradleyTerryModel().fit(hist)
+        bt_model = BradleyTerryModel().fit(hist, half_life_days=hl_team)
         bt_pace = bt_model.predict(X)
     except Exception as e:
         logger.warning("[predict._run_single] BT model failed: %s", e)
     try:
-        mixed_model = MixedEffectsLikeModel().fit(hist)
+        mixed_model = MixedEffectsLikeModel().fit(hist, half_life_days=hl_team)
         mixed_pace = mixed_model.predict(X)
     except Exception as e:
         logger.warning("[predict._run_single] Mixed model failed: %s", e)
@@ -551,43 +615,18 @@ def run_predictions_for_event(
     cm = CalibrationManager(cfg)
     # Load weights (either newly calibrated or existing)
     calibrated_weights = cm.load_weights()
+    ens_cfg_obj = None
     try:
-        # 1. Update Blending Config (passed to train_pace_model via cfg)
-        if "blending" in calibrated_weights:
-            b = calibrated_weights["blending"]
-            # Ensure target config structure exists (it should from config.yaml)
-            if hasattr(cfg, "modelling") and hasattr(cfg.modelling, "blending"):
-                # Update attributes in-place
-                if "gbm_weight" in b:
-                    cfg.modelling.blending.gbm_weight = b["gbm_weight"]
-                if "baseline_weight" in b:
-                    cfg.modelling.blending.baseline_weight = b["baseline_weight"]
-                if "baseline_team_factor" in b:
-                    cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
-                if "baseline_driver_team_factor" in b:
-                    cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
-                if "grid_factor" in b:
-                    cfg.modelling.blending.grid_factor = b["grid_factor"]
-                if "current_season_weight" in b:
-                    cfg.modelling.blending.current_season_weight = b["current_season_weight"]
-                if "current_season_qualifying_weight" in b:
-                    cfg.modelling.blending.current_season_qualifying_weight = b["current_season_qualifying_weight"]
-                if "current_quali_factor" in b:
-                    cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
-                logger.info(f"[predict] Applied calibrated blending weights (gbm={b.get('gbm_weight', 0):.2f})")
-                print(f"    [Predict] Using calibrated weights (GBM={b.get('gbm_weight', 0):.2f}, Baseline={b.get('baseline_weight', 0):.2f})")
-
-        # 2. Prepare Ensemble Config (passed to combine_pace)
-        ens_cfg_obj = None
+        _apply_calibrated_weights(cfg, calibrated_weights)
+        # Prepare Ensemble Config (passed to combine_pace)
         if "ensemble" in calibrated_weights:
             e = calibrated_weights["ensemble"]
             ens_cfg_obj = EnsembleConfig(
                 w_gbm=e.get("w_gbm", 0.25),
                 w_elo=e.get("w_elo", 0.25),
                 w_bt=e.get("w_bt", 0.25),
-                w_mixed=e.get("w_mixed", 0.25)
+                w_mixed=e.get("w_mixed", 0.25),
             )
-            logger.info(f"[predict] Applied calibrated ensemble weights (gbm={e.get('w_gbm', 0):.2f}, elo={e.get('w_elo', 0):.2f})")
     except Exception:
         pass
 
@@ -756,25 +795,15 @@ def run_predictions_for_event(
                             cm.run_calibration(jc, om, history_df=all_history)
                             # Reload weights if they changed
                             calibrated_weights = cm.load_weights()
-                            if "blending" in calibrated_weights:
-                                b = calibrated_weights["blending"]
-                                if hasattr(cfg, "modelling") and hasattr(cfg.modelling, "blending"):
-                                    if "gbm_weight" in b:
-                                        cfg.modelling.blending.gbm_weight = b["gbm_weight"]
-                                    if "baseline_weight" in b:
-                                        cfg.modelling.blending.baseline_weight = b["baseline_weight"]
-                                    if "baseline_team_factor" in b:
-                                        cfg.modelling.blending.baseline_team_factor = b["baseline_team_factor"]
-                                    if "baseline_driver_team_factor" in b:
-                                        cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
-                                    if "grid_factor" in b:
-                                        cfg.modelling.blending.grid_factor = b["grid_factor"]
-                                    if "current_season_weight" in b:
-                                        cfg.modelling.blending.current_season_weight = b["current_season_weight"]
-                                    if "current_season_qualifying_weight" in b:
-                                        cfg.modelling.blending.current_season_qualifying_weight = b["current_season_qualifying_weight"]
-                                    if "current_quali_factor" in b:
-                                        cfg.modelling.blending.current_quali_factor = b["current_quali_factor"]
+                            _apply_calibrated_weights(cfg, calibrated_weights)
+                            if "ensemble" in calibrated_weights:
+                                e = calibrated_weights["ensemble"]
+                                ens_cfg_obj = EnsembleConfig(
+                                    w_gbm=e.get("w_gbm", 0.25),
+                                    w_elo=e.get("w_elo", 0.25),
+                                    w_bt=e.get("w_bt", 0.25),
+                                    w_mixed=e.get("w_mixed", 0.25),
+                                )
 
                     # Universal Grid Feature logic (Race<-Quali, Sprint<-SprintQuali)
                     # Map target session -> precursor session that determines grid
@@ -899,20 +928,22 @@ def run_predictions_for_event(
                         elo_model = bt_model = mixed_model = None
 
                         roster_key = tuple(sorted(roster_ids))
+                        elo_k = getattr(cfg.modelling, "_calibrated_elo_k", 20.0)
+                        hl_team = cfg.modelling.recency_half_life_days.team
                         if roster_key in ensemble_cache:
                             logger.debug(f"[predict] Using cached ensemble models for roster size {len(roster_ids)}")
                             elo_model, bt_model, mixed_model = ensemble_cache[roster_key]
                         else:
                             try:
-                                elo_model = EloModel().fit(hist)
+                                elo_model = EloModel(k=elo_k).fit(hist)
                             except Exception as e:
                                 logger.info(f"[predict] Elo model fit failed: {e}")
                             try:
-                                bt_model = BradleyTerryModel().fit(hist)
+                                bt_model = BradleyTerryModel().fit(hist, half_life_days=hl_team)
                             except Exception as e:
                                 logger.info(f"[predict] Bradley–Terry model fit failed: {e}")
                             try:
-                                mixed_model = MixedEffectsLikeModel().fit(hist)
+                                mixed_model = MixedEffectsLikeModel().fit(hist, half_life_days=hl_team)
                             except Exception as e:
                                 logger.info(f"[predict] Mixed-effects-like model fit failed: {e}")
                             ensemble_cache[roster_key] = (elo_model, bt_model, mixed_model)

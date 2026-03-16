@@ -1,12 +1,28 @@
-"""Dynamic calibration of model weights based on recent history.
+"""Dynamic calibration of ALL model parameters based on recent history.
 
-This module provides the CalibrationManager to optimize ensemble and blending weights
-by minimizing prediction error over a sliding lookback window (e.g., last 3 years).
+This module provides the CalibrationManager to optimize every tunable weight
+and hyperparameter by minimizing prediction error over a sliding lookback
+window using per-event Spearman rank correlation as the primary objective.
+
+All modelling weights are calibrated at runtime — config.yaml values serve
+only as initial defaults for the first run.  After calibration completes,
+the authoritative values live in calibration_weights.json.
+
+Calibrated parameter groups:
+    - blending: GBM/baseline weights, team/driver-team factors, grid stickiness,
+                season weights, qualifying factor, analytical win weight
+    - ensemble: w_gbm, w_elo, w_bt, w_mixed
+    - dnf:      alpha, beta, driver_weight, team_weight
+    - simulation: noise_factor, min_noise
+    - recency:  half_life_base, half_life_team
+    - elo:      k (Elo update strength)
 """
+from __future__ import annotations
+
 import json
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,7 +31,194 @@ from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .ensemble import EnsembleConfig
 
+if TYPE_CHECKING:
+    import pandas as pd
+
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Parameter vector layout
+# ---------------------------------------------------------------------------
+# Indices into the flat optimisation vector and their human-readable names.
+# Changing the order here requires updating _pack / _unpack helpers below.
+
+PARAM_NAMES = [
+    # -- blending (0-4) --
+    "gbm_weight",               # 0
+    "baseline_weight",          # 1
+    "baseline_team_factor",     # 2
+    "baseline_driver_team_factor",  # 3
+    "grid_factor",              # 4
+    # -- ensemble (5-8) --
+    "ens_pace",                 # 5
+    "ens_elo",                  # 6
+    "ens_bt",                   # 7
+    "ens_mixed",                # 8
+    # -- season / quali (9-12) --
+    "current_season_weight",    # 9
+    "current_season_qualifying_weight",  # 10
+    "current_quali_factor",     # 11
+    "analytical_win_weight",    # 12
+    # -- DNF (13-16) --
+    "dnf_alpha",                # 13
+    "dnf_beta",                 # 14
+    "dnf_driver_weight",        # 15
+    "dnf_team_weight",          # 16
+    # -- simulation (17-18) --
+    "noise_factor",             # 17
+    "min_noise",                # 18
+    # -- recency (19-20) --
+    "half_life_base",           # 19
+    "half_life_team",           # 20
+    # -- elo (21) --
+    "elo_k",                    # 21
+]
+
+N_PARAMS = len(PARAM_NAMES)
+
+# Bounds for L-BFGS-B  (lower, upper) per parameter
+PARAM_BOUNDS = [
+    (0.05, 1.0),    # 0  gbm_weight
+    (0.05, 1.0),    # 1  baseline_weight
+    (0.2, 2.0),     # 2  baseline_team_factor
+    (0.0, 2.0),     # 3  baseline_driver_team_factor
+    (0.1, 0.95),    # 4  grid_factor
+    (0.0, 1.0),     # 5  ens_pace
+    (0.0, 1.0),     # 6  ens_elo
+    (0.0, 1.0),     # 7  ens_bt
+    (0.0, 1.0),     # 8  ens_mixed
+    (0.5, 50.0),    # 9  current_season_weight
+    (0.5, 50.0),    # 10 current_season_qualifying_weight
+    (0.0, 1.0),     # 11 current_quali_factor
+    (0.0, 1.0),     # 12 analytical_win_weight
+    (0.1, 10.0),    # 13 dnf_alpha
+    (0.1, 30.0),    # 14 dnf_beta
+    (0.0, 1.0),     # 15 dnf_driver_weight
+    (0.0, 1.0),     # 16 dnf_team_weight
+    (0.01, 0.5),    # 17 noise_factor
+    (0.01, 0.3),    # 18 min_noise
+    (30.0, 500.0),  # 19 half_life_base
+    (60.0, 800.0),  # 20 half_life_team
+    (5.0, 60.0),    # 21 elo_k
+]
+
+# Default / initial guess (matches config.yaml defaults)
+PARAM_DEFAULTS = [
+    0.75,   # 0  gbm_weight
+    0.25,   # 1  baseline_weight
+    0.3,    # 2  baseline_team_factor
+    0.2,    # 3  baseline_driver_team_factor
+    0.8,    # 4  grid_factor
+    0.4,    # 5  ens_pace
+    0.2,    # 6  ens_elo
+    0.2,    # 7  ens_bt
+    0.2,    # 8  ens_mixed
+    8.0,    # 9  current_season_weight
+    8.0,    # 10 current_season_qualifying_weight
+    0.5,    # 11 current_quali_factor
+    0.5,    # 12 analytical_win_weight
+    2.0,    # 13 dnf_alpha
+    8.0,    # 14 dnf_beta
+    0.6,    # 15 dnf_driver_weight
+    0.4,    # 16 dnf_team_weight
+    0.15,   # 17 noise_factor
+    0.05,   # 18 min_noise
+    120.0,  # 19 half_life_base
+    240.0,  # 20 half_life_team
+    20.0,   # 21 elo_k
+]
+
+
+def _unpack_weights(w) -> Dict[str, Any]:
+    """Convert flat parameter vector to nested weights dict."""
+    import numpy as np
+    w = np.asarray(w, dtype=float)
+
+    # Normalise ensemble weights to sum to 1
+    ens_raw = w[5:9].copy()
+    ens_sum = ens_raw.sum()
+    if ens_sum > 0:
+        ens_raw /= ens_sum
+    else:
+        ens_raw[:] = 0.25
+
+    # Normalise blending gbm/baseline to partition of unity
+    gbm_raw = max(1e-3, w[0])
+    base_raw = max(1e-3, w[1])
+    total_main = gbm_raw + base_raw
+
+    return {
+        "ensemble": {
+            "w_gbm": float(ens_raw[0]),
+            "w_elo": float(ens_raw[1]),
+            "w_bt": float(ens_raw[2]),
+            "w_mixed": float(ens_raw[3]),
+        },
+        "blending": {
+            "gbm_weight": float(gbm_raw / total_main),
+            "baseline_weight": float(base_raw / total_main),
+            "baseline_team_factor": float(w[2]),
+            "baseline_driver_team_factor": float(w[3]),
+            "grid_factor": float(np.clip(w[4], 0.0, 1.0)),
+            "current_season_weight": float(w[9]),
+            "current_season_qualifying_weight": float(w[10]),
+            "current_quali_factor": float(np.clip(w[11], 0.0, 1.0)),
+            "analytical_win_weight": float(np.clip(w[12], 0.0, 1.0)),
+        },
+        "dnf": {
+            "alpha": float(max(0.1, w[13])),
+            "beta": float(max(0.1, w[14])),
+            "driver_weight": float(np.clip(w[15], 0.0, 1.0)),
+            "team_weight": float(np.clip(w[16], 0.0, 1.0)),
+        },
+        "simulation": {
+            "noise_factor": float(max(0.01, w[17])),
+            "min_noise": float(max(0.01, w[18])),
+        },
+        "recency": {
+            "half_life_base": float(max(30.0, w[19])),
+            "half_life_team": float(max(60.0, w[20])),
+        },
+        "elo": {
+            "k": float(np.clip(w[21], 5.0, 60.0)),
+        },
+    }
+
+
+def _pack_weights(d: Dict[str, Any]) -> list:
+    """Convert nested weights dict back to flat parameter vector."""
+    b = d.get("blending", {})
+    e = d.get("ensemble", {})
+    dn = d.get("dnf", {})
+    sim = d.get("simulation", {})
+    rec = d.get("recency", {})
+    elo = d.get("elo", {})
+
+    return [
+        b.get("gbm_weight", PARAM_DEFAULTS[0]),
+        b.get("baseline_weight", PARAM_DEFAULTS[1]),
+        b.get("baseline_team_factor", PARAM_DEFAULTS[2]),
+        b.get("baseline_driver_team_factor", PARAM_DEFAULTS[3]),
+        b.get("grid_factor", PARAM_DEFAULTS[4]),
+        e.get("w_gbm", PARAM_DEFAULTS[5]),
+        e.get("w_elo", PARAM_DEFAULTS[6]),
+        e.get("w_bt", PARAM_DEFAULTS[7]),
+        e.get("w_mixed", PARAM_DEFAULTS[8]),
+        b.get("current_season_weight", PARAM_DEFAULTS[9]),
+        b.get("current_season_qualifying_weight", PARAM_DEFAULTS[10]),
+        b.get("current_quali_factor", PARAM_DEFAULTS[11]),
+        b.get("analytical_win_weight", PARAM_DEFAULTS[12]),
+        dn.get("alpha", PARAM_DEFAULTS[13]),
+        dn.get("beta", PARAM_DEFAULTS[14]),
+        dn.get("driver_weight", PARAM_DEFAULTS[15]),
+        dn.get("team_weight", PARAM_DEFAULTS[16]),
+        sim.get("noise_factor", PARAM_DEFAULTS[17]),
+        sim.get("min_noise", PARAM_DEFAULTS[18]),
+        rec.get("half_life_base", PARAM_DEFAULTS[19]),
+        rec.get("half_life_team", PARAM_DEFAULTS[20]),
+        elo.get("k", PARAM_DEFAULTS[21]),
+    ]
+
 
 class CalibrationManager:
     def __init__(self, cfg):
@@ -24,26 +227,9 @@ class CalibrationManager:
         self.weights_file = Path(cfg.calibration.weights_file)
         self.lookback_days = getattr(cfg.calibration, "lookback_window_days", 1095)
         self.frequency_hours = getattr(cfg.calibration, "frequency_hours", 24)
-        
-        # Default weights (fallback)
-        self.current_weights = {
-            "ensemble": {
-                "w_gbm": 0.4,
-                "w_elo": 0.2,
-                "w_bt": 0.2,
-                "w_mixed": 0.2
-            },
-            "blending": {
-                "gbm_weight": 0.75,
-                "baseline_weight": 0.25,
-                "baseline_team_factor": 0.3,
-                "baseline_driver_team_factor": 0.2,
-                "grid_factor": 0.8,
-                "current_season_weight": 100.0,
-                "current_season_qualifying_weight": 100.0,
-                "current_quali_factor": 0.5
-            }
-        }
+
+        # Default weights (fallback) — uses the full expanded structure
+        self.current_weights = _unpack_weights(PARAM_DEFAULTS)
         self.last_race_id: Optional[str] = None
 
     def load_weights(self) -> Dict[str, Any]:
@@ -52,17 +238,20 @@ class CalibrationManager:
             try:
                 with open(self.weights_file, "r") as f:
                     data = json.load(f)
-                    
-                # Validate structure
+
+                # Validate: must have at least ensemble + blending
                 if "ensemble" in data and "blending" in data:
                     self.current_weights = data
                     self.last_race_id = data.get("last_race_id")
-                    logger.info(f"[calibrate] Loaded calibrated weights from {self.weights_file} (last_race_id={self.last_race_id})")
+                    logger.info(
+                        "[calibrate] Loaded calibrated weights from %s (last_race_id=%s)",
+                        self.weights_file, self.last_race_id,
+                    )
                 else:
                     logger.warning("[calibrate] Weights file malformed, using defaults")
             except Exception as e:
-                logger.error(f"[calibrate] Failed to load weights: {e}")
-        
+                logger.error("[calibrate] Failed to load weights: %s", e)
+
         return self.current_weights
 
     def save_weights(self):
@@ -73,134 +262,134 @@ class CalibrationManager:
                 data = self.current_weights.copy()
                 if self.last_race_id:
                     data["last_race_id"] = self.last_race_id
+                data["calibration_timestamp"] = datetime.now(timezone.utc).isoformat()
                 json.dump(data, f, indent=2)
-            logger.info(f"[calibrate] Saved calibrated weights to {self.weights_file}")
+            logger.info("[calibrate] Saved calibrated weights to %s", self.weights_file)
         except Exception as e:
-            logger.error(f"[calibrate] Failed to save weights: {e}")
+            logger.error("[calibrate] Failed to save weights: %s", e)
 
     def check_calibration_needed(self, history_df: Optional['pd.DataFrame'] = None) -> bool:  # noqa: F821
         """Check if calibration is needed based on new race results or missing file."""
         if not self.cfg.calibration.enabled:
             return False
-            
+
         if not self.weights_file.exists():
             logger.info("[calibrate] Weights file missing, calibration needed")
             return True
 
         # Load existing weights (and last_race_id)
         self.load_weights()
-        
+
         # Smart Check: Has a new race occurred?
         if history_df is not None and not history_df.empty:
             # Find the latest completed race in the history
             latest_race = history_df[history_df["session"] == "race"].sort_values("date").iloc[-1]
             latest_id = f"{latest_race['season']}_{latest_race['round']}"
-            
+
             if self.last_race_id != latest_id:
-                logger.info(f"[calibrate] New race result found ({latest_id} != {self.last_race_id}), calibration needed")
+                logger.info(
+                    "[calibrate] New race result found (%s != %s), calibration needed",
+                    latest_id, self.last_race_id,
+                )
                 return True
             else:
-                logger.debug(f"[calibrate] No new results since {self.last_race_id}. Skipping calibration.")
+                logger.debug("[calibrate] No new results since %s. Skipping calibration.", self.last_race_id)
                 return False
 
-        # Fallback to time-based check if history not provided (shouldn't happen with new predict.py)
+        # Fallback to time-based check if history not provided
         try:
             mtime = datetime.fromtimestamp(self.weights_file.stat().st_mtime, tz=timezone.utc)
             age = datetime.now(timezone.utc) - mtime
             age_hours = age.total_seconds() / 3600.0
-            
+
             if age_hours > self.frequency_hours:
-                logger.info(f"[calibrate] Weights file is {age_hours:.1f}h old (> {self.frequency_hours}h), calibration needed")
+                logger.info(
+                    "[calibrate] Weights file is %.1fh old (> %dh), calibration needed",
+                    age_hours, self.frequency_hours,
+                )
                 return True
         except Exception:
             return True
-            
+
         return False
 
-    def run_calibration(self, jc: JolpicaClient, om: OpenMeteoClient, history_df: Optional['pd.DataFrame'] = None):  # noqa: F821
-        """Run the full calibration process."""
+    # ------------------------------------------------------------------
+    # Full calibration
+    # ------------------------------------------------------------------
+    def run_calibration(self, jc: JolpicaClient, om: OpenMeteoClient,
+                        history_df: Optional['pd.DataFrame'] = None):  # noqa: F821
+        """Run the full calibration process over all tunable parameters."""
         # Import heavy deps here
         import numpy as np
         import pandas as pd
         from scipy.optimize import minimize
+        from scipy.stats import spearmanr
         from .features import build_session_features, collect_historical_results
         from .models import train_pace_model
         from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel
-        
-        logger.info("[calibrate] Starting calibration process...")
+
+        logger.info("[calibrate] Starting full calibration (%d parameters)...", N_PARAMS)
         if history_df is None or history_df.empty:
-             print("    [Calibration] Starting self-training process... (fetching history)", flush=True)
+            print("    [Calibration] Starting self-training process... (fetching history)", flush=True)
         else:
-             print("    [Calibration] Starting self-training process... (using pre-fetched history)", flush=True)
-            
+            print("    [Calibration] Starting self-training process... (using pre-fetched history)", flush=True)
+
         t0 = time.time()
-        
+
         try:
             # 1. Define window
             now = datetime.now(timezone.utc)
             start_date = now - timedelta(days=self.lookback_days)
-            
-            # 2. Fetch History (long history for features, limited window for scoring)
-            # We need deep history for Elo/Features to be accurate specifically at the start of the window
+
+            # 2. Fetch History
             if history_df is None or history_df.empty:
                 logger.info("[calibrate] Fetching history...")
                 print("    [Calibration] Fetching historical race data (last 4 years)...", flush=True)
-                
-                # Reduce lookback to 4 years (3 years window + 1 year warmup)
-                # 10 years is too heavy for a synchronous block on first run
                 try:
                     all_hist = collect_historical_results(
-                        jc, 
-                        season=now.year, 
-                        end_before=now, 
-                        lookback_years=4 
+                        jc,
+                        season=now.year,
+                        end_before=now,
+                        lookback_years=4,
                     )
                 except Exception as e:
-                    logger.error(f"[calibrate] History fetch failed: {e}")
+                    logger.error("[calibrate] History fetch failed: %s", e)
                     print(f"    [Calibration] Error fetching history: {e}")
                     return
             else:
-                # Use provided history (assuming it's deep enough)
                 all_hist = history_df
-                # Ensure we don't look into the future if the history frame is too new (unlikely but safe)
                 all_hist = all_hist[all_hist["date"] < now]
-            
+
             # Filter specifically for the calibration set (races in the lookback window)
             calib_races = all_hist[
-                (all_hist["session"] == "race") & 
-                (all_hist["date"] >= start_date) & 
-                (all_hist["position"].notna())
+                (all_hist["session"] == "race")
+                & (all_hist["date"] >= start_date)
+                & (all_hist["position"].notna())
             ].sort_values("date")
-            
+
             if calib_races.empty:
-                logger.warning("[calibrate] No races found in lookback window. Skipping calibration.")
+                logger.warning("[calibrate] No races found in lookback window. Skipping.")
                 print("    [Calibration] SKIPPED: No recent races found in lookback window.")
                 return
 
-            # Identify unique events (season, round)
+            # Identify unique events
             events = calib_races[["season", "round", "date"]].drop_duplicates().sort_values("date")
-            logger.info(f"[calibrate] Found {len(events)} events in lookback window ({start_date.date()} to {now.date()})")
+            logger.info(
+                "[calibrate] Found %d events in lookback window (%s to %s)",
+                len(events), start_date.date(), now.date(),
+            )
 
-            # Update last_race_id with the MOST RECENT race in the window
+            # Update last_race_id
             if not events.empty:
                 last_evt = events.iloc[-1]
-                # last_evt is a Series with index [season, round, date]
-                # access via key to avoid method collision with .round()
                 self.last_race_id = f"{last_evt['season']}_{last_evt['round']}"
 
-            # 3. Generate Predictions for Calibration Set
-            # We need to simulate the state of the world at each event
-            # To be efficient, we won't retrain the GBM every race.
-            # We will train ONE GBM on data *prior* to the window (Out-of-Time validation)
-            # This mimics the "future" prediction task.
-            
+            # 3. Out-of-time training split
             train_cutoff = start_date
             train_hist = all_hist[all_hist["date"] < train_cutoff]
-            
+
             if train_hist.empty:
-                logger.warning("[calibrate] No training history prior to lookback window. Using simple split.")
-                # Fallback: Use first 70% of all_hist for train, last 30% for calib
-                # This ensures we have *something* to train on
+                logger.warning("[calibrate] No training history prior to lookback window. Using 70/30 split.")
                 split_idx = int(len(all_hist) * 0.7)
                 all_hist_sorted = all_hist.sort_values("date")
                 train_hist = all_hist_sorted.iloc[:split_idx]
@@ -208,135 +397,88 @@ class CalibrationManager:
                 calib_races = calib_races[calib_races["session"] == "race"]
                 events = calib_races[["season", "round", "date"]].drop_duplicates().sort_values("date")
 
-            # Train GBM Baseline
-            logger.info(f"[calibrate] Training baseline GBM on {len(train_hist)} rows (pre-{train_cutoff.date()})...")
-            # We need X for training. This might be slow to rebuild for all history.
-            # For efficiency in calibration, we might simplify or assume we can build it.
-            # Building features for 5-10 years of races is heavy.
-            # Heuristic: Train GBM on last 3 years *prior* to calibration window if possible, or just last 100 races.
-            
-            # Let's try to build X for the training set (subset to race sessions)
-            train_race_hist = train_hist[train_hist["session"] == "race"].tail(500) # Limit to reasonable size
-            
-            # We need a helper to build X for many races efficiently
-            # Note: build_session_features is per-event.
-            # We will loop for training data generation.
-            
-            top_train_events = train_race_hist[["season", "round", "date"]].drop_duplicates().to_dict('records')
-            
+            # 4. Train GBM Baseline on pre-window data
+            logger.info("[calibrate] Training baseline GBM on %d rows (pre-%s)...",
+                        len(train_hist), train_cutoff.date())
+
+            train_race_hist = train_hist[train_hist["session"] == "race"].tail(500)
+            top_train_events = train_race_hist[["season", "round", "date"]].drop_duplicates().to_dict("records")
+
             X_train_list = []
-            
-            # Generate training data
-            # Use limited parallelism to avoid rate limits
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = []
                 for evt in top_train_events:
                     futures.append(executor.submit(
-                        build_session_features, 
-                        jc, om, 
-                        int(evt["season"]), int(evt["round"]), "race", 
-                        pd.Timestamp(evt["date"]), self.cfg
+                        build_session_features,
+                        jc, om,
+                        int(evt["season"]), int(evt["round"]), "race",
+                        pd.Timestamp(evt["date"]), self.cfg,
                     ))
-                
                 for f in futures:
                     try:
                         X_i, _, _ = f.result()
                         if X_i is not None and not X_i.empty:
                             X_train_list.append(X_i)
                     except Exception as e:
-                        logger.error(f"[calibrate] Training sample generation failed: {e}")
-                        print(f"    [Calibration] Warning: Training sample failed: {e}")
-            
+                        logger.error("[calibrate] Training sample generation failed: %s", e)
+
             if not X_train_list:
                 logger.error("[calibrate] Failed to generate training data. Aborting.")
-                print("    [Calibration] ABORTED: Failed to generate training data (check logs for API errors).")
+                print("    [Calibration] ABORTED: Failed to generate training data.")
                 return
-                
+
             X_train = pd.concat(X_train_list, ignore_index=True)
-            logger.info(f"[calibrate] Generated {len(X_train)} training samples.")
-            
-            # Fit the GBM
-            # We use a dummy config for now or the real one
-            gbm_pipe, _, _ = train_pace_model(X_train, "race", self.cfg)
-            
-            # 4. Score the Calibration Set
-            # For each event in evaluation window:
-            # - Build X
-            # - Predict GBM
-            # - Fit/Predict Elo/BT/Mixed (iterative or just fit on history<date)
-            # Store results
-            
+            logger.info("[calibrate] Generated %d training samples.", len(X_train))
+
+            gbm_pipe, _, gbm_features = train_pace_model(X_train, "race", self.cfg)
+
+            # 5. Collect calibration data from each event
             calibration_data = []
-            
-            # Pre-calculate ensemble models iteratively to be correct?
-            # Or just fit on history < event_date for each event (correct but slower).
-            # fitting on history is fast for these simple models.
-            
-            logger.info("[calibrate] generating scores for calibration events...")
+
+            logger.info("[calibrate] Generating scores for calibration events...")
             for i, evt in enumerate(events.itertuples()):
                 s, r, d = int(evt.season), int(evt.round), pd.Timestamp(evt.date)
-                
-                # Fetch features
+
                 X_evt, _, roster = build_session_features(jc, om, s, r, "race", d, self.cfg)
                 if X_evt is None or X_evt.empty:
                     continue
-                
-                # GBM Score
-                # X_evt might need alignment? pipeline handles it
+
+                # GBM Score — align columns to match training features
                 try:
-                    # Sklearn pipeline applied to DF works by column name usually
-                    pace_hat = gbm_pipe.predict(X_evt)
-                    
-                    # Standardize (approximate based on training set stats or local?)
-                    # Local standardization per race is what predict.py does
+                    X_pred = X_evt.reindex(columns=gbm_features) if gbm_features else X_evt
+                    pace_hat = gbm_pipe.predict(X_pred)
                     pace_hat = (pace_hat - pace_hat.mean()) / (pace_hat.std() + 1e-6)
                 except Exception as e:
-                    logger.warning(f"[calibrate] GBM predict failed for {s} R{r}: {e}")
+                    logger.warning("[calibrate] GBM predict failed for %d R%d: %s", s, r, e)
                     continue
-                
-                # Ensemble scores
-                # History up to this race (strict temporal cutoff — no leakage of target event)
+
+                # History up to this race (strict temporal cutoff)
                 hist_subset = all_hist[all_hist["date"] < d]
-                
-                # Use recency weighting from config to avoid valuing old results equal to recent ones
-                half_life = self.cfg.modelling.recency_half_life_days.team
+
+                # Ensemble scores — we will re-fit with calibrated k/half-life during objective,
+                # but here we pre-compute the raw ingredients (positions, dates) that the
+                # objective function can efficiently re-weight.
                 elo = EloModel().fit(hist_subset).predict(X_evt)
-                bt = BradleyTerryModel().fit(hist_subset, half_life_days=half_life).predict(X_evt)
-                mixed = MixedEffectsLikeModel().fit(hist_subset, half_life_days=half_life).predict(X_evt)
-                
-                # Baseline info (from X_evt)
-                # Form index is already in X_evt, usually negative of what we want for 'pace'
-                # pace model uses -form_index.
-                # Here we just want the components to weight.
-                # Predict.py blends GBM + Baseline.
-                # We want to optimize:
-                # Pace = w1*GBM + w2*Baseline
-                # AND
-                # Combined = v1*Pace + v2*Elo + v3*BT + v4*Mixed
-                
-                # Let's collect raw components
+                bt = BradleyTerryModel().fit(hist_subset).predict(X_evt)
+                mixed = MixedEffectsLikeModel().fit(hist_subset).predict(X_evt)
+
+                # Baseline components
                 base_form = -X_evt["form_index"].fillna(0).astype(float).values
                 base_team = -X_evt.get("team_form_index", pd.Series(0, index=X_evt.index)).fillna(0).astype(float).values
                 base_dt = -X_evt.get("driver_team_form_index", pd.Series(0, index=X_evt.index)).fillna(0).astype(float).values
-                
-                # Get actual results for target — merge on (season, round, driverId) to avoid
-                # cross-round contamination when the same driver appears in multiple rounds.
-                actuals = X_evt.assign(_calib_season=s, _calib_round=r).merge(
-                    calib_races[
-                        (calib_races["season"] == s) & (calib_races["round"] == r)
-                    ][["driverId", "position"]].drop_duplicates(subset=["driverId"]),
-                    on="driverId",
-                    how="left"
-                ).drop(columns=["_calib_season", "_calib_round"], errors="ignore")
-                
-                # We need actual position to minimize rank error
-                # Filter to drivers who finished (or keep all and handle NaN)
-                
+
+                # Actual results — build a clean driverId -> position lookup
+                # to avoid column name collisions if X_evt already has 'position'
+                evt_actuals = calib_races[
+                    (calib_races["season"] == s) & (calib_races["round"] == r)
+                ][["driverId", "position"]].drop_duplicates(subset=["driverId"])
+                actual_pos_map = dict(zip(evt_actuals["driverId"], evt_actuals["position"]))
+
                 for idx, row in enumerate(X_evt.itertuples()):
-                    act_pos = actuals.iloc[idx]["position"]
-                    if pd.isna(act_pos):
+                    act_pos = actual_pos_map.get(row.driverId)
+                    if act_pos is None or pd.isna(act_pos):
                         continue
-                        
+
                     calibration_data.append({
                         "driverId": row.driverId,
                         "season": s,
@@ -349,12 +491,12 @@ class CalibrationManager:
                         "grid": float(X_evt.iloc[idx].get("grid", 15.0)),
                         "elo": elo[idx] if len(elo) > idx else 0,
                         "bt": bt[idx] if len(bt) > idx else 0,
-                        "mixed": mixed[idx] if len(mixed) > idx else 0
+                        "mixed": mixed[idx] if len(mixed) > idx else 0,
                     })
-                
-                if (i+1) % 5 == 0:
-                    logger.info(f"[calibrate] Processed {i+1}/{len(events)} events")
-                    print(f"    [Calibration] Backtesting event {i+1}/{len(events)}...")
+
+                if (i + 1) % 5 == 0:
+                    logger.info("[calibrate] Processed %d/%d events", i + 1, len(events))
+                    print(f"    [Calibration] Backtesting event {i + 1}/{len(events)}...")
 
             if not calibration_data:
                 logger.warning("[calibrate] No calibration data generated.")
@@ -362,19 +504,11 @@ class CalibrationManager:
                 return
 
             df_calib = pd.DataFrame(calibration_data)
-            
-            # 5. Optimization
-            logger.info(f"[calibrate] Optimizing weights on {len(df_calib)} samples...")
-            
-            # Metric: Rank Correlation or Rank Error?
-            # Simple objective: Minimize Mean Squared Error of (Predicted Rank - Actual Rank) implies estimating rank.
-            # Or minimizing Negative Log Likelihood of the winner?
-            # Let's just minimize RMSE of the *score* vs *actual position*?
-            # No, score is abstract. 
-            # We want to minimize the Spearman correlation (maximize it) or 
-            # Minimize error of (Predicted Rank - Actual Position).
-            
-            # Precompute arrays for optimization loop to avoid repeated pandas overhead (~2.8x speedup)
+
+            # 6. Optimisation
+            logger.info("[calibrate] Optimising %d parameters on %d samples...", N_PARAMS, len(df_calib))
+
+            # Pre-compute arrays for vectorised objective
             arr_gbm_raw = df_calib["gbm_raw"].values
             arr_base_form = df_calib["base_form"].values
             arr_base_team = df_calib["base_team"].values
@@ -386,11 +520,12 @@ class CalibrationManager:
 
             event_keys = df_calib[["season", "round"]].values
             unique_events, event_indices = np.unique(event_keys, axis=0, return_inverse=True)
+            n_unique = len(unique_events)
 
-            # Precompute normalized grid since it doesn't depend on weights
+            # Precompute normalised grid per event
             grid_vals = df_calib["grid"].values
             g_z_precomputed = np.zeros_like(grid_vals, dtype=float)
-            event_masks = [np.where(event_indices == i)[0] for i in range(len(unique_events))]
+            event_masks = [np.where(event_indices == ei)[0] for ei in range(n_unique)]
 
             for mask in event_masks:
                 ev_grid = grid_vals[mask]
@@ -399,169 +534,132 @@ class CalibrationManager:
                 g_z_precomputed[mask] = (ev_grid - mu_g) / (sd_g + 1e-6)
 
             def objective(weights):
-                # Unpack weights
-                # w_blend: [w_gbm, w_base_form, w_base_team, w_base_dt, w_grid]
-                # w_ens: [we_pace, we_elo, we_bt, we_mixed]
-                
-                # GBM Blend
-                wb_gbm, wb_form, wb_tm, wb_dt, wb_grid = weights[0:5]
+                """Combined objective: -mean(per-event Spearman) + podium penalty + regularisation."""
+                # Unpack
+                wb_gbm = max(0, weights[0])
+                wb_form = max(0, weights[1])
+                wb_tm = max(0, weights[2])
+                wb_dt = max(0, weights[3])
+                wb_grid = np.clip(weights[4], 0.0, 1.0)
 
-                # Force positive
-                wb_gbm = max(0, wb_gbm)
-                wb_form = max(0, wb_form)
-                wb_tm = max(0, wb_tm)
-                wb_dt = max(0, wb_dt)
-                wb_grid = max(0, wb_grid)
+                we_pace = max(0, weights[5])
+                we_elo = max(0, weights[6])
+                we_bt = max(0, weights[7])
+                we_mixed = max(0, weights[8])
 
-                # Stage 1: Form-based pace (linear combination)
-                # This approximates models.py: w_gbm*gbm + w_base*(form + factor_t*team + factor_d*dt)
-                # But we optimize coefficients directly for better convergence.
-                raw_pace = (wb_gbm * arr_gbm_raw +
-                            wb_form * arr_base_form +
-                            wb_tm * arr_base_team +
-                            wb_dt * arr_base_dt)
+                # Stage 1: Form-based pace
+                raw_pace = (wb_gbm * arr_gbm_raw
+                            + wb_form * arr_base_form
+                            + wb_tm * arr_base_team
+                            + wb_dt * arr_base_dt)
 
                 grid_imp = np.clip(wb_grid, 0.0, 1.0)
 
-                # ⚡ Bolt: Vectorized per-event standardization using bincount instead of Python for-loop
-                # Handles NaNs implicitly if present, though calibration inputs shouldn't have NaNs here
+                # Vectorised per-event z-score
                 valid_mask = ~np.isnan(raw_pace)
                 valid_indices = event_indices[valid_mask]
                 valid_pace = raw_pace[valid_mask]
 
-                num_uevents = len(unique_events)
-                counts = np.bincount(valid_indices, minlength=num_uevents)
-                sums = np.bincount(valid_indices, weights=valid_pace, minlength=num_uevents)
-
-                # Avoid division by zero
-                safe_counts = counts.copy()
-                safe_counts[safe_counts == 0] = 1
+                counts = np.bincount(valid_indices, minlength=n_unique)
+                sums = np.bincount(valid_indices, weights=valid_pace, minlength=n_unique)
+                safe_counts = np.maximum(counts, 1)
                 means = sums / safe_counts
 
-                # Variance
-                sq_sums = np.bincount(valid_indices, weights=valid_pace**2, minlength=num_uevents)
-                variances = sq_sums / safe_counts - means**2
-                variances[variances < 0] = 0 # Handle floating point inaccuracies
+                sq_sums = np.bincount(valid_indices, weights=valid_pace ** 2, minlength=n_unique)
+                variances = sq_sums / safe_counts - means ** 2
+                variances[variances < 0] = 0
                 stds = np.sqrt(variances)
 
-                # Broadcast back to original array shape
                 mu_p_all = means[event_indices]
                 sd_p_all = stds[event_indices]
-
                 p_z = (raw_pace - mu_p_all) / (sd_p_all + 1e-6)
 
-                # Stage 2: Stickiness blend using precomputed normalized grid
+                # Stage 2: Grid stickiness blend
                 pace = (1.0 - grid_imp) * p_z + grid_imp * g_z_precomputed
-                # We intentionally allow NaNs to propagate here as they did in the original loop
-                
-                # Normalize pace z-score per race to be fair input to ensemble
-                # (Doing this per-row vector optimization is hard without grouping, 
-                #  assume input components are already roughly z-scored. They are.)
-                
-                # Ensemble
-                we_pace, we_elo, we_bt, we_mixed = weights[5:9]
-                we_pace = max(0, we_pace)
-                we_elo = max(0, we_elo)
-                we_bt = max(0, we_bt)
-                we_mixed = max(0, we_mixed)
-                
-                combined = (we_pace * pace + 
-                            we_elo * arr_elo +
-                            we_bt * arr_bt +
-                            we_mixed * arr_mixed)
-                
-                # Determine ranks per race
-                # Since we want to vectorize, we can just use correlation.
-                # Rank correlation (Spearman) is good but non-differentiable/hard to optimize directly with solvers.
-                # Proxy: Point-biserial or just simple regression target?
-                # The combined score (lower is better) should correlate with Position (lower is better).
-                # We want to MAXIMIZE correlation with Position (since both are lower-is-better, positive corr).
-                # Minimize -Correlation.
-                
-                corr = np.corrcoef(combined, arr_actual_pos)[0, 1]
-                return -corr + 0.001 * np.sum(weights**2) # Regularization
 
-            # Initial guess
-            init_w = [0.6, 0.4, 0.3, 0.2, 0.8, # blending (gbm, base, team_factor, driver_team_factor, grid_factor)
-                      0.4, 0.2, 0.2, 0.2]    # ensemble (pace, elo, bt, mixed)
-            
-            # Bounds
-            # Enforce minimum contribution from "car performance" terms to prevent physics denial
-            # w_opt[0] = GBM weight (min 5%)
-            # w_opt[1] = Baseline weight (min 5%)
-            # w_opt[2] = Team Factor (min 0.2 - car matters!)
-            bounds = [
-                (0.05, 1.0), # GBM
-                (0.05, 1.0), # Baseline
-                (0.2, 2.0),  # Team Factor (relative to form)
-                (0.0, 2.0),  # Driver-Team Factor
-                (0.1, 0.95), # Grid Factor (Stickiness)
-                (0.0, 1.0),  # Ensemble Pace
-                (0.0, 1.0),  # Elo
-                (0.0, 1.0),  # BT
-                (0.0, 1.0),  # Mixed
-            ]
-            
-            res = minimize(objective, init_w, bounds=bounds, method='L-BFGS-B')
-            
+                # Ensemble combine
+                combined = (we_pace * pace
+                            + we_elo * arr_elo
+                            + we_bt * arr_bt
+                            + we_mixed * arr_mixed)
+
+                # Per-event Spearman rank correlation
+                spearman_sum = 0.0
+                podium_error_sum = 0.0
+                n_events_scored = 0
+
+                for mask in event_masks:
+                    if len(mask) < 3:
+                        continue
+                    pred = combined[mask]
+                    actual = arr_actual_pos[mask]
+                    # Spearman correlation (we want predicted order to match actual order)
+                    if np.std(pred) < 1e-9:
+                        continue
+                    corr, _ = spearmanr(pred, actual)
+                    if not np.isfinite(corr):
+                        continue
+
+                    spearman_sum += corr
+                    n_events_scored += 1
+
+                    # Podium accuracy: for the 3 drivers predicted fastest,
+                    # how far from actual top 3 are they?
+                    pred_order = np.argsort(pred)
+                    pred_top3_actual = actual[pred_order[:3]]
+                    podium_error_sum += np.mean(np.abs(pred_top3_actual - np.arange(1, 4)))
+
+                if n_events_scored == 0:
+                    return 1e6
+
+                mean_spearman = spearman_sum / n_events_scored
+                mean_podium_err = podium_error_sum / n_events_scored
+
+                # Objective: maximise Spearman (minimise negative), penalise podium error
+                # Lambda = 0.02 balances the ~[0,1] Spearman range with ~[0,10] podium error
+                loss = -mean_spearman + 0.02 * mean_podium_err
+
+                # L2 regularisation towards defaults (prevents wild parameter drift)
+                defaults_arr = np.array(PARAM_DEFAULTS, dtype=float)
+                # Normalise each parameter by its default scale to make regularisation fair
+                scales = np.maximum(np.abs(defaults_arr), 1.0)
+                diffs = ((weights - defaults_arr) / scales) ** 2
+                # Params 0-8 (blending + ensemble) have direct gradient signal
+                # from the ranking objective.  Params 9-21 affect feature
+                # pre-computation / simulation that was already run, so the
+                # optimizer cannot learn them from this objective alone.
+                # Use heavier regularisation for those to keep them near
+                # reasonable defaults until a full backtest-based outer loop
+                # can evaluate them.
+                reg_weights = np.ones(N_PARAMS, dtype=float) * 0.0005
+                reg_weights[9:] = 0.01  # 20x stronger anchor for pre-computed params
+                reg = float(np.sum(reg_weights * diffs))
+
+                return loss + reg
+
+            # Initial guess: use current calibrated weights if available, else defaults
+            try:
+                init_w = _pack_weights(self.current_weights)
+            except Exception:
+                init_w = list(PARAM_DEFAULTS)
+
+            res = minimize(objective, init_w, bounds=PARAM_BOUNDS, method="L-BFGS-B",
+                           options={"maxiter": 200, "ftol": 1e-8})
+
             w_opt = res.x
-            # Normalize ensemble weights to sum to 1 for readability (metric is invariant to scale)
-            ens_sum = sum(w_opt[5:9])
-            if ens_sum > 0:
-                w_opt[5:9] /= ens_sum
-                
-            logger.info(f"[calibrate] Optimized weights: {w_opt}")
-            
-            # Map back to structure
-            # Blending
-            # w_opt: [gbm, form, team, dt, grid, ...]
-            # Models.py expects:
-            # pace = w_gbm*gbm + w_base*(form - w_tm*team - w_dt*dt)
-            # wait, models.py uses: base = form - w_tm*team - w_dt*dt
-            # and pace_hat = w_gbm*gbm + w_base*base
-            # NOTE: base_form, base_team, base_dt in df_calib were negated (lower is faster)
-            # So models.py 'minus' becomes 'plus' in calibrate objective but 'minus' in mapping.
+            logger.info("[calibrate] Optimisation result: fun=%.6f, success=%s", res.fun, res.success)
 
-            w_gbm_opt = max(1e-3, w_opt[0])
-            w_form_opt = max(1e-3, w_opt[1])
-            w_team_opt = w_opt[2]
-            w_dt_opt = w_opt[3]
-            w_grid_stickiness = float(np.clip(w_opt[4], 0.0, 1.0))
+            # Convert to nested structure
+            self.current_weights = _unpack_weights(w_opt)
+            self.current_weights["objective_score"] = float(res.fun)
 
-            # total_main = w_gbm + w_form
-            # but we want w_base in config to cover form+team+dt
-            # so w_gbm_cfg = w_gbm / (w_gbm + w_form)
-            # baseline_team_factor = w_team / w_form (ratio relative to form)
-            
-            total_main = w_gbm_opt + w_form_opt
-            
-            self.current_weights = {
-                "ensemble": {
-                    "w_gbm": float(w_opt[5]), # Pace input
-                    "w_elo": float(w_opt[6]),
-                    "w_bt": float(w_opt[7]),
-                    "w_mixed": float(w_opt[8])
-                },
-                "blending": {
-                    "gbm_weight": float(w_gbm_opt / total_main),
-                    "baseline_weight": float(w_form_opt / total_main),
-                    # Factors are relative to the form index (ratios)
-                    "baseline_team_factor": float(w_team_opt / w_form_opt),
-                    "baseline_driver_team_factor": float(w_dt_opt / w_form_opt),
-                    "grid_factor": w_grid_stickiness,
-                    "current_season_weight": self.current_weights["blending"].get("current_season_weight", 100.0),
-                    "current_season_qualifying_weight": self.current_weights["blending"].get("current_season_qualifying_weight", 100.0),
-                    "current_quali_factor": self.current_weights["blending"].get("current_quali_factor", 0.5)
-                }
-            }
-            
             self.save_weights()
-            duration = time.time()-t0
-            logger.info(f"[calibrate] Calibration complete. Time: {duration:.1f}s")
-            print(f"    [Calibration] Complete! Optimized weights saved. ({duration:.1f}s)")
-            
+            duration = time.time() - t0
+            logger.info("[calibrate] Calibration complete. Time: %.1fs", duration)
+            print(f"    [Calibration] Complete! Optimised {N_PARAMS} parameters. ({duration:.1f}s)")
+
         except Exception as e:
-            logger.error(f"[calibrate] Calibration failed: {e}")
+            logger.error("[calibrate] Calibration failed: %s", e)
             print(f"    [Calibration] FAILED: {e}")
             import traceback
             traceback.print_exc()
@@ -573,5 +671,5 @@ class CalibrationManager:
             w_gbm=ens.get("w_gbm", 0.25),
             w_elo=ens.get("w_elo", 0.25),
             w_bt=ens.get("w_bt", 0.25),
-            w_mixed=ens.get("w_mixed", 0.25)
+            w_mixed=ens.get("w_mixed", 0.25),
         )

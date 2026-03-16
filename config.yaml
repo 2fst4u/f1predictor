@@ -42,9 +42,10 @@ caching:
     max_entries: 50
 
 modelling:
-  recency_half_life_days:
-    base: 120  # reduced for more reactivity to recent form
-    team: 240  # reduced for team perf to be more current
+  # All model weights (blending, ensemble, DNF, simulation, recency,
+  # Elo K) are dynamically calibrated at runtime via CalibrationManager.
+  # Defaults live in f1pred/calibrate.py PARAM_DEFAULTS.
+  # Delete calibration_weights.json to force full re-calibration.
   monte_carlo:
     draws: 5000
   features:
@@ -53,33 +54,12 @@ modelling:
     include_weather_ensemble: true
   targets:
     session_types: ["qualifying", "race", "sprint_qualifying", "sprint"]
-  # pace_scale removed - was destroying variance in predictions
   simulation:
-    noise_factor: 0.15
-    min_noise: 0.05
-    max_penalty_base: 20.0
-  blending:
-    gbm_weight: 0.75
-    baseline_weight: 0.25
-    baseline_team_factor: 0.3
-    baseline_driver_team_factor: 0.2
-    grid_factor: 0.8
-    current_season_weight: 100.0
-    current_season_qualifying_weight: 100.0
-    current_quali_factor: 0.5  # weight of current weekend qualifying position in race pace
-    analytical_win_weight: 0.5  # weight of analytical (Plackett-Luce) vs simulation p_win (0=all sim, 1=all analytical)
+    max_penalty_base: 20.0   # DNF penalty ceiling (structural, not calibrated)
   dnf:
-    alpha: 2.0
-    beta: 8.0
-    driver_weight: 0.6
-    team_weight: 0.4
-    clip_min: 0.02
-    clip_max: 0.35
+    clip_min: 0.02           # safety guardrail (not calibrated)
+    clip_max: 0.35           # safety guardrail (not calibrated)
   ensemble:
-    w_elo: 0.2
-    w_bt: 0.2
-    w_mixed: 0.2
-    w_gbm: 0.4
     min_std: 0.05
 
 calibration:

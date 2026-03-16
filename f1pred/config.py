@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Any, Dict, Optional
 from pathlib import Path
 import os
@@ -80,8 +80,8 @@ class Caching:
 
 @dataclass
 class RecencyHalfLives:
-    base: int
-    team: int
+    base: int = 120
+    team: int = 240
     weather: Optional[int] = 30
 
 
@@ -104,41 +104,41 @@ class TargetsCfg:
 
 @dataclass
 class EnsembleCfg:
-    w_elo: float
-    w_bt: float
-    w_mixed: float
-    w_gbm: float
-    min_std: float
+    w_elo: float = 0.2
+    w_bt: float = 0.2
+    w_mixed: float = 0.2
+    w_gbm: float = 0.4
+    min_std: float = 0.05
 
 
 @dataclass
 class SimulationCfg:
-    noise_factor: float
-    min_noise: float
-    max_penalty_base: float
+    noise_factor: float = 0.15
+    min_noise: float = 0.05
+    max_penalty_base: float = 20.0
 
 
 @dataclass
 class BlendingCfg:
-    gbm_weight: float
-    baseline_weight: float
-    baseline_team_factor: float
-    baseline_driver_team_factor: float
-    grid_factor: float
-    current_season_weight: float = 100.0
-    current_season_qualifying_weight: float = 100.0
+    gbm_weight: float = 0.75
+    baseline_weight: float = 0.25
+    baseline_team_factor: float = 0.3
+    baseline_driver_team_factor: float = 0.2
+    grid_factor: float = 0.8
+    current_season_weight: float = 8.0
+    current_season_qualifying_weight: float = 8.0
     current_quali_factor: float = 0.5
     analytical_win_weight: float = 0.5
 
 
 @dataclass
 class DNFCfg:
-    alpha: float
-    beta: float
-    driver_weight: float
-    team_weight: float
-    clip_min: float
-    clip_max: float
+    alpha: float = 2.0
+    beta: float = 8.0
+    driver_weight: float = 0.6
+    team_weight: float = 0.4
+    clip_min: float = 0.02
+    clip_max: float = 0.35
 
 
 @dataclass
@@ -322,29 +322,29 @@ def load_config(path: str) -> AppConfig:
     rc_dc = RequestsCacheCfg(**cfg["caching"]["requests_cache"])
     pc_dc = PredictionCacheCfg(**cfg["caching"].get("prediction_cache", {"max_entries": 50}))
     caching = Caching(requests_cache=rc_dc, prediction_cache=pc_dc)
-    rh = RecencyHalfLives(**cfg["modelling"]["recency_half_life_days"])
+    # Recency half-lives: fully defaulted, config can override
+    rh_in = cfg["modelling"].get("recency_half_life_days", {})
+    rh = RecencyHalfLives(**rh_in) if rh_in else RecencyHalfLives()
+
     mc = MonteCarlo(**cfg["modelling"]["monte_carlo"])
     feat = FeaturesCfg(**cfg["modelling"]["features"])
     tgt_dc = TargetsCfg(**cfg["modelling"]["targets"])
-    ens_dc = EnsembleCfg(**cfg["modelling"].get("ensemble", {}))
-    
-    sim_dc = SimulationCfg(**cfg["modelling"].get("simulation", {}))
 
-    # Blending config with default for new grid_factor to maintain test compatibility
-    blend_in = cfg["modelling"].get("blending", {}).copy()
-    if "grid_factor" not in blend_in:
-        blend_in["grid_factor"] = 0.8
-    if "current_season_weight" not in blend_in:
-        blend_in["current_season_weight"] = 100.0
-    if "current_season_qualifying_weight" not in blend_in:
-        blend_in["current_season_qualifying_weight"] = 100.0
-    if "current_quali_factor" not in blend_in:
-        blend_in["current_quali_factor"] = 0.5
+    # All calibratable sections: dataclass defaults are the source of truth.
+    # Config YAML may supply non-calibratable fields only (e.g. min_std, clip_min).
+    ens_in = cfg["modelling"].get("ensemble", {})
+    ens_dc = EnsembleCfg(**ens_in)
+
+    sim_in = cfg["modelling"].get("simulation", {})
+    sim_dc = SimulationCfg(**sim_in)
+
+    blend_in = cfg["modelling"].get("blending", {})
     blend_dc = BlendingCfg(**blend_in)
 
-    dnf_dc = DNFCfg(**cfg["modelling"].get("dnf", {}))
-    
-    pace_scale = float(cfg["modelling"].get("pace_scale", 1.0))  # Default 1.0 (no scaling)
+    dnf_in = cfg["modelling"].get("dnf", {})
+    dnf_dc = DNFCfg(**dnf_in)
+
+    pace_scale = float(cfg["modelling"].get("pace_scale", 1.0))  # Deprecated
     modelling = Modelling(
         recency_half_life_days=rh,
         monte_carlo=mc,
