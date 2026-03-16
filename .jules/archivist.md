@@ -1,3 +1,3 @@
-## 2024-05-24 - [Resolve Pytest Local Module Execution Issues]
-**Learning:** Local execution using the `pytest` standalone binary can fail to resolve local modules in this specific virtual environment setup, resulting in ModuleNotFoundError. Relying solely on the `pytest` command creates a barrier to entry for contributors and creates inconsistency between local runs and CI.
-**Action:** Always use `python -m pytest` instead of `pytest` across all scripts, CI, and documentation to ensure reliable execution and module resolution in all environments. Ensure `pytest-cov` is installed alongside `pytest` since the project explicitly tracks coverage and specifies a `fail_under` threshold in `pyproject.toml`.
+## 2024-03-10 - Undocumented Configuration Drift
+**Learning:** Configuration options often get added to `config.yaml` and validation logic (`f1pred/config.py`) without corresponding updates in `README.md`, causing documentation to drift from actual supported behavior.
+**Action:** When auditing configuration options, cross-reference `config.yaml` values explicitly against the `README.md` to spot undocumented parameters (like `precipitation_unit`).
