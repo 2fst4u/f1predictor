@@ -78,6 +78,7 @@ data_sources:
   open_meteo:
     temperature_unit: "celsius" # or fahrenheit
     windspeed_unit: "kmh" # kmh, ms, mph, kn
+    precipitation_unit: "mm" # mm, inch
 ```
 
 ## Output
