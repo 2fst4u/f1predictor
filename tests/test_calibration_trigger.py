@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 import pandas as pd
 from pathlib import Path
-from f1pred.calibrate import CalibrationManager
+from f1pred.calibrate import CalibrationManager, CALIBRATION_VERSION
 
 class TestCalibrationTrigger(unittest.TestCase):
     def setUp(self):
@@ -51,14 +51,34 @@ class TestCalibrationTrigger(unittest.TestCase):
         
         with patch.object(cm, "load_weights", return_value={}):
             cm.last_race_id = "2024_21"
+            # Stamp the current calibration version so the version check passes
+            cm.current_weights["calibration_version"] = CALIBRATION_VERSION
             
             # History with same latest race
             history_df = pd.DataFrame([
                 {"session": "race", "date": pd.Timestamp("2024-12-01"), "season": 2024, "round": 21, "position": 1}
             ])
             
-            # Should return False because IDs match
+            # Should return False because IDs match and version matches
             self.assertFalse(cm.check_calibration_needed(history_df))
+
+    def test_calibration_check_version_mismatch(self):
+        """Recalibration is triggered when the calibration schema changes."""
+        cm = CalibrationManager(self.mock_cfg)
+        cm.weights_file = MagicMock()
+        cm.weights_file.exists.return_value = True
+
+        with patch.object(cm, "load_weights", return_value={}):
+            cm.last_race_id = "2024_21"
+            # Stamp a stale version to simulate an application update
+            cm.current_weights["calibration_version"] = "old_version"
+
+            history_df = pd.DataFrame([
+                {"session": "race", "date": pd.Timestamp("2024-12-01"), "season": 2024, "round": 21, "position": 1}
+            ])
+
+            # Should return True because version mismatch, even though race ID matches
+            self.assertTrue(cm.check_calibration_needed(history_df))
 
 if __name__ == "__main__":
     unittest.main()

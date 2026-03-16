@@ -87,8 +87,8 @@ PARAM_BOUNDS = [
     (0.0, 1.0),     # 6  ens_elo
     (0.0, 1.0),     # 7  ens_bt
     (0.0, 1.0),     # 8  ens_mixed
-    (0.5, 50.0),    # 9  current_season_weight
-    (0.5, 50.0),    # 10 current_season_qualifying_weight
+    (3.0, 50.0),    # 9  current_season_weight
+    (3.0, 50.0),    # 10 current_season_qualifying_weight
     (0.0, 1.0),     # 11 current_quali_factor
     (0.0, 1.0),     # 12 analytical_win_weight
     (0.1, 10.0),    # 13 dnf_alpha
@@ -127,6 +127,27 @@ PARAM_DEFAULTS = [
     240.0,  # 20 half_life_team
     20.0,   # 21 elo_k
 ]
+
+
+def _calibration_version() -> str:
+    """Derive a version fingerprint from the calibration schema.
+
+    Changes to the parameter layout (names, bounds, defaults, count)
+    produce a different hash, which forces a fresh calibration when
+    the application is updated.  This avoids silently reusing weights
+    produced by an older objective function or parameter layout.
+    """
+    import hashlib
+    sig = (
+        str(PARAM_NAMES)
+        + str(PARAM_BOUNDS)
+        + str(PARAM_DEFAULTS)
+        + str(N_PARAMS)
+    )
+    return hashlib.sha256(sig.encode()).hexdigest()[:12]
+
+
+CALIBRATION_VERSION = _calibration_version()
 
 
 def _unpack_weights(w) -> Dict[str, Any]:
@@ -262,6 +283,7 @@ class CalibrationManager:
                 data = self.current_weights.copy()
                 if self.last_race_id:
                     data["last_race_id"] = self.last_race_id
+                data["calibration_version"] = CALIBRATION_VERSION
                 data["calibration_timestamp"] = datetime.now(timezone.utc).isoformat()
                 json.dump(data, f, indent=2)
             logger.info("[calibrate] Saved calibrated weights to %s", self.weights_file)
@@ -279,6 +301,16 @@ class CalibrationManager:
 
         # Load existing weights (and last_race_id)
         self.load_weights()
+
+        # Version check: if the calibration schema has changed (parameters,
+        # bounds, defaults), the cached weights are stale and must be rebuilt.
+        stored_version = self.current_weights.get("calibration_version")
+        if stored_version != CALIBRATION_VERSION:
+            logger.info(
+                "[calibrate] Calibration version mismatch (stored=%s, current=%s), recalibration needed",
+                stored_version, CALIBRATION_VERSION,
+            )
+            return True
 
         # Smart Check: Has a new race occurred?
         if history_df is not None and not history_df.empty:
@@ -433,6 +465,11 @@ class CalibrationManager:
             gbm_pipe, _, gbm_features = train_pace_model(X_train, "race", self.cfg)
 
             # 5. Collect calibration data from each event
+            #
+            # To allow the optimizer to learn current_season_weight, we store
+            # BOTH the boosted form indices (used by blending params 0-4) AND
+            # separate unboosted vs current-season-only form components so the
+            # objective can recompute an effective form at different boost levels.
             calibration_data = []
 
             logger.info("[calibrate] Generating scores for calibration events...")
@@ -455,20 +492,46 @@ class CalibrationManager:
                 # History up to this race (strict temporal cutoff)
                 hist_subset = all_hist[all_hist["date"] < d]
 
-                # Ensemble scores — we will re-fit with calibrated k/half-life during objective,
-                # but here we pre-compute the raw ingredients (positions, dates) that the
-                # objective function can efficiently re-weight.
+                # Ensemble scores
                 elo = EloModel().fit(hist_subset).predict(X_evt)
                 bt = BradleyTerryModel().fit(hist_subset).predict(X_evt)
                 mixed = MixedEffectsLikeModel().fit(hist_subset).predict(X_evt)
 
-                # Baseline components
+                # Baseline components (boosted form as computed by features.py)
                 base_form = -X_evt["form_index"].fillna(0).astype(float).values
                 base_team = -X_evt.get("team_form_index", pd.Series(0, index=X_evt.index)).fillna(0).astype(float).values
                 base_dt = -X_evt.get("driver_team_form_index", pd.Series(0, index=X_evt.index)).fillna(0).astype(float).values
 
+                # Compute UNBOOSTED form indices for the same drivers so the
+                # objective function can recompute form = unboosted + boost * cur_season_only.
+                # This gives the optimizer a gradient signal on current_season_weight.
+                try:
+                    from .features import compute_form_indices
+                    hl_base = self.cfg.modelling.recency_half_life_days.base
+
+                    # Unboosted form (boost_factor=1.0 => no current-season emphasis)
+                    unboosted_form_df = compute_form_indices(
+                        hist_subset, ref_date=d, half_life_days=hl_base,
+                        current_season=None, boost_factor=1.0,
+                    )
+                    unboosted_map = dict(zip(unboosted_form_df["driverId"], -unboosted_form_df["form_index"]))
+
+                    # Current-season-only form (only races in the event's season)
+                    cur_season_hist = hist_subset[hist_subset["season"] == s]
+                    if not cur_season_hist.empty:
+                        cur_form_df = compute_form_indices(
+                            cur_season_hist, ref_date=d, half_life_days=hl_base,
+                            current_season=None, boost_factor=1.0,
+                        )
+                        cur_form_map = dict(zip(cur_form_df["driverId"], -cur_form_df["form_index"]))
+                    else:
+                        cur_form_map = {}
+                except Exception as e:
+                    logger.warning("[calibrate] Unboosted form computation failed: %s", e)
+                    unboosted_map = {}
+                    cur_form_map = {}
+
                 # Actual results — build a clean driverId -> position lookup
-                # to avoid column name collisions if X_evt already has 'position'
                 evt_actuals = calib_races[
                     (calib_races["season"] == s) & (calib_races["round"] == r)
                 ][["driverId", "position"]].drop_duplicates(subset=["driverId"])
@@ -479,8 +542,9 @@ class CalibrationManager:
                     if act_pos is None or pd.isna(act_pos):
                         continue
 
+                    drv_id = row.driverId
                     calibration_data.append({
-                        "driverId": row.driverId,
+                        "driverId": drv_id,
                         "season": s,
                         "round": r,
                         "actual_pos": act_pos,
@@ -488,6 +552,9 @@ class CalibrationManager:
                         "base_form": base_form[idx],
                         "base_team": base_team[idx],
                         "base_dt": base_dt[idx],
+                        # Decomposed form: unboosted (all history) + current-season-only
+                        "form_unboosted": unboosted_map.get(drv_id, base_form[idx]),
+                        "form_cur_season": cur_form_map.get(drv_id, 0.0),
                         "grid": float(X_evt.iloc[idx].get("grid", 15.0)),
                         "elo": elo[idx] if len(elo) > idx else 0,
                         "bt": bt[idx] if len(bt) > idx else 0,
@@ -518,6 +585,10 @@ class CalibrationManager:
             arr_mixed = df_calib["mixed"].values
             arr_actual_pos = df_calib["actual_pos"].values
 
+            # Decomposed form components for season-weight sensitivity
+            arr_form_unboosted = df_calib["form_unboosted"].values
+            arr_form_cur_season = df_calib["form_cur_season"].values
+
             event_keys = df_calib[["season", "round"]].values
             unique_events, event_indices = np.unique(event_keys, axis=0, return_inverse=True)
             n_unique = len(unique_events)
@@ -534,7 +605,12 @@ class CalibrationManager:
                 g_z_precomputed[mask] = (ev_grid - mu_g) / (sd_g + 1e-6)
 
             def objective(weights):
-                """Combined objective: -mean(per-event Spearman) + podium penalty + regularisation."""
+                """Combined objective: -mean(per-event Spearman) + podium penalty + regularisation.
+
+                The baseline form component is now recomputed as a function of
+                current_season_weight (weights[9]) so the optimizer can learn
+                how much to emphasise recent season results vs historical form.
+                """
                 # Unpack
                 wb_gbm = max(0, weights[0])
                 wb_form = max(0, weights[1])
@@ -547,9 +623,18 @@ class CalibrationManager:
                 we_bt = max(0, weights[7])
                 we_mixed = max(0, weights[8])
 
+                # Current season weight from optimiser (param index 9)
+                w_season = max(1.0, weights[9])
+
+                # Recompute effective form as: unboosted_base + (boost - 1) * cur_season_component
+                # When w_season=1.0 this equals unboosted_base (no boost).
+                # When w_season=8.0 this adds 7x the current-season-only form.
+                # This gives the optimizer a direct gradient on weights[9].
+                effective_form = arr_form_unboosted + (w_season - 1.0) * arr_form_cur_season
+
                 # Stage 1: Form-based pace
                 raw_pace = (wb_gbm * arr_gbm_raw
-                            + wb_form * arr_base_form
+                            + wb_form * effective_form
                             + wb_tm * arr_base_team
                             + wb_dt * arr_base_dt)
 
@@ -619,32 +704,30 @@ class CalibrationManager:
                 # Lambda = 0.02 balances the ~[0,1] Spearman range with ~[0,10] podium error
                 loss = -mean_spearman + 0.02 * mean_podium_err
 
-                # L2 regularisation towards defaults (prevents wild parameter drift)
+                # Regularisation: The bounds (PARAM_BOUNDS) are the primary
+                # guardrails.  We only add a very light L2 penalty to discourage
+                # extreme corner solutions when the objective surface is flat,
+                # NOT to anchor towards hardcoded "defaults".  The optimizer
+                # should learn the right values from data.
                 defaults_arr = np.array(PARAM_DEFAULTS, dtype=float)
-                # Normalise each parameter by its default scale to make regularisation fair
                 scales = np.maximum(np.abs(defaults_arr), 1.0)
                 diffs = ((weights - defaults_arr) / scales) ** 2
-                # Params 0-8 (blending + ensemble) have direct gradient signal
-                # from the ranking objective.  Params 9-21 affect feature
-                # pre-computation / simulation that was already run, so the
-                # optimizer cannot learn them from this objective alone.
-                # Use heavier regularisation for those to keep them near
-                # reasonable defaults until a full backtest-based outer loop
-                # can evaluate them.
-                reg_weights = np.ones(N_PARAMS, dtype=float) * 0.0005
-                reg_weights[9:] = 0.01  # 20x stronger anchor for pre-computed params
+
+                # Params 0-9: learnable from the objective — near-zero regularisation
+                # Params 10-21: pre-computed (no gradient signal) — light anchor only
+                reg_weights = np.ones(N_PARAMS, dtype=float) * 1e-5
+                reg_weights[10:] = 0.005
                 reg = float(np.sum(reg_weights * diffs))
 
                 return loss + reg
 
-            # Initial guess: use current calibrated weights if available, else defaults
-            try:
-                init_w = _pack_weights(self.current_weights)
-            except Exception:
-                init_w = list(PARAM_DEFAULTS)
+            # Initial guess: always start from PARAM_DEFAULTS so the optimizer
+            # learns entirely from the data each time, rather than drifting from
+            # a potentially stale cached solution.  The bounds enforce safety.
+            init_w = list(PARAM_DEFAULTS)
 
             res = minimize(objective, init_w, bounds=PARAM_BOUNDS, method="L-BFGS-B",
-                           options={"maxiter": 200, "ftol": 1e-8})
+                           options={"maxiter": 300, "ftol": 1e-9})
 
             w_opt = res.x
             logger.info("[calibrate] Optimisation result: fun=%.6f, success=%s", res.fun, res.success)

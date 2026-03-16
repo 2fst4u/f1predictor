@@ -13,6 +13,7 @@ env/
 ENV/
 
 # --- Project caches and generated data (do not commit) ---
+calibration_weights.json
 cache/
 fastf1_cache/
 .cache/
