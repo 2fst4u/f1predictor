@@ -205,6 +205,10 @@ async def get_predictions(
     if not _config:
          raise HTTPException(status_code=500, detail="Application not configured")
 
+    # 🛡️ Sentinel: Prevent DoS via unbounded list input
+    if sessions and len(sessions) > 10:
+        raise HTTPException(status_code=400, detail="Too many sessions requested")
+
     try:
         # Use default sessions if not provided
         target_sessions = sessions or _config.modelling.targets.session_types
@@ -261,6 +265,10 @@ async def get_predictions_stream(
 ):
     if not _config:
          raise HTTPException(status_code=500, detail="Application not configured")
+
+    # 🛡️ Sentinel: Prevent DoS via unbounded list input
+    if sessions and len(sessions) > 10:
+        raise HTTPException(status_code=400, detail="Too many sessions requested")
 
     def run_and_collect(q: queue.Queue):
         try:
