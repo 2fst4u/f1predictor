@@ -148,21 +148,35 @@ async def get_event_status(
             if exists:
                 has_results = False
 
-                # Fast check: Fresh Jolpica query (bypass cache to
-                # avoid stale empty responses from before results were posted)
+                # First check: Use cached Jolpica query (instant if already fetched)
                 try:
-                    import requests_cache as rc
-                    with rc.disabled():
-                        if s == "race":
-                            has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
-                        elif s == "qualifying":
-                            has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
-                        elif s == "sprint":
-                            has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
-                        elif s == "sprint_qualifying":
-                            # No explicit Jolpica endpoint for sprint qualifying results;
-                            # Approximate by checking if the Sprint itself has results.
-                            has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
+                    res = []
+                    if s == "race":
+                        res = jc.get_race_results(str(s_i), str(r_i))
+                    elif s == "qualifying":
+                        res = jc.get_qualifying_results(str(s_i), str(r_i))
+                    elif s == "sprint":
+                        res = jc.get_sprint_results(str(s_i), str(r_i))
+                    elif s == "sprint_qualifying":
+                        # No explicit Jolpica endpoint for sprint qualifying results;
+                        # Approximate by checking if the Sprint itself has results.
+                        res = jc.get_sprint_results(str(s_i), str(r_i))
+                    
+                    has_results = bool(res)
+
+                    # Second check: Fresh Jolpica query (bypass cache to
+                    # avoid stale empty responses from before results were posted)
+                    if not has_results:
+                        import requests_cache as rc
+                        with rc.disabled():
+                            if s == "race":
+                                has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
+                            elif s == "qualifying":
+                                has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
+                            elif s == "sprint":
+                                has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
+                            elif s == "sprint_qualifying":
+                                has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
                 except Exception:
                     pass
 
