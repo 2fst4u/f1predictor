@@ -134,10 +134,6 @@ async def get_event_status(
         all_possible = ["sprint_qualifying", "sprint", "qualifying", "race"]
         sessions = []
 
-        # Derive roster once for the round (Optimization: avoid redundant deep scans)
-        from .features import build_roster
-        roster = build_roster(jc, str(s_i), str(r_i), event_dt=None)
-
         # Check for each session if it exists in race_info and if results exist
         for s in all_possible:
             # Race and Qualifying always exist in F1
@@ -152,33 +148,23 @@ async def get_event_status(
             if exists:
                 has_results = False
 
-                # 1. Primary check: Use prediction engine results (Jolpica + FastF1)
+                # Fast check: Fresh Jolpica query (bypass cache to
+                # avoid stale empty responses from before results were posted)
                 try:
-                    from .predict import _get_actual_positions_for_session
-                    if roster is not None and not roster.empty:
-                        acts = _get_actual_positions_for_session(jc, s_i, r_i, s, roster)
-                        has_results = acts is not None and not acts.isna().all()
+                    import requests_cache as rc
+                    with rc.disabled():
+                        if s == "race":
+                            has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
+                        elif s == "qualifying":
+                            has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
+                        elif s == "sprint":
+                            has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
+                        elif s == "sprint_qualifying":
+                            # No explicit Jolpica endpoint for sprint qualifying results;
+                            # Approximate by checking if the Sprint itself has results.
+                            has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
                 except Exception:
                     pass
-
-                # 2. Secondary check: Fresh Jolpica query (bypass cache to
-                #    avoid stale empty responses from before results were posted)
-                if not has_results:
-                    try:
-                        import requests_cache as rc
-                        with rc.disabled():
-                            if s == "race":
-                                has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
-                            elif s == "qualifying":
-                                has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
-                            elif s == "sprint":
-                                has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
-                            elif s == "sprint_qualifying":
-                                # No Jolpica endpoint for sprint qualifying; rely on
-                                # the primary check above.
-                                pass
-                    except Exception:
-                        pass
 
                 sessions.append({
                     "id": s,
