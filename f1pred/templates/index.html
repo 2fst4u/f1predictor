@@ -271,7 +271,7 @@
                                                         <div class="flex justify-between text-[10px] mb-0.5 sm:mb-1">
                                                             <span x-text="(p.p_win * 100).toFixed(1) + '%'"></span>
                                                         </div>
-                                                        <div class="progress-bar hidden sm:block">
+                                                        <div class="progress-bar hidden sm:block" aria-hidden="true">
                                                             <div class="progress-fill" :style="'width: ' + (p.p_win * 100) + '%; background-color: ' + getProbColor(p.p_win * 100)"></div>
                                                         </div>
                                                     </div>
@@ -281,7 +281,7 @@
                                                         <div class="flex justify-between text-[10px] mb-0.5 sm:mb-1">
                                                             <span x-text="(p.p_top3 * 100).toFixed(1) + '%'"></span>
                                                         </div>
-                                                        <div class="progress-bar hidden sm:block">
+                                                        <div class="progress-bar hidden sm:block" aria-hidden="true">
                                                             <div class="progress-fill" :style="'width: ' + (p.p_top3 * 100) + '%; background-color: ' + getProbColor(p.p_top3 * 100)"></div>
                                                         </div>
                                                     </div>
@@ -291,7 +291,7 @@
                                                         <div class="flex justify-between text-[10px] mb-0.5 sm:mb-1">
                                                             <span x-text="(p.p_dnf * 100).toFixed(1) + '%'"></span>
                                                         </div>
-                                                        <div class="progress-bar hidden sm:block">
+                                                        <div class="progress-bar hidden sm:block" aria-hidden="true">
                                                             <div class="progress-fill" :style="'width: ' + (p.p_dnf * 100) + '%; background-color: ' + getProbColor(p.p_dnf * 100, true)"></div>
                                                         </div>
                                                     </div>
