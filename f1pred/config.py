@@ -125,8 +125,8 @@ class BlendingCfg:
     baseline_team_factor: float
     baseline_driver_team_factor: float
     grid_factor: float
-    current_season_weight: float = 8.0
-    current_season_qualifying_weight: float = 20.0
+    current_season_weight: float = 100.0
+    current_season_qualifying_weight: float = 100.0
     current_quali_factor: float = 0.5
     analytical_win_weight: float = 0.5
 
@@ -335,9 +335,9 @@ def load_config(path: str) -> AppConfig:
     if "grid_factor" not in blend_in:
         blend_in["grid_factor"] = 0.8
     if "current_season_weight" not in blend_in:
-        blend_in["current_season_weight"] = 8.0
+        blend_in["current_season_weight"] = 100.0
     if "current_season_qualifying_weight" not in blend_in:
-        blend_in["current_season_qualifying_weight"] = 20.0
+        blend_in["current_season_qualifying_weight"] = 100.0
     if "current_quali_factor" not in blend_in:
         blend_in["current_quali_factor"] = 0.5
     blend_dc = BlendingCfg(**blend_in)

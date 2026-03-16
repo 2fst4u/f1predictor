@@ -568,6 +568,8 @@ def run_predictions_for_event(
                     cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
                 if "grid_factor" in b:
                     cfg.modelling.blending.grid_factor = b["grid_factor"]
+                if "current_season_weight" in b:
+                    cfg.modelling.blending.current_season_weight = b["current_season_weight"]
                 if "current_season_qualifying_weight" in b:
                     cfg.modelling.blending.current_season_qualifying_weight = b["current_season_qualifying_weight"]
                 if "current_quali_factor" in b:
@@ -767,6 +769,8 @@ def run_predictions_for_event(
                                         cfg.modelling.blending.baseline_driver_team_factor = b["baseline_driver_team_factor"]
                                     if "grid_factor" in b:
                                         cfg.modelling.blending.grid_factor = b["grid_factor"]
+                                    if "current_season_weight" in b:
+                                        cfg.modelling.blending.current_season_weight = b["current_season_weight"]
                                     if "current_season_qualifying_weight" in b:
                                         cfg.modelling.blending.current_season_qualifying_weight = b["current_season_qualifying_weight"]
                                     if "current_quali_factor" in b:
