@@ -1,0 +1,3 @@
+## 2024-03-17 - Improve feature influence accessibility and empty state guidance
+**Learning:** When rendering directional deltas or feature influence legends that rely on visual cues (like +/- symbols or green/red color coding), screen readers will announce confusing literal characters instead of context. Furthermore, when binding to dynamically loaded state like Alpine.js, empty state text might immediately jump to "ready" states.
+**Action:** Hide the literal characters and visual legends from screen readers using `aria-hidden="true"`. Provide the equivalent context using adjacent `<span class="sr-only">` elements (e.g., 'Improves position:', 'Worsens position:'). When verifying empty states, account for auto-populating default config values.
