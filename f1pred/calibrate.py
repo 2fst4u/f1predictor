@@ -49,7 +49,7 @@ PARAM_NAMES = [
     "baseline_team_factor",     # 2
     "baseline_driver_team_factor",  # 3
     "grid_factor",              # 4
-    # -- ensemble (5-8) --
+    # -- ensemble race weights (5-8) --
     "ens_pace",                 # 5
     "ens_elo",                  # 6
     "ens_bt",                   # 7
@@ -72,6 +72,14 @@ PARAM_NAMES = [
     "half_life_team",           # 20
     # -- elo (21) --
     "elo_k",                    # 21
+    # -- ensemble qualifying weights (22-25) --
+    # Separate weight set for qualifying/sprint_qualifying sessions so that
+    # race-only statistical models (Elo, BT, Mixed) can be down-weighted
+    # without degrading race predictions.
+    "ens_pace_quali",           # 22
+    "ens_elo_quali",            # 23
+    "ens_bt_quali",             # 24
+    "ens_mixed_quali",          # 25
 ]
 
 N_PARAMS = len(PARAM_NAMES)
@@ -100,6 +108,10 @@ PARAM_BOUNDS = [
     (30.0, 500.0),  # 19 half_life_base
     (60.0, 800.0),  # 20 half_life_team
     (5.0, 60.0),    # 21 elo_k
+    (0.0, 1.0),     # 22 ens_pace_quali
+    (0.0, 0.5),     # 23 ens_elo_quali   (capped lower — race-only model)
+    (0.0, 0.5),     # 24 ens_bt_quali    (capped lower — race-only model)
+    (0.0, 0.5),     # 25 ens_mixed_quali (capped lower — race-only model)
 ]
 
 # Default / initial guess (matches config.yaml defaults)
@@ -126,6 +138,10 @@ PARAM_DEFAULTS = [
     120.0,  # 19 half_life_base
     240.0,  # 20 half_life_team
     20.0,   # 21 elo_k
+    0.7,    # 22 ens_pace_quali  — GBM carries most weight for qualifying
+    0.1,    # 23 ens_elo_quali
+    0.1,    # 24 ens_bt_quali
+    0.1,    # 25 ens_mixed_quali
 ]
 
 
@@ -155,13 +171,26 @@ def _unpack_weights(w) -> Dict[str, Any]:
     import numpy as np
     w = np.asarray(w, dtype=float)
 
-    # Normalise ensemble weights to sum to 1
+    # Normalise race ensemble weights to sum to 1
     ens_raw = w[5:9].copy()
     ens_sum = ens_raw.sum()
     if ens_sum > 0:
         ens_raw /= ens_sum
     else:
         ens_raw[:] = 0.25
+
+    # Normalise qualifying ensemble weights to sum to 1 (params 22-25)
+    # Fall back to defaults if the vector is shorter (old weight files)
+    if len(w) > 25:
+        ens_q_raw = w[22:26].copy()
+    else:
+        ens_q_raw = np.array([PARAM_DEFAULTS[22], PARAM_DEFAULTS[23],
+                               PARAM_DEFAULTS[24], PARAM_DEFAULTS[25]])
+    ens_q_sum = ens_q_raw.sum()
+    if ens_q_sum > 0:
+        ens_q_raw /= ens_q_sum
+    else:
+        ens_q_raw[:] = np.array([0.7, 0.1, 0.1, 0.1])
 
     # Normalise blending gbm/baseline to partition of unity
     gbm_raw = max(1e-3, w[0])
@@ -174,6 +203,11 @@ def _unpack_weights(w) -> Dict[str, Any]:
             "w_elo": float(ens_raw[1]),
             "w_bt": float(ens_raw[2]),
             "w_mixed": float(ens_raw[3]),
+            # Qualifying-specific weights
+            "w_gbm_quali": float(ens_q_raw[0]),
+            "w_elo_quali": float(ens_q_raw[1]),
+            "w_bt_quali": float(ens_q_raw[2]),
+            "w_mixed_quali": float(ens_q_raw[3]),
         },
         "blending": {
             "gbm_weight": float(gbm_raw / total_main),
@@ -238,6 +272,10 @@ def _pack_weights(d: Dict[str, Any]) -> list:
         rec.get("half_life_base", PARAM_DEFAULTS[19]),
         rec.get("half_life_team", PARAM_DEFAULTS[20]),
         elo.get("k", PARAM_DEFAULTS[21]),
+        e.get("w_gbm_quali", PARAM_DEFAULTS[22]),
+        e.get("w_elo_quali", PARAM_DEFAULTS[23]),
+        e.get("w_bt_quali", PARAM_DEFAULTS[24]),
+        e.get("w_mixed_quali", PARAM_DEFAULTS[25]),
     ]
 
 
@@ -464,13 +502,36 @@ class CalibrationManager:
 
             gbm_pipe, _, gbm_features = train_pace_model(X_train, "race", self.cfg)
 
-            # 5. Collect calibration data from each event
+            # Also train a qualifying-specific GBM for qualifying calibration data
+            gbm_pipe_quali = None
+            gbm_features_quali = None
+            try:
+                gbm_pipe_quali, _, gbm_features_quali = train_pace_model(
+                    X_train, "qualifying", self.cfg
+                )
+            except Exception as e:
+                logger.warning("[calibrate] Qualifying GBM training failed: %s", e)
+
+            # 5. Collect calibration data from each event.
+            #
+            # We gather BOTH race and qualifying data so the objective function
+            # can simultaneously optimise race weights (params 5-8) and
+            # qualifying weights (params 22-25).
             #
             # To allow the optimizer to learn current_season_weight, we store
-            # BOTH the boosted form indices (used by blending params 0-4) AND
-            # separate unboosted vs current-season-only form components so the
-            # objective can recompute an effective form at different boost levels.
-            calibration_data = []
+            # BOTH the boosted form indices AND separate unboosted/current-season
+            # components so the objective can recompute form at different boost levels.
+            calibration_data = []       # race rows
+            quali_calibration_data = [] # qualifying rows
+
+            # Collect qualifying actuals from history (qpos column)
+            calib_quali = all_hist[
+                (all_hist["session"] == "qualifying")
+                & (all_hist["date"] >= start_date)
+                & (all_hist["qpos"].notna())
+            ].sort_values("date")
+
+            quali_events = calib_quali[["season", "round", "date"]].drop_duplicates().sort_values("date")
 
             logger.info("[calibrate] Generating scores for calibration events...")
             for i, evt in enumerate(events.itertuples()):
@@ -492,10 +553,15 @@ class CalibrationManager:
                 # History up to this race (strict temporal cutoff)
                 hist_subset = all_hist[all_hist["date"] < d]
 
-                # Ensemble scores
-                elo = EloModel().fit(hist_subset).predict(X_evt)
-                bt = BradleyTerryModel().fit(hist_subset).predict(X_evt)
-                mixed = MixedEffectsLikeModel().fit(hist_subset).predict(X_evt)
+                # Fit ensemble models once per event; use race track for race data,
+                # qualifying track for qualifying data (handled at predict-time below)
+                elo_model_fit = EloModel().fit(hist_subset)
+                bt_model_fit = BradleyTerryModel().fit(hist_subset)
+                mixed_model_fit = MixedEffectsLikeModel().fit(hist_subset)
+
+                elo = elo_model_fit.predict(X_evt, session_type="race")
+                bt = bt_model_fit.predict(X_evt, session_type="race")
+                mixed = mixed_model_fit.predict(X_evt, session_type="race")
 
                 # Baseline components (boosted form as computed by features.py)
                 base_form = -X_evt["form_index"].fillna(0).astype(float).values
@@ -504,7 +570,7 @@ class CalibrationManager:
 
                 # Compute UNBOOSTED form indices for the same drivers so the
                 # objective function can recompute form = unboosted + boost * cur_season_only.
-                # This gives the optimizer a gradient signal on current_season_weight.
+                # This gives the optimizer a direct gradient on current_season_weight.
                 try:
                     from .features import compute_form_indices
                     hl_base = self.cfg.modelling.recency_half_life_days.base
@@ -531,7 +597,7 @@ class CalibrationManager:
                     unboosted_map = {}
                     cur_form_map = {}
 
-                # Actual results — build a clean driverId -> position lookup
+                # Actual race results — build a clean driverId -> position lookup
                 evt_actuals = calib_races[
                     (calib_races["season"] == s) & (calib_races["round"] == r)
                 ][["driverId", "position"]].drop_duplicates(subset=["driverId"])
@@ -562,20 +628,83 @@ class CalibrationManager:
                     })
 
                 if (i + 1) % 5 == 0:
-                    logger.info("[calibrate] Processed %d/%d events", i + 1, len(events))
+                    logger.info("[calibrate] Processed %d/%d race events", i + 1, len(events))
                     print(f"    [Calibration] Backtesting event {i + 1}/{len(events)}...")
 
+            # Collect qualifying calibration data
+            logger.info("[calibrate] Generating scores for %d qualifying events...", len(quali_events))
+            for i, evt in enumerate(quali_events.itertuples()):
+                s, r, d = int(evt.season), int(evt.round), pd.Timestamp(evt.date)
+
+                try:
+                    X_evt_q, _, _ = build_session_features(jc, om, s, r, "qualifying", d, self.cfg)
+                except Exception as e:
+                    logger.debug("[calibrate] Qualifying features failed for %d R%d: %s", s, r, e)
+                    continue
+                if X_evt_q is None or X_evt_q.empty:
+                    continue
+
+                # GBM qualifying score
+                try:
+                    if gbm_pipe_quali is not None and gbm_features_quali:
+                        X_pred_q = X_evt_q.reindex(columns=gbm_features_quali)
+                        pace_hat_q = gbm_pipe_quali.predict(X_pred_q)
+                    else:
+                        X_pred_q = X_evt_q.reindex(columns=gbm_features) if gbm_features else X_evt_q
+                        pace_hat_q = gbm_pipe.predict(X_pred_q)
+                    pace_hat_q = (pace_hat_q - pace_hat_q.mean()) / (pace_hat_q.std() + 1e-6)
+                except Exception as e:
+                    logger.debug("[calibrate] Qualifying GBM predict failed for %d R%d: %s", s, r, e)
+                    continue
+
+                hist_subset_q = all_hist[all_hist["date"] < d]
+
+                elo_model_q = EloModel().fit(hist_subset_q)
+                bt_model_q = BradleyTerryModel().fit(hist_subset_q)
+                mixed_model_q = MixedEffectsLikeModel().fit(hist_subset_q)
+
+                elo_q = elo_model_q.predict(X_evt_q, session_type="qualifying")
+                bt_q = bt_model_q.predict(X_evt_q, session_type="qualifying")
+                mixed_q = mixed_model_q.predict(X_evt_q, session_type="qualifying")
+
+                # Actual qualifying positions
+                evt_actuals_q = calib_quali[
+                    (calib_quali["season"] == s) & (calib_quali["round"] == r)
+                ][["driverId", "qpos"]].drop_duplicates(subset=["driverId"])
+                actual_qpos_map = dict(zip(evt_actuals_q["driverId"], evt_actuals_q["qpos"]))
+
+                for idx, row in enumerate(X_evt_q.itertuples()):
+                    act_qpos = actual_qpos_map.get(row.driverId)
+                    if act_qpos is None or pd.isna(act_qpos):
+                        continue
+                    quali_calibration_data.append({
+                        "driverId": row.driverId,
+                        "season": s,
+                        "round": r,
+                        "actual_pos": act_qpos,
+                        "gbm_raw": pace_hat_q[idx],
+                        "elo": elo_q[idx] if len(elo_q) > idx else 0,
+                        "bt": bt_q[idx] if len(bt_q) > idx else 0,
+                        "mixed": mixed_q[idx] if len(mixed_q) > idx else 0,
+                    })
+
             if not calibration_data:
-                logger.warning("[calibrate] No calibration data generated.")
+                logger.warning("[calibrate] No race calibration data generated.")
                 print("    [Calibration] ABORTED: No validation queries succeeded.")
                 return
 
             df_calib = pd.DataFrame(calibration_data)
+            df_calib_q = pd.DataFrame(quali_calibration_data) if quali_calibration_data else pd.DataFrame()
+            logger.info(
+                "[calibrate] Race samples: %d; Qualifying samples: %d",
+                len(df_calib), len(df_calib_q),
+            )
 
             # 6. Optimisation
-            logger.info("[calibrate] Optimising %d parameters on %d samples...", N_PARAMS, len(df_calib))
+            logger.info("[calibrate] Optimising %d parameters on %d race + %d qualifying samples...",
+                        N_PARAMS, len(df_calib), len(df_calib_q))
 
-            # Pre-compute arrays for vectorised objective
+            # Pre-compute arrays for vectorised race objective
             arr_gbm_raw = df_calib["gbm_raw"].values
             _ = df_calib["base_form"].values
             arr_base_team = df_calib["base_team"].values
@@ -604,14 +733,33 @@ class CalibrationManager:
                 sd_g = np.nanstd(ev_grid)
                 g_z_precomputed[mask] = (ev_grid - mu_g) / (sd_g + 1e-6)
 
-            def objective(weights):
-                """Combined objective: -mean(per-event Spearman) + podium penalty + regularisation.
+            # Pre-compute arrays for qualifying objective (may be empty)
+            has_quali_data = not df_calib_q.empty
+            if has_quali_data:
+                arr_q_gbm = df_calib_q["gbm_raw"].values
+                arr_q_elo = df_calib_q["elo"].values
+                arr_q_bt = df_calib_q["bt"].values
+                arr_q_mixed = df_calib_q["mixed"].values
+                arr_q_actual = df_calib_q["actual_pos"].values
+                q_event_keys = df_calib_q[["season", "round"]].values
+                _, q_event_indices = np.unique(q_event_keys, axis=0, return_inverse=True)
+                n_q_unique = len(np.unique(q_event_keys, axis=0))
+                q_event_masks = [
+                    np.where(q_event_indices == ei)[0] for ei in range(n_q_unique)
+                ]
 
-                The baseline form component is now recomputed as a function of
-                current_season_weight (weights[9]) so the optimizer can learn
-                how much to emphasise recent season results vs historical form.
+            def objective(weights):
+                """Combined objective over race AND qualifying sessions.
+
+                Race term: -Spearman(predicted_pace, actual_race_pos) using race weights (5-8)
+                Qualifying term: -Spearman(predicted_pace, actual_qpos) using quali weights (22-25)
+
+                The two terms are averaged with equal weight so the optimizer
+                simultaneously learns good race predictions and good qualifying
+                predictions, including the correct trade-off between the GBM
+                and the statistical models for each session type.
                 """
-                # Unpack
+                # Unpack race/blending params
                 wb_gbm = max(0, weights[0])
                 wb_form = max(0, weights[1])
                 wb_tm = max(0, weights[2])
@@ -623,16 +771,19 @@ class CalibrationManager:
                 we_bt = max(0, weights[7])
                 we_mixed = max(0, weights[8])
 
+                # Qualifying ensemble weights (params 22-25)
+                we_q_pace = max(0, weights[22]) if len(weights) > 22 else PARAM_DEFAULTS[22]
+                we_q_elo = max(0, weights[23]) if len(weights) > 23 else PARAM_DEFAULTS[23]
+                we_q_bt = max(0, weights[24]) if len(weights) > 24 else PARAM_DEFAULTS[24]
+                we_q_mixed = max(0, weights[25]) if len(weights) > 25 else PARAM_DEFAULTS[25]
+
                 # Current season weight from optimiser (param index 9)
                 w_season = max(1.0, weights[9])
 
                 # Recompute effective form as: unboosted_base + (boost - 1) * cur_season_component
-                # When w_season=1.0 this equals unboosted_base (no boost).
-                # When w_season=8.0 this adds 7x the current-season-only form.
-                # This gives the optimizer a direct gradient on weights[9].
                 effective_form = arr_form_unboosted + (w_season - 1.0) * arr_form_cur_season
 
-                # Stage 1: Form-based pace
+                # ---- Race objective ----
                 raw_pace = (wb_gbm * arr_gbm_raw
                             + wb_form * effective_form
                             + wb_tm * arr_base_team
@@ -659,67 +810,105 @@ class CalibrationManager:
                 sd_p_all = stds[event_indices]
                 p_z = (raw_pace - mu_p_all) / (sd_p_all + 1e-6)
 
-                # Stage 2: Grid stickiness blend
+                # Grid stickiness blend
                 pace = (1.0 - grid_imp) * p_z + grid_imp * g_z_precomputed
 
-                # Ensemble combine
-                combined = (we_pace * pace
-                            + we_elo * arr_elo
-                            + we_bt * arr_bt
-                            + we_mixed * arr_mixed)
+                # Normalise race ensemble weights
+                race_wsum = we_pace + we_elo + we_bt + we_mixed
+                if race_wsum < 1e-9:
+                    race_wsum = 1.0
+                combined_race = (
+                    (we_pace / race_wsum) * pace
+                    + (we_elo / race_wsum) * arr_elo
+                    + (we_bt / race_wsum) * arr_bt
+                    + (we_mixed / race_wsum) * arr_mixed
+                )
 
-                # Per-event Spearman rank correlation
-                spearman_sum = 0.0
-                podium_error_sum = 0.0
-                n_events_scored = 0
+                race_spearman_sum = 0.0
+                race_podium_err_sum = 0.0
+                n_race_scored = 0
 
                 for mask in event_masks:
                     if len(mask) < 3:
                         continue
-                    pred = combined[mask]
+                    pred = combined_race[mask]
                     actual = arr_actual_pos[mask]
-                    # Spearman correlation (we want predicted order to match actual order)
                     if np.std(pred) < 1e-9:
                         continue
                     corr, _ = spearmanr(pred, actual)
                     if not np.isfinite(corr):
                         continue
-
-                    spearman_sum += corr
-                    n_events_scored += 1
-
-                    # Podium accuracy: for the 3 drivers predicted fastest,
-                    # how far from actual top 3 are they?
+                    race_spearman_sum += corr
+                    n_race_scored += 1
                     pred_order = np.argsort(pred)
                     pred_top3_actual = actual[pred_order[:3]]
-                    podium_error_sum += np.mean(np.abs(pred_top3_actual - np.arange(1, 4)))
+                    race_podium_err_sum += np.mean(np.abs(pred_top3_actual - np.arange(1, 4)))
 
-                if n_events_scored == 0:
+                if n_race_scored == 0:
                     return 1e6
 
-                mean_spearman = spearman_sum / n_events_scored
-                mean_podium_err = podium_error_sum / n_events_scored
+                mean_race_spearman = race_spearman_sum / n_race_scored
+                mean_race_podium_err = race_podium_err_sum / n_race_scored
+                race_loss = -mean_race_spearman + 0.02 * mean_race_podium_err
 
-                # Objective: maximise Spearman (minimise negative), penalise podium error
-                # Lambda = 0.02 balances the ~[0,1] Spearman range with ~[0,10] podium error
-                loss = -mean_spearman + 0.02 * mean_podium_err
+                # ---- Qualifying objective ----
+                quali_loss = 0.0
+                if has_quali_data:
+                    # Normalise qualifying ensemble weights
+                    q_wsum = we_q_pace + we_q_elo + we_q_bt + we_q_mixed
+                    if q_wsum < 1e-9:
+                        q_wsum = 1.0
+                    combined_quali = (
+                        (we_q_pace / q_wsum) * arr_q_gbm
+                        + (we_q_elo / q_wsum) * arr_q_elo
+                        + (we_q_bt / q_wsum) * arr_q_bt
+                        + (we_q_mixed / q_wsum) * arr_q_mixed
+                    )
 
-                # Regularisation: The bounds (PARAM_BOUNDS) are the primary
-                # guardrails.  We only add a very light L2 penalty to discourage
-                # extreme corner solutions when the objective surface is flat,
-                # NOT to anchor towards hardcoded "defaults".  The optimizer
-                # should learn the right values from data.
+                    q_spearman_sum = 0.0
+                    q_podium_err_sum = 0.0
+                    n_q_scored = 0
+
+                    for mask in q_event_masks:
+                        if len(mask) < 3:
+                            continue
+                        pred_q = combined_quali[mask]
+                        actual_q = arr_q_actual[mask]
+                        if np.std(pred_q) < 1e-9:
+                            continue
+                        corr_q, _ = spearmanr(pred_q, actual_q)
+                        if not np.isfinite(corr_q):
+                            continue
+                        q_spearman_sum += corr_q
+                        n_q_scored += 1
+                        pred_q_order = np.argsort(pred_q)
+                        pred_q_top3_actual = actual_q[pred_q_order[:3]]
+                        q_podium_err_sum += np.mean(np.abs(pred_q_top3_actual - np.arange(1, 4)))
+
+                    if n_q_scored > 0:
+                        mean_q_spearman = q_spearman_sum / n_q_scored
+                        mean_q_podium_err = q_podium_err_sum / n_q_scored
+                        quali_loss = -mean_q_spearman + 0.02 * mean_q_podium_err
+
+                # Combined loss: equal weighting of race and qualifying performance
+                if has_quali_data and quali_loss != 0.0:
+                    total_loss = 0.5 * race_loss + 0.5 * quali_loss
+                else:
+                    total_loss = race_loss
+
+                # Regularisation: very light L2 to discourage extreme corner solutions.
+                # The bounds (PARAM_BOUNDS) are the primary guardrails.
                 defaults_arr = np.array(PARAM_DEFAULTS, dtype=float)
                 scales = np.maximum(np.abs(defaults_arr), 1.0)
                 diffs = ((weights - defaults_arr) / scales) ** 2
 
-                # Params 0-9: learnable from the objective — near-zero regularisation
-                # Params 10-21: pre-computed (no gradient signal) — light anchor only
+                # Learnable params (0-9, 22-25): near-zero regularisation
+                # Other params (10-21): light anchor — less gradient signal
                 reg_weights = np.ones(N_PARAMS, dtype=float) * 1e-5
-                reg_weights[10:] = 0.005
+                reg_weights[10:22] = 0.005
                 reg = float(np.sum(reg_weights * diffs))
 
-                return loss + reg
+                return total_loss + reg
 
             # Initial guess: always start from PARAM_DEFAULTS so the optimizer
             # learns entirely from the data each time, rather than drifting from
@@ -751,8 +940,12 @@ class CalibrationManager:
     def get_ensemble_config(self) -> EnsembleConfig:
         ens = self.current_weights.get("ensemble", {})
         return EnsembleConfig(
-            w_gbm=ens.get("w_gbm", 0.25),
-            w_elo=ens.get("w_elo", 0.25),
-            w_bt=ens.get("w_bt", 0.25),
-            w_mixed=ens.get("w_mixed", 0.25),
+            w_gbm=ens.get("w_gbm", 0.4),
+            w_elo=ens.get("w_elo", 0.2),
+            w_bt=ens.get("w_bt", 0.2),
+            w_mixed=ens.get("w_mixed", 0.2),
+            w_gbm_quali=ens.get("w_gbm_quali", PARAM_DEFAULTS[22]),
+            w_elo_quali=ens.get("w_elo_quali", PARAM_DEFAULTS[23]),
+            w_bt_quali=ens.get("w_bt_quali", PARAM_DEFAULTS[24]),
+            w_mixed_quali=ens.get("w_mixed_quali", PARAM_DEFAULTS[25]),
         )

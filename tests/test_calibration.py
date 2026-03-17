@@ -143,11 +143,13 @@ class TestPackUnpack(unittest.TestCase):
             self.assertIn(group, d)
 
     def test_ensemble_normalised(self):
-        """Ensemble weights should sum to ~1.0 after unpacking."""
+        """Race and qualifying ensemble weight sets should each sum to ~1.0."""
         d = _unpack_weights(PARAM_DEFAULTS)
         ens = d["ensemble"]
-        total = sum(ens.values())
-        self.assertAlmostEqual(total, 1.0, places=5)
+        race_total = ens["w_gbm"] + ens["w_elo"] + ens["w_bt"] + ens["w_mixed"]
+        self.assertAlmostEqual(race_total, 1.0, places=5)
+        quali_total = ens["w_gbm_quali"] + ens["w_elo_quali"] + ens["w_bt_quali"] + ens["w_mixed_quali"]
+        self.assertAlmostEqual(quali_total, 1.0, places=5)
 
     def test_bounds_length(self):
         self.assertEqual(len(PARAM_BOUNDS), N_PARAMS)

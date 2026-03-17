@@ -481,17 +481,17 @@ def _run_single_prediction(
     hl_team = cfg.modelling.recency_half_life_days.team
     try:
         elo_model = EloModel(k=elo_k).fit(hist)
-        elo_pace = elo_model.predict(X)
+        elo_pace = elo_model.predict(X, session_type=sess)
     except Exception as e:
         logger.warning("[predict._run_single] Elo model failed: %s", e)
     try:
         bt_model = BradleyTerryModel().fit(hist, half_life_days=hl_team)
-        bt_pace = bt_model.predict(X)
+        bt_pace = bt_model.predict(X, session_type=sess)
     except Exception as e:
         logger.warning("[predict._run_single] BT model failed: %s", e)
     try:
         mixed_model = MixedEffectsLikeModel().fit(hist, half_life_days=hl_team)
-        mixed_pace = mixed_model.predict(X)
+        mixed_pace = mixed_model.predict(X, session_type=sess)
     except Exception as e:
         logger.warning("[predict._run_single] Mixed model failed: %s", e)
     
@@ -510,6 +510,7 @@ def _run_single_prediction(
             bt_pace=bt_pace,
             mixed_pace=mixed_pace,
             cfg=ens_cfg,
+            session_type=sess,
         )
     except Exception as e:
         logger.warning("[predict._run_single] Ensemble combine failed, using GBM pace: %s", e)
@@ -622,10 +623,14 @@ def run_predictions_for_event(
         if "ensemble" in calibrated_weights:
             e = calibrated_weights["ensemble"]
             ens_cfg_obj = EnsembleConfig(
-                w_gbm=e.get("w_gbm", 0.25),
-                w_elo=e.get("w_elo", 0.25),
-                w_bt=e.get("w_bt", 0.25),
-                w_mixed=e.get("w_mixed", 0.25),
+                w_gbm=e.get("w_gbm", 0.4),
+                w_elo=e.get("w_elo", 0.2),
+                w_bt=e.get("w_bt", 0.2),
+                w_mixed=e.get("w_mixed", 0.2),
+                w_gbm_quali=e.get("w_gbm_quali", 0.7),
+                w_elo_quali=e.get("w_elo_quali", 0.1),
+                w_bt_quali=e.get("w_bt_quali", 0.1),
+                w_mixed_quali=e.get("w_mixed_quali", 0.1),
             )
     except Exception:
         pass
@@ -948,25 +953,28 @@ def run_predictions_for_event(
                                 logger.info(f"[predict] Mixed-effects-like model fit failed: {e}")
                             ensemble_cache[roster_key] = (elo_model, bt_model, mixed_model)
 
-                        # Predict using models
+                        # Predict using models — pass session type so each model
+                        # uses the appropriate rating/strength track (race vs qualifying)
                         if elo_model:
                             try:
-                                elo_pace = elo_model.predict(X)
+                                elo_pace = elo_model.predict(X, session_type=sess)
                             except Exception as e:
                                 logger.info(f"[predict] Elo predict failed: {e}")
                         if bt_model:
                             try:
-                                bt_pace = bt_model.predict(X)
+                                bt_pace = bt_model.predict(X, session_type=sess)
                             except Exception as e:
                                 logger.info(f"[predict] BT predict failed: {e}")
                         if mixed_model:
                             try:
-                                mixed_pace = mixed_model.predict(X)
+                                mixed_pace = mixed_model.predict(X, session_type=sess)
                             except Exception as e:
                                 logger.info(f"[predict] Mixed predict failed: {e}")
 
-                        # Combine GBM pace with ensemble elements
-                        # Prefer calibrated weights; fall back to config.yaml ensemble weights
+                        # Combine GBM pace with ensemble elements.
+                        # Pass session_type so qualifying predictions use the
+                        # qualifying-specific weight set (higher GBM, lower race-only models).
+                        # Prefer calibrated weights; fall back to config.yaml ensemble weights.
                         try:
                             final_ens_cfg = ens_cfg_obj if ens_cfg_obj else EnsembleConfig(
                                 w_elo=cfg.modelling.ensemble.w_elo,
@@ -981,6 +989,7 @@ def run_predictions_for_event(
                                 bt_pace=bt_pace,
                                 mixed_pace=mixed_pace,
                                 cfg=final_ens_cfg,
+                                session_type=sess,
                             )
                         except Exception as e:
                             logger.info(f"[predict] Ensemble combine failed, falling back to GBM pace: {e}")
