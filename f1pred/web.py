@@ -164,19 +164,19 @@ async def get_event_status(
                     
                     has_results = bool(res)
 
-                    # Second check: Fresh Jolpica query (bypass cache to
-                    # avoid stale empty responses from before results were posted)
+                    # Second check: Force-refresh Jolpica query (bypass cache to
+                    # avoid stale empty responses from before results were posted).
+                    # requests_cache.disabled() does not work on an already-instantiated
+                    # CachedSession; force_refresh=True correctly bypasses the cache.
                     if not has_results:
-                        import requests_cache as rc
-                        with rc.disabled():
-                            if s == "race":
-                                has_results = bool(jc.get_race_results(str(s_i), str(r_i)))
-                            elif s == "qualifying":
-                                has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i)))
-                            elif s == "sprint":
-                                has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
-                            elif s == "sprint_qualifying":
-                                has_results = bool(jc.get_sprint_results(str(s_i), str(r_i)))
+                        if s == "race":
+                            has_results = bool(jc.get_race_results(str(s_i), str(r_i), force_refresh=True))
+                        elif s == "qualifying":
+                            has_results = bool(jc.get_qualifying_results(str(s_i), str(r_i), force_refresh=True))
+                        elif s == "sprint":
+                            has_results = bool(jc.get_sprint_results(str(s_i), str(r_i), force_refresh=True))
+                        elif s == "sprint_qualifying":
+                            has_results = bool(jc.get_sprint_results(str(s_i), str(r_i), force_refresh=True))
                 except Exception:
                     pass
 

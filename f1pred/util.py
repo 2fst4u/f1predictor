@@ -218,10 +218,16 @@ def http_get_json(
     params: Optional[Dict[str, Any]] = None,
     timeout: int = 30,
     include_metadata: bool = False,
+    force_refresh: bool = False,
 ) -> Any:
     """
     GET a URL and return parsed JSON; falls back safely if the payload isn't valid JSON.
     Includes protection against large responses (DoS).
+
+    Args:
+        force_refresh: If True, bypass the HTTP cache and fetch a fresh response from the
+            origin server (equivalent to requests_cache's force_refresh parameter). Use this
+            when a previously cached empty/stale response needs to be re-validated.
 
     Returns:
       - If include_metadata=False (default): dict/list parsed from JSON when possible,
@@ -236,7 +242,13 @@ def http_get_json(
     # Use stream=True to inspect headers/size before full download
     # Note: When using requests-cache, stream=True might still trigger cache logic,
     # but we manually limit the read size to prevent memory exhaustion.
-    with session.get(url, params=params, timeout=timeout, stream=True) as resp:
+    # force_refresh=True is passed to requests-cache to bypass a stale cached response.
+    # Only pass it when the session actually supports it (i.e. is a CachedSession);
+    # plain requests.Session raises TypeError on unknown kwargs.
+    extra_kwargs: Dict[str, Any] = {}
+    if force_refresh and hasattr(session, "cache"):
+        extra_kwargs["force_refresh"] = True
+    with session.get(url, params=params, timeout=timeout, stream=True, **extra_kwargs) as resp:
         resp.raise_for_status()
 
         # Check Content-Length header if present

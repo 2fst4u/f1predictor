@@ -69,9 +69,14 @@ class JolpicaClient:
         max_429_retries: int = 6,
         backoff_base: float = 0.5,
         backoff_max: float = 30.0,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         """
         GET with Retry-After-aware backoff on 429. Logs chosen backoff and outcome.
+
+        Args:
+            force_refresh: If True, bypass the HTTP cache and fetch a live response from
+                the origin server. Use this to re-validate a previously cached empty result.
         """
         url = f"{self.base_url}/{path.lstrip('/')}"
         attempt = 0
@@ -80,7 +85,8 @@ class JolpicaClient:
         while True:
             try:
                 data, from_cache = http_get_json(
-                    self.session, url, params=params or {}, timeout=self.timeout, include_metadata=True
+                    self.session, url, params=params or {}, timeout=self.timeout,
+                    include_metadata=True, force_refresh=force_refresh,
                 )
                 if not from_cache and self.rate_limit_sleep and self.rate_limit_sleep > 0:
                     time.sleep(self.rate_limit_sleep)
@@ -260,26 +266,26 @@ class JolpicaClient:
 
     # Round-level results
 
-    def get_race_results(self, season: str, rnd: str) -> List[Dict[str, Any]]:
+    def get_race_results(self, season: str, rnd: str, force_refresh: bool = False) -> List[Dict[str, Any]]:
         season = self._validate_season(season)
         rnd = self._validate_round(rnd)
-        js = self._get(f"{season}/{rnd}/results.json", params={"limit": 1000})
+        js = self._get(f"{season}/{rnd}/results.json", params={"limit": 1000}, force_refresh=force_refresh)
         mr = self._extract_mrdata(js)
         races = mr.get("RaceTable", {}).get("Races", [])
         return (races[0].get("Results", []) if races else []) or []
 
-    def get_qualifying_results(self, season: str, rnd: str) -> List[Dict[str, Any]]:
+    def get_qualifying_results(self, season: str, rnd: str, force_refresh: bool = False) -> List[Dict[str, Any]]:
         season = self._validate_season(season)
         rnd = self._validate_round(rnd)
-        js = self._get(f"{season}/{rnd}/qualifying.json", params={"limit": 1000})
+        js = self._get(f"{season}/{rnd}/qualifying.json", params={"limit": 1000}, force_refresh=force_refresh)
         mr = self._extract_mrdata(js)
         races = mr.get("RaceTable", {}).get("Races", [])
         return (races[0].get("QualifyingResults", []) if races else []) or []
 
-    def get_sprint_results(self, season: str, rnd: str) -> List[Dict[str, Any]]:
+    def get_sprint_results(self, season: str, rnd: str, force_refresh: bool = False) -> List[Dict[str, Any]]:
         season = self._validate_season(season)
         rnd = self._validate_round(rnd)
-        js = self._get(f"{season}/{rnd}/sprint.json", params={"limit": 1000})
+        js = self._get(f"{season}/{rnd}/sprint.json", params={"limit": 1000}, force_refresh=force_refresh)
         mr = self._extract_mrdata(js)
         races = mr.get("RaceTable", {}).get("Races", [])
         return (races[0].get("SprintResults", []) if races else []) or []
