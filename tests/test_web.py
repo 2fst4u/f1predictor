@@ -86,3 +86,44 @@ def test_get_predict_invalid_season(client):
     response = client.get("/api/predict", params={"season": "invalid"})
     assert response.status_code == 500
     assert response.json() == {"detail": "Internal server error"}
+
+@patch("f1pred.web.resolve_event")
+@patch("f1pred.web.JolpicaClient")
+def test_get_event_status_success(mock_jc, mock_resolve, client):
+    mock_instance = mock_jc.return_value
+    mock_resolve.return_value = (2024, 1, {"raceName": "Bahrain GP", "Sprint": {}, "SprintQualifying": {}})
+
+    # Mocking Jolpica methods to return some results but not others
+    mock_instance.get_race_results.return_value = []
+    mock_instance.get_qualifying_results.return_value = [{"position": 1}]
+    mock_instance.get_sprint_results.return_value = []
+
+    response = client.get("/api/event-status/2024/1")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["season"] == 2024
+    assert data["round"] == 1
+    assert data["raceName"] == "Bahrain GP"
+
+    sessions = data["sessions"]
+    assert len(sessions) == 4
+
+    sq_status = next(s for s in sessions if s["id"] == "sprint_qualifying")
+    assert not sq_status["has_results"]
+
+    s_status = next(s for s in sessions if s["id"] == "sprint")
+    assert not s_status["has_results"]
+
+    q_status = next(s for s in sessions if s["id"] == "qualifying")
+    assert q_status["has_results"]
+
+    r_status = next(s for s in sessions if s["id"] == "race")
+    assert not r_status["has_results"]
+
+@patch("f1pred.web.resolve_event")
+def test_get_event_status_error(mock_resolve, client):
+    mock_resolve.side_effect = Exception("Resolve failed")
+
+    response = client.get("/api/event-status/2024/1")
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal server error"}
