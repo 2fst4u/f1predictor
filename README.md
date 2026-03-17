@@ -67,10 +67,9 @@ All settings live in `config.yaml`. The main things you might want to tweak:
 
 ```yaml
 modelling:
-  recency_half_life_days:
-    base: 120 # How quickly old results fade in importance
-    weather: 180 # Weather skill memory
-    team: 240 # Team performance memory
+  # Model weights (including recency, blending, ensemble, DNF)
+  # are dynamically calibrated at runtime.
+  # Delete calibration_weights.json to force full re-calibration.
   monte_carlo:
     draws: 5000 # Simulation iterations (more = slower but smoother)
 
