@@ -1,3 +1,3 @@
-## 2024-XX-XX - CI/local coverage discrepancies
-**Learning:** Local coverage calculations can occasionally report higher percentages than the GitHub CI runner due to environment discrepancies. When ratcheting the coverage threshold (`fail_under`), align with the CI runner's metric to prevent pipeline failures.
-**Action:** When bumping the `fail_under` threshold, bump it by exactly the delta amount of the new tests instead of directly setting it to the local coverage total, or use the local delta to add to the previously set threshold.
+## 2026-03-17 - Architectural Constraints on CI Errors
+**Learning:** CI failures that originate from Docker builds or production `requirements.txt` issues (e.g., `llvmlite` wheel build errors due to `shap` dependencies) cannot be fixed by modifying the test suite. Fixing these requires changes to production infrastructure or application dependencies.
+**Action:** When a CI failure is explicitly related to Docker or production environment setups rather than the test suite, strictly adhere to the Spec persona boundaries by aborting the PR creation rather than attempting out-of-scope infrastructure changes.
