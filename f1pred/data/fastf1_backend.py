@@ -1,10 +1,15 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Any
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)
 _CACHE_INITED = False
+
+# Maximum seconds a single FastF1 session load may take before we give up.
+# Prevents hangs when F1 live-timing servers are unresponsive.
+_SESSION_LOAD_TIMEOUT = 15
 
 
 def init_fastf1(cache_dir: str) -> bool:
@@ -67,12 +72,29 @@ def get_event(season: int, round_no: int):
         return None
 
 
+def _load_session_with_timeout(ev, session_name: str, timeout: float = _SESSION_LOAD_TIMEOUT, **load_kwargs):
+    """Load a FastF1 session with a wall-clock timeout.
+
+    Returns the loaded session object, or raises ``FuturesTimeoutError`` /
+    other exceptions on failure.
+    """
+    def _do_load():
+        sess = ev.get_session(session_name)
+        sess.load(**load_kwargs)
+        return sess
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(_do_load).result(timeout=timeout)
+
+
 def get_session_times(ev, session_name: str) -> Optional[Tuple[datetime, datetime]]:
     if ev is None:
         return None
     try:
-        sess = ev.get_session(session_name)
-        sess.load(telemetry=False, laps=False, weather=False, messages=False)
+        sess = _load_session_with_timeout(
+            ev, session_name,
+            telemetry=False, laps=False, weather=False, messages=False,
+        )
         start = _to_py_datetime(sess.session_info.get("StartDate"))
         end = _to_py_datetime(sess.session_info.get("EndDate"))
         if start and end:
@@ -84,6 +106,9 @@ def get_session_times(ev, session_name: str) -> Optional[Tuple[datetime, datetim
             if s and e:
                 return s, e
         return None
+    except FuturesTimeoutError:
+        logger.warning("FastF1 session timing load timed out for %s", session_name)
+        return None
     except Exception:
         return None
 
@@ -94,8 +119,10 @@ def get_session_classification(season: int, round_no: int, session_name: str):
         ev = get_event(season, round_no)
         if ev is None:
             return None
-        sess = ev.get_session(session_name)
-        sess.load(telemetry=False, laps=False, weather=False, messages=False)
+        sess = _load_session_with_timeout(
+            ev, session_name,
+            telemetry=False, laps=False, weather=False, messages=False,
+        )
 
         # Try to get results from sess.results (often populated for finished sessions)
         results = getattr(sess, "results", None)
@@ -139,7 +166,13 @@ def _patch_missing_positions(sess, results):
         # 1. Attempt internal FastF1 fix for qualifying sessions (Deleted-column bug)
         # Laps may not have been loaded yet — reload with laps=True so we can
         # fix the Deleted column and recompute the classification.
-        sess.load(telemetry=False, laps=True, weather=False, messages=False)
+        def _reload_with_laps(s=sess):
+            s.load(telemetry=False, laps=True, weather=False, messages=False)
+            return s
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            sess = pool.submit(_reload_with_laps).result(timeout=_SESSION_LOAD_TIMEOUT)
+
         laps = getattr(sess, "laps", None)
 
         if laps is not None and not laps.empty:
@@ -231,8 +264,10 @@ def get_session_weather_status(season: int, round_no: int, session_name: str) ->
         ev = get_event(season, round_no)
         if ev is None:
             return None
-        sess = ev.get_session(session_name)
-        sess.load(telemetry=False, laps=True, weather=True, messages=False)
+        sess = _load_session_with_timeout(
+            ev, session_name,
+            telemetry=False, laps=True, weather=True, messages=False,
+        )
         
         result = {"is_wet": False, "rainfall": False, "track_status": "DRY"}
         

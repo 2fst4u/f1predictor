@@ -1,11 +1,18 @@
 from __future__ import annotations
 from typing import List, Dict, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
+import time
 
 from .util import get_logger
 from .data.jolpica import JolpicaClient
 
 logger = get_logger(__name__)
+
+# Maximum seconds to spend inside _roster_from_fastf1 before giving up.
+# FastF1 sess.load() has no internal timeout, so this prevents hangs when
+# F1 live-timing servers are slow or sessions don't exist yet.
+_FASTF1_ROSTER_TIMEOUT = 15
 
 
 def _entries_from_results(results: List[Dict]) -> List[Dict]:
@@ -207,7 +214,13 @@ def _get_canonical_mapping(jc: JolpicaClient, season: str) -> Dict[str, 'Any']: 
 
 
 def _roster_from_fastf1(season: int, rnd: int, mapping: Optional[Dict] = None) -> List[Dict]:
-    """Attempt to fetch roster from FastF1 (live timing)."""
+    """Attempt to fetch roster from FastF1 (live timing).
+
+    Applies a wall-clock timeout (_FASTF1_ROSTER_TIMEOUT) so that unresponsive
+    F1 live-timing servers cannot block the entire prediction pipeline.
+    """
+    t0 = time.monotonic()
+
     try:
         # Import here to avoid circular dependencies if not already imported
         from .data import fastf1_backend as ff1
@@ -223,13 +236,32 @@ def _roster_from_fastf1(season: int, rnd: int, mapping: Optional[Dict] = None) -
         results = None
 
         for sname in session_names:
+            # Check wall-clock budget before attempting another session
+            elapsed = time.monotonic() - t0
+            if elapsed >= _FASTF1_ROSTER_TIMEOUT:
+                logger.info(f"[roster] FastF1 roster timeout after {elapsed:.1f}s; tried sessions up to {sname}")
+                break
+
+            remaining = _FASTF1_ROSTER_TIMEOUT - elapsed
             try:
-                sess = ev.get_session(sname)
-                sess.load(telemetry=False, laps=False, weather=False, messages=False)
+                # Run sess.load() in a worker thread with a timeout so a single
+                # hanging request cannot block the cascade indefinitely.
+                def _load_session(s=sname, e=ev):
+                    sess = e.get_session(s)
+                    sess.load(telemetry=False, laps=False, weather=False, messages=False)
+                    return sess
+
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(_load_session)
+                    sess = future.result(timeout=remaining)
+
                 if sess.results is not None and not sess.results.empty:
                     results = sess.results
                     logger.info(f"[roster] Found roster in session: {sname}")
                     break
+            except FuturesTimeoutError:
+                logger.info(f"[roster] FastF1 session {sname} timed out after {remaining:.1f}s")
+                break  # No point trying more sessions if one already exceeded the budget
             except Exception:
                 continue
 

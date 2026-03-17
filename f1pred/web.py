@@ -325,7 +325,14 @@ async def get_predictions_stream(
         thread.start()
 
         while True:
-            item = q.get()
+            try:
+                item = q.get(timeout=10)
+            except queue.Empty:
+                # Send SSE comment as keepalive to prevent client/proxy
+                # timeout while roster derivation or feature building runs.
+                yield ": keepalive\n\n"
+                continue
+
             if item is None:
                 break
 
