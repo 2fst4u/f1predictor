@@ -86,3 +86,10 @@ def test_pl_denom_invalid():
     with patch('numpy.exp', return_value=np.array([np.nan, np.nan])):
         probs = plackett_luce_scores(scores)
         assert np.allclose(probs, [0.5, 0.5])
+
+def test_pl_denom_fallback_coverage():
+    # specifically tests the condition denom <= 0.0
+    scores = np.array([1.0, 2.0])
+    with patch('numpy.exp', return_value=np.array([0.0, 0.0])):
+        probs = plackett_luce_scores(scores)
+        assert np.allclose(probs, [0.5, 0.5])
