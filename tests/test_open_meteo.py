@@ -187,7 +187,7 @@ def test_fetch_hourly_df_invalid_response(mock_get):
         geocoding_url="test"
     )
     df = client._fetch_hourly_df("test_url", {"hourly": ["temp"]})
-    assert True
+    assert len(df) == 0
     assert list(df.columns) == ["time"]
 
 @patch("f1pred.data.open_meteo.http_get_json")
@@ -199,8 +199,8 @@ def test_fetch_hourly_df_no_hourly(mock_get):
         historical_forecast_url="test",
         geocoding_url="test"
     )
-    _ = client._fetch_hourly_df("test_url", {"hourly": ["temp"]})
-    assert True
+    df = client._fetch_hourly_df("test_url", {"hourly": ["temp"]})
+    assert len(df) == 0
 
 @patch("f1pred.data.open_meteo.http_get_json")
 def test_fetch_hourly_df_hourly_not_dict(mock_get):
@@ -211,8 +211,8 @@ def test_fetch_hourly_df_hourly_not_dict(mock_get):
         historical_forecast_url="test",
         geocoding_url="test"
     )
-    _ = client._fetch_hourly_df("test_url", {"hourly": ["temp"]})
-    assert True
+    df = client._fetch_hourly_df("test_url", {"hourly": ["temp"]})
+    assert len(df) == 0
 
 @patch("f1pred.data.open_meteo.http_get_json")
 def test_fetch_hourly_df_exception(mock_get):
@@ -223,8 +223,8 @@ def test_fetch_hourly_df_exception(mock_get):
         historical_forecast_url="test",
         geocoding_url="test"
     )
-    _ = client._fetch_hourly_df("test_url", {"hourly": ["temp"]})
-    assert True
+    df = client._fetch_hourly_df("test_url", {"hourly": ["temp"]})
+    assert len(df) == 0
 
 
 @patch.object(OpenMeteoClient, '_fetch_hourly_df')
@@ -235,8 +235,8 @@ def test_get_forecast_invalid_coords(mock_fetch):
         historical_forecast_url="test",
         geocoding_url="test"
     )
-    _ = client.get_forecast(91.0, 0.0, datetime(2023, 1, 1), datetime(2023, 1, 2))
-    assert True
+    df = client.get_forecast(91.0, 0.0, datetime(2023, 1, 1), datetime(2023, 1, 2))
+    assert len(df) == 0
     mock_fetch.assert_not_called()
 
 @patch.object(OpenMeteoClient, '_fetch_hourly_df')
@@ -259,8 +259,8 @@ def test_get_historical_weather_invalid_coords(mock_fetch):
         historical_forecast_url="test",
         geocoding_url="test"
     )
-    _ = client.get_historical_weather(91.0, 0.0, datetime(2023, 1, 1), datetime(2023, 1, 2))
-    assert True
+    df = client.get_historical_weather(91.0, 0.0, datetime(2023, 1, 1), datetime(2023, 1, 2))
+    assert len(df) == 0
     mock_fetch.assert_not_called()
 
 @patch.object(OpenMeteoClient, '_fetch_hourly_df')
@@ -283,8 +283,8 @@ def test_get_historical_forecast_invalid_coords(mock_fetch):
         historical_forecast_url="test",
         geocoding_url="test"
     )
-    _ = client.get_historical_forecast(91.0, 0.0, datetime(2023, 1, 1), datetime(2023, 1, 2))
-    assert True
+    df = client.get_historical_forecast(91.0, 0.0, datetime(2023, 1, 1), datetime(2023, 1, 2))
+    assert len(df) == 0
     mock_fetch.assert_not_called()
 
 @patch.object(OpenMeteoClient, '_fetch_hourly_df')
@@ -309,3 +309,7 @@ def test_compute_past_forecast_days_naive_to_aware():
     start = datetime.now()
     end = datetime.now()
     client._compute_past_forecast_days(start, end)
+
+    past, forecast = client._compute_past_forecast_days(start, end)
+    assert isinstance(past, int)
+    assert isinstance(forecast, int)
