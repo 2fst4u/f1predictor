@@ -1,8 +1,8 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Optional, TYPE_CHECKING
 
-from datetime import datetime, timezone
+from datetime import timezone
 
 from .util import get_logger
 
@@ -169,7 +169,6 @@ class EloModel:
             return np.zeros(len(X), dtype=float)
 
         is_quali = session_type in _QUALI_SESSIONS
-        ratings = self.quali_ratings_ if is_quali else self.race_ratings_
         get_fn = self._get_quali_rating if is_quali else self._get_race_rating
 
         scores = [get_fn(str(d)) for d in ids]
