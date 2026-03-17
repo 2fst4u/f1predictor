@@ -453,7 +453,7 @@ def _run_single_prediction(
         return None
     
     # Train pace model
-    _, pace_hat, _ = train_pace_model(X, session_type=sess, cfg=cfg)
+    _, pace_hat, _, _ = train_pace_model(X, session_type=sess, cfg=cfg)
     
     # Standardize pace
     try:
@@ -870,6 +870,10 @@ def run_predictions_for_event(
                         else:
                             logger.info(f"[predict] Using actual grid for {sess}")
 
+                    # Initialise explainability data (populated in the non-cached path)
+                    shap_per_driver = None
+                    ensemble_component_scores = None  # per-driver: {gbm, elo, bt, mixed, weights}
+
                     # 3. Cache check (if no actual results and features built)
                     if (cached_hit := pred_cache.get(cache_inputs := {
                         "X": X.copy(),
@@ -913,7 +917,7 @@ def run_predictions_for_event(
                             )
                         except Exception as e:
                             logger.info(f"[predict] Could not build historical training set: {e}")
-                        _, pace_hat, _ = train_pace_model(X, session_type=sess, cfg=cfg, hist_X=hist_X_train)
+                        _, pace_hat, _, shap_per_driver = train_pace_model(X, session_type=sess, cfg=cfg, hist_X=hist_X_train)
 
                         # Standardize GBM pace (z-score) but preserve variance
                         try:
@@ -991,6 +995,14 @@ def run_predictions_for_event(
                                 cfg=final_ens_cfg,
                                 session_type=sess,
                             )
+                            # Capture per-driver ensemble component breakdown
+                            try:
+                                ensemble_component_scores = _build_ensemble_components(
+                                    pace_hat, elo_pace, bt_pace, mixed_pace,
+                                    final_ens_cfg, sess,
+                                )
+                            except Exception as _ec_err:
+                                logger.debug("[predict] ensemble component breakdown failed: %s", _ec_err)
                         except Exception as e:
                             logger.info(f"[predict] Ensemble combine failed, falling back to GBM pace: {e}")
                             combined_pace = pace_hat
@@ -1035,6 +1047,17 @@ def run_predictions_for_event(
                         ranked["p_win"] = p_win[order]
                         ranked["p_dnf"] = dnf_prob[order]
                         ranked["predicted_position"] = np.arange(1, len(ranked) + 1)
+
+                        # Attach explainability columns (re-order to match sorted `order`)
+                        if shap_per_driver is not None:
+                            ranked["shap_values"] = [shap_per_driver[i] for i in order]
+                        else:
+                            ranked["shap_values"] = [None] * len(ranked)
+
+                        if ensemble_component_scores is not None:
+                            ranked["ensemble_components"] = [ensemble_component_scores[i] for i in order]
+                        else:
+                            ranked["ensemble_components"] = [None] * len(ranked)
 
                         # Store in cache
                         pred_cache.set(cache_inputs, {
@@ -1168,6 +1191,179 @@ def run_predictions_for_event(
             "round": round_i,
             "sessions": session_results,
         }
+
+
+def _build_ensemble_components(
+    gbm_pace: 'np.ndarray',
+    elo_pace: Optional['np.ndarray'],
+    bt_pace: Optional['np.ndarray'],
+    mixed_pace: Optional['np.ndarray'],
+    cfg: Any,
+    session_type: str,
+) -> Optional[List[Dict[str, Any]]]:
+    """Build per-driver ensemble component breakdown dicts.
+
+    For each driver returns a dict with keys:
+      gbm, elo, bt, mixed  — the normalised contribution (as a fraction 0-1
+                              of the driver's total absolute pace contribution)
+      weights              — the normalised blending weights used
+    """
+    try:
+        import numpy as np
+        n = len(gbm_pace)
+
+        _QUALI_SESSIONS = {"qualifying", "sprint_qualifying"}
+        is_quali = session_type in _QUALI_SESSIONS
+
+        if is_quali:
+            w_gbm_raw = getattr(cfg, "w_gbm_quali", cfg.w_gbm)
+            w_elo_raw = getattr(cfg, "w_elo_quali", cfg.w_elo)
+            w_bt_raw = getattr(cfg, "w_bt_quali", cfg.w_bt)
+            w_mixed_raw = getattr(cfg, "w_mixed_quali", cfg.w_mixed)
+        else:
+            w_gbm_raw = cfg.w_gbm
+            w_elo_raw = cfg.w_elo
+            w_bt_raw = cfg.w_bt
+            w_mixed_raw = cfg.w_mixed
+
+        wsum = w_gbm_raw + w_elo_raw + w_bt_raw + w_mixed_raw
+        if wsum <= 0:
+            w_gbm_raw, w_elo_raw, w_bt_raw, w_mixed_raw = 1.0, 0.0, 0.0, 0.0
+            wsum = 1.0
+
+        w_gbm = w_gbm_raw / wsum
+        w_elo = w_elo_raw / wsum
+        w_bt = w_bt_raw / wsum
+        w_mixed = w_mixed_raw / wsum
+
+        # Safe component helper: if missing or wrong length, use zeros
+        def _safe(arr: Optional['np.ndarray']) -> 'np.ndarray':
+            if arr is None or len(arr) != n:
+                return np.zeros(n, dtype=float)
+            return np.asarray(arr, dtype=float)
+
+        g = _safe(gbm_pace)
+        e = _safe(elo_pace)
+        b = _safe(bt_pace)
+        m = _safe(mixed_pace)
+
+        weights_dict = {"gbm": round(w_gbm, 4), "elo": round(w_elo, 4),
+                        "bt": round(w_bt, 4), "mixed": round(w_mixed, 4)}
+
+        result: List[Dict[str, Any]] = []
+        for i in range(n):
+            contrib_gbm   = abs(w_gbm   * g[i])
+            contrib_elo   = abs(w_elo   * e[i])
+            contrib_bt    = abs(w_bt    * b[i])
+            contrib_mixed = abs(w_mixed * m[i])
+            total = contrib_gbm + contrib_elo + contrib_bt + contrib_mixed
+            if total < 1e-9:
+                total = 1.0
+            result.append({
+                "gbm":     round(contrib_gbm   / total, 4),
+                "elo":     round(contrib_elo   / total, 4),
+                "bt":      round(contrib_bt    / total, 4),
+                "mixed":   round(contrib_mixed / total, 4),
+                "weights": weights_dict,
+            })
+        return result
+    except Exception as exc:
+        logger.debug("[predict] _build_ensemble_components error: %s", exc)
+        return None
+
+
+# Human-readable labels for raw feature names used in SHAP displays
+_FEATURE_LABELS: Dict[str, str] = {
+    "form_index":                "Race Form",
+    "qualifying_form_index":     "Quali Form",
+    "driver_team_form_index":    "Driver-Team Fit",
+    "team_form_index":           "Team Strength",
+    "teammate_delta":            "vs Teammate",
+    "grid_finish_delta":         "Overtaking Skill",
+    "circuit_avg_pos":           "Circuit History",
+    "circuit_dnf_rate":          "Circuit DNF Rate",
+    "circuit_experience":        "Circuit Experience",
+    "circuit_overtake_difficulty": "Pass Difficulty",
+    "global_circuit_dnf_rate":   "Track DNF Rate",
+    "grid":                      "Grid Position",
+    "current_quali_pos":         "Quali Position",
+    "weather_effect":            "Weather Impact",
+    "weather_beta_temp":         "Temp Sensitivity",
+    "weather_beta_pressure":     "Pressure Sensitivity",
+    "weather_beta_wind":         "Wind Sensitivity",
+    "weather_beta_rain":         "Rain Sensitivity",
+    "temp_skill":                "Temp Skill",
+    "rain_skill":                "Rain Skill",
+    "wind_skill":                "Wind Skill",
+    "pressure_skill":            "Pressure Skill",
+    "weather_temp_mean":         "Air Temp",
+    "weather_rain_sum":          "Rain Total",
+    "weather_wind_mean":         "Wind Speed",
+    "weather_pressure_mean":     "Air Pressure",
+    "weather_humidity_mean":     "Humidity",
+    "team_tenure_events":        "Team Tenure",
+    "is_race":                   "Race Session",
+    "is_qualifying":             "Quali Session",
+    "is_sprint":                 "Sprint Session",
+    "constructorId":             "Constructor",
+}
+
+
+def _print_influence_row(
+    r: Any,
+    max_name: int,
+    max_team: int,
+    has_grid: bool,
+    max_shap_features: int = 5,
+) -> None:
+    """Print a compact influence sub-row beneath a driver's prediction row.
+
+    Shows:
+    - Ensemble component percentages (GBM / Elo / BT / Mixed)
+    - Top N SHAP features by absolute magnitude with +/- direction
+
+    Uses only ASCII characters to avoid UnicodeEncodeError on Windows terminals.
+    """
+    indent = "     "  # aligns roughly under the driver name column
+
+    parts: List[str] = []
+
+    # 1. Ensemble component breakdown
+    ens = r.get("ensemble_components")
+    if ens and isinstance(ens, dict):
+        g  = ens.get("gbm",   0.0) * 100
+        e  = ens.get("elo",   0.0) * 100
+        bt = ens.get("bt",    0.0) * 100
+        mx = ens.get("mixed", 0.0) * 100
+        ens_str = (
+            f"{Style.DIM}Models: "
+            f"{Fore.CYAN}GBM {g:.0f}%{Style.RESET_ALL}{Style.DIM} | "
+            f"{Fore.YELLOW}Elo {e:.0f}%{Style.RESET_ALL}{Style.DIM} | "
+            f"{Fore.MAGENTA}BT {bt:.0f}%{Style.RESET_ALL}{Style.DIM} | "
+            f"{Fore.GREEN}Mix {mx:.0f}%{Style.RESET_ALL}"
+        )
+        parts.append(ens_str)
+
+    # 2. Top SHAP features
+    shap = r.get("shap_values")
+    if shap and isinstance(shap, dict):
+        # Sort by absolute magnitude, descending
+        sorted_feats = sorted(shap.items(), key=lambda kv: abs(kv[1]), reverse=True)
+        top_feats = sorted_feats[:max_shap_features]
+        if top_feats:
+            shap_tokens: List[str] = []
+            for fname, fval in top_feats:
+                label = _FEATURE_LABELS.get(fname, fname.replace("_", " ").title())
+                direction = "+" if fval >= 0 else "-"
+                # Negative SHAP = better pace (lower pace index) = good for position
+                col = Fore.GREEN if fval < 0 else Fore.RED
+                shap_tokens.append(
+                    f"{col}{direction}{label}{Style.RESET_ALL}"
+                )
+            parts.append(f"{Style.DIM}Factors: {Style.RESET_ALL}" + f"{Style.DIM}, {Style.RESET_ALL}".join(shap_tokens))
+
+    if parts:
+        print(indent + f"  {Style.DIM}|{Style.RESET_ALL}  ".join(parts))
 
 
 def _render_bar_parts(percentage: float, width: int = 5) -> Tuple[str, str]:
@@ -1590,6 +1786,12 @@ def print_session_console(
 
         row_str = "   ".join(row_parts)
         print(row_str)
+
+        # --- Influence sub-row ---
+        try:
+            _print_influence_row(r, max_name, max_team, has_grid)
+        except Exception:
+            pass  # Never let explainability crash the main output
 
     # Print legend explaining abbreviations
     print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, DNF=Retirement Prob, Actual=Result (*=Exact, ~=Close), Chg=Grid Delta{Style.RESET_ALL}")

@@ -7,17 +7,19 @@ from f1pred.models import train_pace_model, estimate_dnf_probabilities, build_hi
 
 def test_train_pace_model_basic(sample_features):
     """Test basic pace model training."""
-    model, pace_hat, features = train_pace_model(sample_features, session_type='race')
+    model, pace_hat, features, shap_vals = train_pace_model(sample_features, session_type='race')
 
     assert model is not None
     assert len(pace_hat) == len(sample_features)
     assert np.all(np.isfinite(pace_hat))
     assert isinstance(features, list)
+    # shap_vals is None when shap is not installed; otherwise a list of dicts
+    assert shap_vals is None or isinstance(shap_vals, list)
 
 
 def test_train_pace_model_variance(sample_features):
     """Test that pace model produces varying predictions."""
-    _, pace_hat, _ = train_pace_model(sample_features, session_type='race')
+    _, pace_hat, _, _ = train_pace_model(sample_features, session_type='race')
 
     # Pace predictions should have some variance (not all identical)
     assert np.std(pace_hat) > 0.01, "Pace predictions are too uniform"
@@ -31,7 +33,7 @@ def test_pace_model_order_makes_sense(sample_features):
     sample_features['team_form_index'] = 0.0
     sample_features['driver_team_form_index'] = 0.0
 
-    _, pace_hat, _ = train_pace_model(sample_features, session_type='race')
+    _, pace_hat, _, _ = train_pace_model(sample_features, session_type='race')
 
     # Pace is LOWER = FASTER. Since we predict y = -form_index:
     # - Driver with form_index=19 (best) should have pace ~ -19 (lowest/fastest)
@@ -123,7 +125,7 @@ def test_train_pace_model_with_hist_X(sample_features):
     hist_X = sample_features.copy()
     hist_X["form_index"] = np.linspace(-5, 5, len(hist_X))
 
-    model, pace_hat, features = train_pace_model(
+    model, pace_hat, features, shap_vals = train_pace_model(
         sample_features, session_type="race", hist_X=hist_X,
     )
     assert model is not None

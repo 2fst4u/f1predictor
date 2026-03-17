@@ -500,13 +500,13 @@ class CalibrationManager:
             X_train = pd.concat(X_train_list, ignore_index=True)
             logger.info("[calibrate] Generated %d training samples.", len(X_train))
 
-            gbm_pipe, _, gbm_features = train_pace_model(X_train, "race", self.cfg)
+            gbm_pipe, _, gbm_features, _ = train_pace_model(X_train, "race", self.cfg)
 
             # Also train a qualifying-specific GBM for qualifying calibration data
             gbm_pipe_quali = None
             gbm_features_quali = None
             try:
-                gbm_pipe_quali, _, gbm_features_quali = train_pace_model(
+                gbm_pipe_quali, _, gbm_features_quali, _ = train_pace_model(
                     X_train, "qualifying", self.cfg
                 )
             except Exception as e:

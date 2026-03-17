@@ -20,6 +20,7 @@ warnings.filterwarnings("ignore", message="X does not have valid feature names")
 __all__ = [
     "train_pace_model",
     "estimate_dnf_probabilities",
+    "compute_shap_values",
 ]
 
 logger = get_logger(__name__)
@@ -542,7 +543,106 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
                 if drv in ("antonelli", "hadjar", "piastri"):
                     logger.info(f"[DEBUG] {drv} | Grid: {grid_vals[i]} | PaceZ: {pace_z[i]:.2f} | Delta: {pace_delta[i]:.2f} | Final PaceHat: {pace_hat[i]:.2f}")
 
-    return pipe, pace_hat, features
+    # Compute SHAP values for explainability
+    shap_per_driver = None
+    try:
+        shap_per_driver = compute_shap_values(pipe, X, features)
+    except Exception as e:
+        logger.debug("[models] SHAP computation failed (non-fatal): %s", e)
+
+    return pipe, pace_hat, features, shap_per_driver
+
+
+def compute_shap_values(
+    pipe: Any,
+    X: 'pd.DataFrame',
+    features: List[str],
+) -> Optional[List[Dict[str, float]]]:
+    """Compute per-driver SHAP values for the GBM component.
+
+    Returns a list of dicts (one per driver row in X) mapping original feature
+    names to their SHAP contribution (lower contribution = made prediction worse,
+    i.e. slower pace; the sign indicates direction of influence on the pace index).
+
+    Returns None if shap is unavailable or the model type is not supported.
+    """
+    import numpy as np
+    import pandas as pd
+
+    try:
+        import shap as shap_lib
+    except ImportError:
+        logger.debug("[models] shap library not installed; skipping SHAP computation")
+        return None
+
+    try:
+        model = pipe.named_steps["model"]
+        pre = pipe.named_steps["pre"]
+
+        # Build transformed feature matrix (same as what the model saw at training)
+        X_infer = X[features].copy() if set(features).issubset(X.columns) else X.reindex(columns=features)
+        X_transformed = pre.transform(X_infer)
+
+        # Resolve output feature names after one-hot encoding
+        try:
+            transformed_names = pre.get_feature_names_out()
+        except Exception:
+            transformed_names = None
+
+        # Build explainer — TreeExplainer works natively for LightGBM, XGBoost,
+        # and sklearn GBM without needing a background dataset.
+        explainer = shap_lib.TreeExplainer(model)
+        shap_values = explainer.shap_values(X_transformed)
+
+        # shap_values shape: (n_drivers, n_transformed_features)
+        if shap_values is None or len(shap_values) == 0:
+            return None
+
+        # Map transformed feature names back to original feature names.
+        # For numeric features the mapping is 1-to-1.
+        # For one-hot encoded categoricals (e.g. constructorId_ferrari) we attribute
+        # the SHAP contribution back to the original column name by summing
+        # across all dummy columns for that original feature.
+        n_drivers = len(X)
+        result: List[Dict[str, float]] = []
+
+        for i in range(n_drivers):
+            row_shap = shap_values[i]  # shape: (n_transformed_features,)
+            contrib: Dict[str, float] = {}
+
+            if transformed_names is not None and len(transformed_names) == len(row_shap):
+                for j, tname in enumerate(transformed_names):
+                    # sklearn ColumnTransformer prefixes names like "num__form_index"
+                    # or "cat__constructorId_ferrari"
+                    if "__" in tname:
+                        prefix, rest = tname.split("__", 1)
+                        # For OHE columns, rest is "originalcol_value"; extract original col
+                        # by matching against known feature names
+                        orig_col = None
+                        for feat in features:
+                            if rest == feat or rest.startswith(feat + "_"):
+                                orig_col = feat
+                                break
+                        if orig_col is None:
+                            orig_col = rest
+                    else:
+                        orig_col = tname
+
+                    contrib[orig_col] = contrib.get(orig_col, 0.0) + float(row_shap[j])
+            else:
+                # Fallback: match by position to original numeric features
+                for j, fname in enumerate(features):
+                    if j < len(row_shap):
+                        contrib[fname] = float(row_shap[j])
+
+            result.append(contrib)
+
+        logger.info("[models] SHAP values computed for %d drivers", n_drivers)
+        return result
+
+    except Exception as e:
+        logger.debug("[models] SHAP computation error: %s", e)
+        return None
 
 
 def estimate_dnf_probabilities(

@@ -1,11 +1,11 @@
 from __future__ import annotations
-from typing import List, Optional
+from typing import Any, List, Optional
 import os
 
 import json
+import math
 import threading
 import queue
-import math
 from fastapi import FastAPI, Request, Query, Path, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -17,6 +17,27 @@ from .data.jolpica import JolpicaClient
 from .data.fastf1_backend import init_fastf1
 
 logger = get_logger(__name__)
+
+
+def _sanitize_for_json(v: Any, _math: Any = math) -> Any:
+    """Recursively sanitize a value so it is safe to embed in JSON.
+
+    - NaN/Inf floats become None
+    - datetime-like objects become ISO strings
+    - Dicts and lists are processed recursively
+    """
+    if isinstance(v, float):
+        if _math.isnan(v) or _math.isinf(v):
+            return None
+        return v
+    if isinstance(v, dict):
+        return {dk: _sanitize_for_json(dv, _math) for dk, dv in v.items()}
+    if isinstance(v, list):
+        return [_sanitize_for_json(item, _math) for item in v]
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
+    return v
+
 
 # Global app and config
 app = FastAPI(title="F1 Prediction Web UI")
@@ -237,14 +258,11 @@ async def get_predictions(
             ranked_df = data["ranked"]
             # Convert DataFrame to list of dicts
             ranked_list = ranked_df.to_dict(orient="records")
-            # Clean up NaNs for JSON
-            import math
+            # Clean up NaNs for JSON (including nested dicts such as shap_values
+            # and ensemble_components)
             for row in ranked_list:
                 for k, v in row.items():
-                    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                        row[k] = None
-                    elif hasattr(v, "isoformat"):
-                        row[k] = v.isoformat()
+                    row[k] = _sanitize_for_json(v, math)
 
             output["sessions"][sess] = {
                 "predictions": ranked_list,
@@ -302,10 +320,7 @@ async def get_predictions_stream(
                 ranked_list = ranked_df.to_dict(orient="records")
                 for row in ranked_list:
                     for k, v in row.items():
-                        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                            row[k] = None
-                        elif hasattr(v, "isoformat"):
-                            row[k] = v.isoformat()
+                        row[k] = _sanitize_for_json(v, math)
 
                 output["sessions"][sess] = {
                     "predictions": ranked_list,
