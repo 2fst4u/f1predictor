@@ -55,9 +55,15 @@ RUN apk add --no-cache \
     openblas
 
 # Install Python dependencies first (for better caching)
-# Copy the built dependency wheels from the builder stage and install them
+# Copy the built dependency wheels from the builder stage and install them.
+# shap must be installed with --no-deps so pip does not attempt to resolve or
+# build its optional numba/llvmlite transitive dependencies, which have no
+# pre-built wheels for Alpine + Python 3.12.  shap's TreeExplainer only needs
+# numpy/scipy/sklearn/pandas, which are already present in the other wheels.
 COPY --from=builder /wheels/*.whl /tmp/wheels/
-RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
+RUN pip install --no-cache-dir $(ls /tmp/wheels/*.whl | grep -v 'shap') && \
+    pip install --no-cache-dir --no-deps $(ls /tmp/wheels/*.whl | grep 'shap') && \
+    rm -rf /tmp/wheels
 
 # Copy the built application wheel from the builder stage and install it
 COPY --from=builder /app/dist/*.whl /tmp/app_wheel/
