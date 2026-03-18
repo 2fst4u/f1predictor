@@ -9,7 +9,6 @@ Covers:
 """
 from __future__ import annotations
 
-import math
 import numpy as np
 import pandas as pd
 import pytest
@@ -377,7 +376,6 @@ class TestSanitizeForJson:
             "fastapi.templating": MagicMock(),
         }
         with patch.dict(sys.modules, mocks):
-            import importlib
             # Clear cached web module if present
             sys.modules.pop("f1pred.web", None)
             import f1pred.web as web_mod
