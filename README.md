@@ -67,7 +67,6 @@ All settings live in `config.yaml`. The main things you might want to tweak:
 
 ```yaml
 app:
-  model_version: "v1.1"
   random_seed: 42
   timezone: "UTC"
   live_refresh_seconds: 600
