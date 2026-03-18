@@ -26,6 +26,8 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.next.outputs.version }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
       - name: Checkout repository
