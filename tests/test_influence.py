@@ -463,6 +463,31 @@ def _make_current_X(n_drivers=5, with_circuit_dnf=False):
     return pd.DataFrame(data)
 
 
+class TestTrainPaceModelShapExceptionBranch:
+
+    def test_shap_exception_in_train_pace_model_is_swallowed(self, sample_features):
+        """Covers lines 550-551: if compute_shap_values raises inside train_pace_model
+        the exception is caught and shap_per_driver is returned as None."""
+        from f1pred.models import train_pace_model
+        import f1pred.models as models_mod
+
+        original = models_mod.compute_shap_values
+
+        def _explode(*args, **kwargs):
+            raise RuntimeError("forced shap failure")
+
+        models_mod.compute_shap_values = _explode
+        try:
+            _, pace_hat, features, shap_vals = train_pace_model(
+                sample_features, session_type="race"
+            )
+            # Exception must be swallowed — shap_vals is None
+            assert shap_vals is None
+            assert len(pace_hat) == len(sample_features)
+        finally:
+            models_mod.compute_shap_values = original
+
+
 class TestEstimateDnfProbabilitiesWeatherBranches:
 
     def test_wet_event_weather_branch(self):
@@ -534,6 +559,62 @@ class TestEstimateDnfProbabilitiesWeatherBranches:
 
         hist = _make_hist()
         X = _make_current_X(with_circuit_dnf=True)
+
+        probs = estimate_dnf_probabilities(hist, X)
+        assert len(probs) == len(X)
+        assert all(0 <= p <= 1 for p in probs)
+
+    def test_cfg_override_branch(self):
+        """Covers lines 674-682: cfg object is used to override default parameters."""
+        from f1pred.models import estimate_dnf_probabilities
+
+        hist = _make_hist()
+        X = _make_current_X()
+
+        cfg = MagicMock()
+        cfg.modelling.dnf.alpha = 3.0
+        cfg.modelling.dnf.beta = 10.0
+        cfg.modelling.dnf.driver_weight = 0.5
+        cfg.modelling.dnf.team_weight = 0.5
+        cfg.modelling.dnf.clip_min = 0.01
+        cfg.modelling.dnf.clip_max = 0.40
+
+        probs = estimate_dnf_probabilities(hist, X, cfg=cfg)
+        assert len(probs) == len(X)
+        assert all(0.01 <= p <= 0.40 for p in probs)
+
+    def test_cfg_attribute_error_falls_back_to_defaults(self):
+        """Covers the AttributeError except branch in cfg handling (line 681-682)."""
+        from f1pred.models import estimate_dnf_probabilities
+
+        hist = _make_hist()
+        X = _make_current_X()
+
+        cfg = MagicMock(spec=[])  # no attributes — raises AttributeError
+
+        probs = estimate_dnf_probabilities(hist, X, cfg=cfg)
+        assert len(probs) == len(X)
+
+    def test_empty_races_early_return(self):
+        """Covers line 686: when hist has no race rows, returns default 0.08 array."""
+        from f1pred.models import estimate_dnf_probabilities
+
+        hist = pd.DataFrame({"session": ["qualifying"], "driverId": ["d1"],
+                             "constructorId": ["c1"], "position": [1],
+                             "status": ["Finished"]})
+        X = _make_current_X(n_drivers=3)
+
+        probs = estimate_dnf_probabilities(hist, X)
+        assert len(probs) == 3
+        assert all(p == pytest.approx(0.08) for p in probs)
+
+    def test_is_dnf_column_branch(self):
+        """Covers line 690: hist with pre-computed is_dnf column."""
+        from f1pred.models import estimate_dnf_probabilities
+
+        hist = _make_hist()
+        hist["is_dnf"] = (hist["status"] == "DNF").astype(int)
+        X = _make_current_X()
 
         probs = estimate_dnf_probabilities(hist, X)
         assert len(probs) == len(X)
