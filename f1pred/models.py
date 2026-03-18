@@ -592,6 +592,10 @@ def compute_shap_values(
         explainer = shap_lib.TreeExplainer(model)
         shap_values = explainer.shap_values(X_transformed)
 
+        # Scikit-learn's GradientBoostingRegressor can sometimes return a single-item list of arrays
+        if isinstance(shap_values, list):
+            shap_values = shap_values[0]
+
         # shap_values shape: (n_drivers, n_transformed_features)
         if shap_values is None or len(shap_values) == 0:
             return None
