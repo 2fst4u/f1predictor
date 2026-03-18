@@ -2,7 +2,7 @@
 # Linted and valid YAML.
 
 app:
-  model_version: "v1.1"
+  model_version: "v1.2"
   random_seed: 42
   timezone: "UTC"
   live_refresh_seconds: 600
