@@ -66,12 +66,6 @@ This allows accurate race predictions even before the grid is known, and account
 All settings live in `config.yaml`. The main things you might want to tweak:
 
 ```yaml
-app:
-  random_seed: 42
-  timezone: "UTC"
-  live_refresh_seconds: 600
-  log_level: "WARNING"  # DEBUG, INFO, WARNING, ERROR
-
 modelling:
   # Model weights (including recency, blending, ensemble, DNF)
   # are dynamically calibrated at runtime.

@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Callable, Dict, Any, Optional, TYPE_CHECKING
+from typing import Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 
@@ -387,8 +387,7 @@ class CalibrationManager:
     # Full calibration
     # ------------------------------------------------------------------
     def run_calibration(self, jc: JolpicaClient, om: OpenMeteoClient,
-                        history_df: Optional['pd.DataFrame'] = None,  # noqa: F821
-                        progress_callback: Optional[Callable[[str], None]] = None):
+                        history_df: Optional['pd.DataFrame'] = None):  # noqa: F821
         """Run the full calibration process over all tunable parameters."""
         # Import heavy deps here
         import numpy as np
@@ -399,17 +398,11 @@ class CalibrationManager:
         from .models import train_pace_model
         from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel
 
-        def _emit(msg: str) -> None:
-            """Emit progress to both stdout and optional SSE callback."""
-            print(f"    {msg}", flush=True)
-            if progress_callback:
-                progress_callback(msg)
-
         logger.info("[calibrate] Starting full calibration (%d parameters)...", N_PARAMS)
         if history_df is None or history_df.empty:
-            _emit("[Calibration] Starting self-training process... (fetching history)")
+            print("    [Calibration] Starting self-training process... (fetching history)", flush=True)
         else:
-            _emit("[Calibration] Starting self-training process... (using pre-fetched history)")
+            print("    [Calibration] Starting self-training process... (using pre-fetched history)", flush=True)
 
         t0 = time.time()
 
@@ -421,7 +414,7 @@ class CalibrationManager:
             # 2. Fetch History
             if history_df is None or history_df.empty:
                 logger.info("[calibrate] Fetching history...")
-                _emit("[Calibration] Fetching historical race data (last 4 years)...")
+                print("    [Calibration] Fetching historical race data (last 4 years)...", flush=True)
                 try:
                     all_hist = collect_historical_results(
                         jc,
@@ -431,7 +424,7 @@ class CalibrationManager:
                     )
                 except Exception as e:
                     logger.error("[calibrate] History fetch failed: %s", e)
-                    _emit(f"[Calibration] Error fetching history: {e}")
+                    print(f"    [Calibration] Error fetching history: {e}")
                     return
             else:
                 all_hist = history_df
@@ -446,7 +439,7 @@ class CalibrationManager:
 
             if calib_races.empty:
                 logger.warning("[calibrate] No races found in lookback window. Skipping.")
-                _emit("[Calibration] SKIPPED: No recent races found in lookback window.")
+                print("    [Calibration] SKIPPED: No recent races found in lookback window.")
                 return
 
             # Identify unique events
@@ -475,7 +468,6 @@ class CalibrationManager:
                 events = calib_races[["season", "round", "date"]].drop_duplicates().sort_values("date")
 
             # 4. Train GBM Baseline on pre-window data
-            _emit(f"[Calibration] Training baseline model on {len(events)} events...")
             logger.info("[calibrate] Training baseline GBM on %d rows (pre-%s)...",
                         len(train_hist), train_cutoff.date())
 
@@ -502,7 +494,7 @@ class CalibrationManager:
 
             if not X_train_list:
                 logger.error("[calibrate] Failed to generate training data. Aborting.")
-                _emit("[Calibration] ABORTED: Failed to generate training data.")
+                print("    [Calibration] ABORTED: Failed to generate training data.")
                 return
 
             X_train = pd.concat(X_train_list, ignore_index=True)
@@ -637,10 +629,9 @@ class CalibrationManager:
 
                 if (i + 1) % 5 == 0:
                     logger.info("[calibrate] Processed %d/%d race events", i + 1, len(events))
-                    _emit(f"[Calibration] Backtesting race event {i + 1}/{len(events)}...")
+                    print(f"    [Calibration] Backtesting event {i + 1}/{len(events)}...")
 
             # Collect qualifying calibration data
-            _emit(f"[Calibration] Backtesting qualifying events ({len(quali_events)} events)...")
             logger.info("[calibrate] Generating scores for %d qualifying events...", len(quali_events))
             for i, evt in enumerate(quali_events.itertuples()):
                 s, r, d = int(evt.season), int(evt.round), pd.Timestamp(evt.date)
@@ -697,12 +688,9 @@ class CalibrationManager:
                         "mixed": mixed_q[idx] if len(mixed_q) > idx else 0,
                     })
 
-                if (i + 1) % 5 == 0:
-                    _emit(f"[Calibration] Backtesting qualifying event {i + 1}/{len(quali_events)}...")
-
             if not calibration_data:
                 logger.warning("[calibrate] No race calibration data generated.")
-                _emit("[Calibration] ABORTED: No validation queries succeeded.")
+                print("    [Calibration] ABORTED: No validation queries succeeded.")
                 return
 
             df_calib = pd.DataFrame(calibration_data)
@@ -713,7 +701,6 @@ class CalibrationManager:
             )
 
             # 6. Optimisation
-            _emit(f"[Calibration] Optimising {N_PARAMS} parameters ({len(df_calib)} race + {len(df_calib_q)} qualifying samples)...")
             logger.info("[calibrate] Optimising %d parameters on %d race + %d qualifying samples...",
                         N_PARAMS, len(df_calib), len(df_calib_q))
 
@@ -941,11 +928,11 @@ class CalibrationManager:
             self.save_weights()
             duration = time.time() - t0
             logger.info("[calibrate] Calibration complete. Time: %.1fs", duration)
-            _emit(f"[Calibration] Complete! Optimised {N_PARAMS} parameters. ({duration:.1f}s)")
+            print(f"    [Calibration] Complete! Optimised {N_PARAMS} parameters. ({duration:.1f}s)")
 
         except Exception as e:
             logger.error("[calibrate] Calibration failed: %s", e)
-            _emit(f"[Calibration] FAILED: {e}")
+            print(f"    [Calibration] FAILED: {e}")
             import traceback
             traceback.print_exc()
             logger.debug(traceback.format_exc())

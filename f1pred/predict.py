@@ -797,8 +797,7 @@ def run_predictions_for_event(
                         )
                         if cm.check_calibration_needed(history_df=all_history):
                             spinner.update(f"Predicting {event_title} - {sess}: Running calibration...")
-                            cm.run_calibration(jc, om, history_df=all_history,
-                                               progress_callback=spinner.update)
+                            cm.run_calibration(jc, om, history_df=all_history)
                             # Reload weights if they changed
                             calibrated_weights = cm.load_weights()
                             _apply_calibrated_weights(cfg, calibrated_weights)

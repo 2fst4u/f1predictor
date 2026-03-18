@@ -548,7 +548,7 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     try:
         shap_per_driver = compute_shap_values(pipe, X, features)
     except Exception as e:
-        logger.warning("[models] SHAP computation failed (non-fatal): %s", e)
+        logger.debug("[models] SHAP computation failed (non-fatal): %s", e)
 
     return pipe, pace_hat, features, shap_per_driver
 
@@ -558,38 +558,19 @@ def compute_shap_values(
     X: 'pd.DataFrame',
     features: List[str],
 ) -> Optional[List[Dict[str, float]]]:
-    """Compute per-driver feature contributions for the GBM component.
-
-    Attempts SHAP TreeExplainer first.  If the shap library is unavailable
-    (e.g. missing numba on Alpine), falls back to an importance-weighted
-    deviation method that uses the model's ``feature_importances_`` to
-    approximate directional per-driver contributions.
+    """Compute per-driver SHAP values for the GBM component.
 
     Returns a list of dicts (one per driver row in X) mapping original feature
-    names to their contribution value.  Returns None only when no method
-    succeeds.
+    names to their SHAP contribution (lower contribution = made prediction worse,
+    i.e. slower pace; the sign indicates direction of influence on the pace index).
+
+    Returns None if shap is unavailable or the model type is not supported.
     """
-    import numpy as np
 
-    # --- Try SHAP first ---
-    shap_result = _try_shap(pipe, X, features)
-    if shap_result is not None:
-        return shap_result
-
-    # --- Fallback: importance-weighted deviation ---
-    return _importance_weighted_contributions(pipe, X, features)
-
-
-def _try_shap(
-    pipe: Any,
-    X: 'pd.DataFrame',
-    features: List[str],
-) -> Optional[List[Dict[str, float]]]:
-    """Attempt SHAP TreeExplainer computation.  Returns None on any failure."""
     try:
         import shap as shap_lib
     except ImportError:
-        logger.info("[models] shap library not importable; will use fallback")
+        logger.debug("[models] shap library not installed; skipping SHAP computation")
         return None
 
     try:
@@ -662,99 +643,7 @@ def _try_shap(
         return result
 
     except Exception as e:
-        logger.warning("[models] SHAP computation failed: %s", e)
-        return None
-
-
-def _importance_weighted_contributions(
-    pipe: Any,
-    X: 'pd.DataFrame',
-    features: List[str],
-) -> Optional[List[Dict[str, float]]]:
-    """Approximate per-driver feature contributions using model feature
-    importances and each driver's deviation from the field mean.
-
-    For each feature: contribution_i = importance * (x_i - mean(x)) / std(x).
-    The sign indicates direction: positive = increases predicted pace index
-    (bad), negative = decreases it (good).
-
-    This is a lightweight alternative to SHAP that requires no extra
-    dependencies beyond sklearn.
-    """
-    import numpy as np
-
-    try:
-        model = pipe.named_steps["model"]
-        pre = pipe.named_steps["pre"]
-
-        if not hasattr(model, "feature_importances_"):
-            logger.info("[models] Model has no feature_importances_; skipping fallback")
-            return None
-
-        importances = model.feature_importances_
-
-        # Build transformed feature matrix
-        X_infer = X[features].copy() if set(features).issubset(X.columns) else X.reindex(columns=features)
-        X_transformed = pre.transform(X_infer)
-
-        if hasattr(X_transformed, "toarray"):
-            X_transformed = X_transformed.toarray()
-
-        X_arr = np.asarray(X_transformed, dtype=float)
-
-        if X_arr.shape[1] != len(importances):
-            logger.info("[models] Feature count mismatch (%d vs %d); skipping fallback",
-                        X_arr.shape[1], len(importances))
-            return None
-
-        # Resolve transformed feature names for mapping back to originals
-        try:
-            transformed_names = list(pre.get_feature_names_out())
-        except Exception:
-            transformed_names = None
-
-        # Per-feature z-scores across drivers
-        means = np.nanmean(X_arr, axis=0)
-        stds = np.nanstd(X_arr, axis=0)
-        stds[stds < 1e-9] = 1.0  # avoid division by zero
-        z_scores = (X_arr - means) / stds
-
-        # Weighted contributions: importance * deviation
-        contributions = z_scores * importances[np.newaxis, :]
-
-        n_drivers = len(X)
-        result: List[Dict[str, float]] = []
-
-        for i in range(n_drivers):
-            row = contributions[i]
-            contrib: Dict[str, float] = {}
-
-            if transformed_names is not None and len(transformed_names) == len(row):
-                for j, tname in enumerate(transformed_names):
-                    if "__" in tname:
-                        _, rest = tname.split("__", 1)
-                        orig_col = None
-                        for feat in features:
-                            if rest == feat or rest.startswith(feat + "_"):
-                                orig_col = feat
-                                break
-                        if orig_col is None:
-                            orig_col = rest
-                    else:
-                        orig_col = tname
-                    contrib[orig_col] = contrib.get(orig_col, 0.0) + float(row[j])
-            else:
-                for j, fname in enumerate(features):
-                    if j < len(row):
-                        contrib[fname] = float(row[j])
-
-            result.append(contrib)
-
-        logger.info("[models] Feature contributions (importance-weighted) computed for %d drivers", n_drivers)
-        return result
-
-    except Exception as e:
-        logger.warning("[models] Fallback feature contribution failed: %s", e)
+        logger.debug("[models] SHAP computation error: %s", e)
         return None
 
 
