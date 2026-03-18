@@ -17,10 +17,15 @@ RUN apk add --no-cache \
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install setuptools>=68.0 wheel setuptools-scm>=8.0
 
-# Pre-build heavy C-extension dependencies as wheels
+# Pre-build heavy C-extension dependencies as wheels.
+# shap is built separately with --no-deps to avoid pulling in numba/llvmlite,
+# which fail to build from source on Alpine + Python 3.12.  shap's TreeExplainer
+# only needs numpy/scipy/sklearn/pandas, all of which are already present.
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip wheel -r requirements.txt -w /wheels
+    grep -v '^shap' requirements.txt > /tmp/requirements-no-shap.txt && \
+    pip wheel -r /tmp/requirements-no-shap.txt -w /wheels && \
+    pip wheel --no-deps $(grep '^shap' requirements.txt | head -1) -w /wheels
 
 # Copy necessary files for the build
 # We need .git to allow setuptools-scm to resolve the version
