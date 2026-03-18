@@ -251,7 +251,7 @@
                                                         <div class="font-semibold text-gray-200 truncate max-w-[120px] sm:max-w-none" x-text="p.name"></div>
                                                     </div>
                                                     <!-- Influence panel — sits under driver name, spans visually via the driver cell -->
-                                                    <div x-show="p.ensemble_components || (p.shap_values && getSortedShap(p.shap_values).length > 0)"
+                                                    <div x-show="p.ensemble_components || (p.shap_values && Object.keys(p.shap_values).length > 0)"
                                                          class="mt-1 pb-2">
                                                         <!-- Model Mix bar -->
                                                         <template x-if="p.ensemble_components">
@@ -272,7 +272,7 @@
                                                             </div>
                                                         </template>
                                                         <!-- SHAP factors -->
-                                                        <template x-if="p.shap_values && getSortedShap(p.shap_values).length > 0">
+                                                        <template x-if="p.shap_values && Object.keys(p.shap_values).length > 0">
                                                             <div>
                                                                 <div class="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">
                                                                     Factors <span class="normal-case font-normal text-gray-600">(green = helps, red = hurts)</span>

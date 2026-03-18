@@ -566,8 +566,6 @@ def compute_shap_values(
 
     Returns None if shap is unavailable or the model type is not supported.
     """
-    import numpy as np
-    import pandas as pd
 
     try:
         import shap as shap_lib
