@@ -5,6 +5,7 @@ Covers:
 - _build_ensemble_components  (predict.py)
 - _print_influence_row  (predict.py)
 - _sanitize_for_json  (web.py)
+- estimate_dnf_probabilities weather/circuit branches  (models.py)
 """
 from __future__ import annotations
 
@@ -424,3 +425,116 @@ class TestSanitizeForJson:
         assert result["shap"]["feat_b"] == pytest.approx(-0.3)
         assert result["vals"][0] is None
         assert result["vals"][1] == 1
+
+
+# ---------------------------------------------------------------------------
+# estimate_dnf_probabilities — weather & circuit branches  (models.py)
+# ---------------------------------------------------------------------------
+
+def _make_hist(n_races=10, n_drivers=5, include_dnf=True):
+    """Build a minimal historical results DataFrame."""
+    from datetime import datetime, timezone, timedelta
+
+    rows = []
+    base = datetime(2023, 3, 1, tzinfo=timezone.utc)
+    for rnd in range(1, n_races + 1):
+        for pos in range(1, n_drivers + 1):
+            rows.append({
+                "season": 2023, "round": rnd, "session": "race",
+                "date": base + timedelta(days=14 * rnd),
+                "driverId": f"d{pos}",
+                "constructorId": f"c{(pos - 1) // 2}",
+                "position": None if (include_dnf and pos == n_drivers and rnd % 3 == 0) else pos,
+                "status": "DNF" if (include_dnf and pos == n_drivers and rnd % 3 == 0) else "Finished",
+                "points": max(0, 26 - pos * 2),
+                "grid": pos,
+            })
+    return pd.DataFrame(rows)
+
+
+def _make_current_X(n_drivers=5, with_circuit_dnf=False):
+    data = {
+        "driverId": [f"d{i}" for i in range(1, n_drivers + 1)],
+        "constructorId": [f"c{(i - 1) // 2}" for i in range(1, n_drivers + 1)],
+        "grid": list(range(1, n_drivers + 1)),
+    }
+    if with_circuit_dnf:
+        data["global_circuit_dnf_rate"] = [0.12] * n_drivers
+    return pd.DataFrame(data)
+
+
+class TestEstimateDnfProbabilitiesWeatherBranches:
+
+    def test_wet_event_weather_branch(self):
+        """Covers lines 702-704: event_weather with rain_sum > threshold."""
+        from f1pred.models import estimate_dnf_probabilities
+
+        hist = _make_hist()
+        X = _make_current_X()
+
+        probs = estimate_dnf_probabilities(
+            hist, X,
+            event_weather={"rain_sum": 5.0},   # wet session
+        )
+        assert len(probs) == len(X)
+        assert all(0 <= p <= 1 for p in probs)
+
+    def test_dry_event_weather_branch(self):
+        """event_weather with rain_sum below threshold → dry."""
+        from f1pred.models import estimate_dnf_probabilities
+
+        hist = _make_hist()
+        X = _make_current_X()
+
+        probs = estimate_dnf_probabilities(
+            hist, X,
+            event_weather={"rain_sum": 0.0},   # dry session
+        )
+        assert len(probs) == len(X)
+
+    def test_hist_weather_branch_covered(self):
+        """Covers lines 713-742: hist_weather dict triggers vectorized merge."""
+        from f1pred.models import estimate_dnf_probabilities
+
+        hist = _make_hist()
+        X = _make_current_X()
+
+        # Build hist_weather keyed by (season, round) tuples
+        hist_weather = {
+            (2023, rnd): {"rain_sum": 3.0 if rnd % 2 == 0 else 0.0}
+            for rnd in range(1, 11)
+        }
+
+        probs = estimate_dnf_probabilities(
+            hist, X,
+            event_weather={"rain_sum": 3.0},   # wet current session
+            hist_weather=hist_weather,
+        )
+        assert len(probs) == len(X)
+        assert all(np.isfinite(p) for p in probs)
+
+    def test_hist_weather_with_nan_rain_skipped(self):
+        """hist_weather entries with NaN rain_sum are skipped safely."""
+        from f1pred.models import estimate_dnf_probabilities
+
+        hist = _make_hist()
+        X = _make_current_X()
+
+        hist_weather = {
+            (2023, 1): {"rain_sum": float("nan")},   # should be skipped
+            (2023, 2): {"rain_sum": 2.0},
+        }
+
+        probs = estimate_dnf_probabilities(hist, X, hist_weather=hist_weather)
+        assert len(probs) == len(X)
+
+    def test_circuit_dnf_rate_branch(self):
+        """Covers lines 777-779: global_circuit_dnf_rate column present."""
+        from f1pred.models import estimate_dnf_probabilities
+
+        hist = _make_hist()
+        X = _make_current_X(with_circuit_dnf=True)
+
+        probs = estimate_dnf_probabilities(hist, X)
+        assert len(probs) == len(X)
+        assert all(0 <= p <= 1 for p in probs)
