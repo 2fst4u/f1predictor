@@ -590,10 +590,18 @@ def compute_shap_values(
         # Build explainer — TreeExplainer works natively for LightGBM, XGBoost,
         # and sklearn GBM without needing a background dataset.
         explainer = shap_lib.TreeExplainer(model)
-        shap_values = explainer.shap_values(X_transformed)
+        # Using check_additivity=False to prevent additivity check failures which are common with LightGBM/XGBoost
+        try:
+            shap_values = explainer.shap_values(X_transformed, check_additivity=False)
+        except Exception:
+            shap_values = explainer.shap_values(X_transformed)
+
+        # Extract raw values from Explanation objects (newer shap versions)
+        if hasattr(shap_values, "values"):
+            shap_values = shap_values.values
 
         # Scikit-learn's GradientBoostingRegressor can sometimes return a single-item list of arrays
-        if isinstance(shap_values, list):
+        if isinstance(shap_values, list) and len(shap_values) > 0:
             shap_values = shap_values[0]
 
         # shap_values shape: (n_drivers, n_transformed_features)
