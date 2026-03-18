@@ -891,6 +891,12 @@ def run_predictions_for_event(
                         p_top3 = ranked["p_top3"].values
                         p_win = ranked["p_win"].values
                         dnf_prob = ranked["p_dnf"].values
+
+                        # Ensure explainability columns exist even for old cache entries
+                        if "shap_values" not in ranked.columns:
+                            ranked["shap_values"] = [None] * len(ranked)
+                        if "ensemble_components" not in ranked.columns:
+                            ranked["ensemble_components"] = [None] * len(ranked)
                     else:
 
                         # Historical results for this roster (fetched before pace model
