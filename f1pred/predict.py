@@ -881,7 +881,7 @@ def run_predictions_for_event(
                         "model_version": cfg.app.model_version,
                         "weights": calibrated_weights,
                         "modelling_cfg": cfg.modelling,
-                        "_cache_breaker": "v2_shap_fix",
+                        "_cache_breaker": "v5_shap_inject",
                     })):
                         spinner.update(f"Predicting {event_title} - {sess}: Using cached result...")
                         ranked = cached_hit["ranked"]
@@ -1057,9 +1057,14 @@ def run_predictions_for_event(
 
                         # Attach explainability columns (re-order to match sorted `order`)
                         if shap_per_driver is not None:
+                            # 🧪 Inject a test placeholder so we can see if the UI renders ANY factors
+                            for i in range(len(shap_per_driver)):
+                                if shap_per_driver[i] is None:
+                                    shap_per_driver[i] = {}
+                                shap_per_driver[i]["_TEST_INPUT_VARIABLE_"] = 9.99
                             ranked["shap_values"] = [shap_per_driver[i] for i in order]
                         else:
-                            ranked["shap_values"] = [None] * len(ranked)
+                            ranked["shap_values"] = [{"_TEST_INPUT_VARIABLE_": 9.99}] * len(ranked)
 
                         if ensemble_component_scores is not None:
                             ranked["ensemble_components"] = [ensemble_component_scores[i] for i in order]
