@@ -238,8 +238,8 @@
                                             <th scope="col" class="px-0.5 py-2 sm:p-4 text-right"><abbr title="Did Not Finish Probability" class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">DNF</abbr></th>
                                         </tr>
                                     </thead>
-                                    <tbody>
-                                        <template x-for="(p, index) in data.predictions" :key="p.driverId">
+                                    <template x-for="(p, index) in data.predictions" :key="p.driverId">
+                                        <tbody class="border-none">
                                             <tr :class="getTeamClass(p.constructorName)" class="text-sm sm:text-base">
                                                 <!-- Position -->
                                                 <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 text-center font-black italic text-base sm:text-lg align-top"
@@ -250,50 +250,6 @@
                                                     <div class="flex items-center space-x-1 sm:space-x-3 mb-0.5">
                                                         <div class="font-bold uppercase tracking-tighter" x-text="p.code || '???'"></div>
                                                         <div class="font-semibold text-gray-200 truncate max-w-[120px] sm:max-w-none" x-text="p.name"></div>
-                                                    </div>
-                                                    <!-- Influence panel — sits under driver name, spans visually via the driver cell -->
-                                                    <div x-show="p.ensemble_components || hasShapFactors(p.shap_values)"
-                                                         class="mt-1 pb-2">
-                                                        <div class="flex flex-col md:flex-row gap-3 md:gap-4 md:items-start">
-                                                            <!-- Model Mix bar -->
-                                                            <template x-if="p.ensemble_components">
-                                                                <div class="md:w-44 md:flex-shrink-0">
-                                                                    <div class="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Model Mix</div>
-                                                                    <div class="flex items-center gap-0.5 h-2 rounded overflow-hidden w-36 sm:w-44" aria-hidden="true">
-                                                                        <div class="h-full bg-cyan-500"   :style="'width:' + (p.ensemble_components.gbm   * 100).toFixed(1) + '%'" :title="'GBM '           + (p.ensemble_components.gbm   * 100).toFixed(0) + '%'"></div>
-                                                                        <div class="h-full bg-yellow-400" :style="'width:' + (p.ensemble_components.elo   * 100).toFixed(1) + '%'" :title="'Elo '           + (p.ensemble_components.elo   * 100).toFixed(0) + '%'"></div>
-                                                                        <div class="h-full bg-purple-500" :style="'width:' + (p.ensemble_components.bt    * 100).toFixed(1) + '%'" :title="'Bradley-Terry ' + (p.ensemble_components.bt    * 100).toFixed(0) + '%'"></div>
-                                                                        <div class="h-full bg-green-400"  :style="'width:' + (p.ensemble_components.mixed * 100).toFixed(1) + '%'" :title="'Mixed-Effects ' + (p.ensemble_components.mixed * 100).toFixed(0) + '%'"></div>
-                                                                    </div>
-                                                                    <div class="flex gap-2 mt-0.5 flex-wrap">
-                                                                        <span class="text-[9px] text-cyan-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-cyan-500 mr-0.5 align-middle"></span>GBM <span x-text="(p.ensemble_components.gbm * 100).toFixed(0) + '%'"></span></span>
-                                                                        <span class="text-[9px] text-yellow-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 mr-0.5 align-middle"></span>Elo <span x-text="(p.ensemble_components.elo * 100).toFixed(0) + '%'"></span></span>
-                                                                        <span class="text-[9px] text-purple-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-purple-500 mr-0.5 align-middle"></span>BT <span x-text="(p.ensemble_components.bt * 100).toFixed(0) + '%'"></span></span>
-                                                                        <span class="text-[9px] text-green-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-green-400 mr-0.5 align-middle"></span>Mix <span x-text="(p.ensemble_components.mixed * 100).toFixed(0) + '%'"></span></span>
-                                                                    </div>
-                                                                </div>
-                                                            </template>
-                                                            <!-- SHAP factors -->
-                                                            <template x-if="hasShapFactors(p.shap_values)">
-                                                                <div class="min-w-0">
-                                                                    <div class="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">
-                                                                        Factors <span class="normal-case font-normal text-gray-600">(green = helps, red = hurts)</span>
-                                                                    </div>
-                                                                    <div class="flex flex-wrap gap-x-2 gap-y-0.5">
-                                                                        <template x-for="feat in getSortedShap(p.shap_values)" :key="feat.key">
-                                                                            <div class="flex items-center gap-0.5 text-[9px]">
-                                                                                <span class="sr-only" x-text="feat.val < 0 ? 'Improves position:' : 'Worsens position:'"></span>
-                                                                                <span aria-hidden="true" :class="feat.val < 0 ? 'text-green-400' : 'text-red-400'" class="font-bold w-2 text-center" x-text="feat.val < 0 ? '▲' : '▼'"></span>
-                                                                                <div class="w-6 sm:w-10 h-1.5 bg-gray-700 rounded overflow-hidden" aria-hidden="true">
-                                                                                    <div class="h-full rounded" :class="feat.val < 0 ? 'bg-green-500' : 'bg-red-500'" :style="'width:' + Math.min(100, feat.absPct).toFixed(0) + '%'"></div>
-                                                                                </div>
-                                                                                <span class="text-gray-400" x-text="feat.label"></span>
-                                                                            </div>
-                                                                        </template>
-                                                                    </div>
-                                                                </div>
-                                                            </template>
-                                                        </div>
                                                     </div>
                                                 </td>
                                                 <!-- Team -->
@@ -341,8 +297,53 @@
                                                     </div>
                                                 </td>
                                             </tr>
-                                        </template>
-                                    </tbody>
+                                            <!-- Influence panel — now in its own row, spanning all columns -->
+                                            <tr :class="getTeamClass(p.constructorName)" x-show="p.ensemble_components || hasShapFactors(p.shap_values)">
+                                                <td colspan="7" class="px-2 sm:px-12 pb-3 border-t border-gray-800/50">
+                                                    <div class="flex flex-wrap gap-x-12 gap-y-4 items-start">
+                                                        <!-- Model Mix bar -->
+                                                        <template x-if="p.ensemble_components">
+                                                            <div class="md:w-44 md:flex-shrink-0">
+                                                                <div class="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Model Mix</div>
+                                                                <div class="flex items-center gap-0.5 h-2 rounded overflow-hidden w-36 sm:w-44" aria-hidden="true">
+                                                                    <div class="h-full bg-cyan-500"   :style="'width:' + (p.ensemble_components.gbm   * 100).toFixed(1) + '%'" :title="'GBM '           + (p.ensemble_components.gbm   * 100).toFixed(0) + '%'"></div>
+                                                                    <div class="h-full bg-yellow-400" :style="'width:' + (p.ensemble_components.elo   * 100).toFixed(1) + '%'" :title="'Elo '           + (p.ensemble_components.elo   * 100).toFixed(0) + '%'"></div>
+                                                                    <div class="h-full bg-purple-500" :style="'width:' + (p.ensemble_components.bt    * 100).toFixed(1) + '%'" :title="'Bradley-Terry ' + (p.ensemble_components.bt    * 100).toFixed(0) + '%'"></div>
+                                                                    <div class="h-full bg-green-400"  :style="'width:' + (p.ensemble_components.mixed * 100).toFixed(1) + '%'" :title="'Mixed-Effects ' + (p.ensemble_components.mixed * 100).toFixed(0) + '%'"></div>
+                                                                </div>
+                                                                <div class="flex gap-2 mt-0.5 flex-wrap">
+                                                                    <span class="text-[9px] text-cyan-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-cyan-500 mr-0.5 align-middle"></span>GBM <span x-text="(p.ensemble_components.gbm * 100).toFixed(0) + '%'"></span></span>
+                                                                    <span class="text-[9px] text-yellow-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 mr-0.5 align-middle"></span>Elo <span x-text="(p.ensemble_components.elo * 100).toFixed(0) + '%'"></span></span>
+                                                                    <span class="text-[9px] text-purple-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-purple-500 mr-0.5 align-middle"></span>BT <span x-text="(p.ensemble_components.bt * 100).toFixed(0) + '%'"></span></span>
+                                                                    <span class="text-[9px] text-green-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-green-400 mr-0.5 align-middle"></span>Mix <span x-text="(p.ensemble_components.mixed * 100).toFixed(0) + '%'"></span></span>
+                                                                </div>
+                                                            </div>
+                                                        </template>
+                                                        <!-- SHAP factors -->
+                                                        <template x-if="hasShapFactors(p.shap_values)">
+                                                            <div class="min-w-0">
+                                                                <div class="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">
+                                                                    Factors <span class="normal-case font-normal text-gray-600">(green = helps, red = hurts)</span>
+                                                                </div>
+                                                                <div class="flex flex-wrap gap-x-2 gap-y-0.5">
+                                                                    <template x-for="feat in getSortedShap(p.shap_values)" :key="feat.key">
+                                                                        <div class="flex items-center gap-0.5 text-[9px]">
+                                                                            <span class="sr-only" x-text="feat.val < 0 ? 'Improves position:' : 'Worsens position:'"></span>
+                                                                            <span aria-hidden="true" :class="feat.val < 0 ? 'text-green-400' : 'text-red-400'" class="font-bold w-2 text-center" x-text="feat.val < 0 ? '▲' : '▼'"></span>
+                                                                            <div class="w-6 sm:w-10 h-1.5 bg-gray-700 rounded overflow-hidden" aria-hidden="true">
+                                                                                <div class="h-full rounded" :class="feat.val < 0 ? 'bg-green-500' : 'bg-red-500'" :style="'width:' + Math.min(100, feat.absPct).toFixed(0) + '%'"></div>
+                                                                            </div>
+                                                                            <span class="text-gray-400" x-text="feat.label"></span>
+                                                                        </div>
+                                                                    </template>
+                                                                </div>
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </template>
                                 </table>
 
                                 <div class="mt-3 rounded border border-gray-700 bg-gray-900/40 p-3">
