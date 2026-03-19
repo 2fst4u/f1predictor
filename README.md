@@ -127,7 +127,8 @@ python main.py --backtest
 Run the local test suite (requires installing test dependencies first):
 
 ```bash
-pip install pytest pytest-cov httpx
+make install
+pip install pytest pytest-cov httpx playwright fastparquet pyarrow colorama
 make test
 ```
 
