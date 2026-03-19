@@ -282,7 +282,8 @@
                                                                     <div class="flex flex-wrap gap-x-2 gap-y-0.5">
                                                                         <template x-for="feat in getSortedShap(p.shap_values)" :key="feat.key">
                                                                             <div class="flex items-center gap-0.5 text-[9px]">
-                                                                                <span :class="feat.val < 0 ? 'text-green-400' : 'text-red-400'" class="font-bold w-2 text-center" x-text="feat.val < 0 ? '▲' : '▼'"></span>
+                                                                                <span class="sr-only" x-text="feat.val < 0 ? 'Improves position:' : 'Worsens position:'"></span>
+                                                                                <span aria-hidden="true" :class="feat.val < 0 ? 'text-green-400' : 'text-red-400'" class="font-bold w-2 text-center" x-text="feat.val < 0 ? '▲' : '▼'"></span>
                                                                                 <div class="w-6 sm:w-10 h-1.5 bg-gray-700 rounded overflow-hidden">
                                                                                     <div class="h-full rounded" :class="feat.val < 0 ? 'bg-green-500' : 'bg-red-500'" :style="'width:' + Math.min(100, feat.absPct).toFixed(0) + '%'"></div>
                                                                                 </div>
@@ -305,6 +306,7 @@
                                                         <span class="font-bold" x-text="p.grid || '--'"></span>
                                                         <template x-if="p.grid && p.grid != p.predicted_position">
                                                             <span class="text-[10px]" :class="p.grid > p.predicted_position ? 'text-green-500' : 'text-red-500'">
+                                                                <span class="sr-only" x-text="p.grid > p.predicted_position ? 'Improves position by:' : 'Worsens position by:'"></span>
                                                                 <i class="fas" :class="p.grid > p.predicted_position ? 'fa-caret-up' : 'fa-caret-down'" aria-hidden="true"></i>
                                                                 <span x-text="Math.abs(p.grid - p.predicted_position)"></span>
                                                             </span>
@@ -357,8 +359,9 @@
                                         </div>
                                         <div>
                                             <div class="font-semibold text-gray-200 mb-1">Factor Impact Direction</div>
-                                            <div><span class="text-green-400 font-semibold">▲ Green</span> = improves predicted finish (helps).</div>
-                                            <div><span class="text-red-400 font-semibold">▼ Red</span> = worsens predicted finish (hurts).</div>
+                                            <div aria-hidden="true"><span class="text-green-400 font-semibold">▲ Green</span> = improves predicted finish (helps).</div>
+                                            <div aria-hidden="true"><span class="text-red-400 font-semibold">▼ Red</span> = worsens predicted finish (hurts).</div>
+                                            <div class="sr-only">Green indicates factors that improve predicted finish (helps), while Red indicates factors that worsen predicted finish (hurts).</div>
                                             <div class="mt-1 text-gray-400">Bar length shows relative influence magnitude for that driver.</div>
                                         </div>
                                     </div>
