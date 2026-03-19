@@ -113,8 +113,8 @@ class TestComputeShapValues:
         # Should still return a list (via positional fallback)
         assert result is None or isinstance(result, list)
 
-    def test_returns_none_on_explainer_exception(self):
-        """If TreeExplainer raises, compute_shap_values returns None."""
+    def test_returns_fallback_on_explainer_exception(self):
+        """If TreeExplainer raises, compute_shap_values falls back to proxy contributions."""
         pytest.importorskip("shap")
         from f1pred.models import compute_shap_values
         import shap as shap_lib
@@ -125,7 +125,8 @@ class TestComputeShapValues:
 
         with patch.object(shap_lib, "TreeExplainer", side_effect=RuntimeError("boom")):
             result = compute_shap_values(pipe, X, feature_names)
-        assert result is None
+        assert isinstance(result, list)
+        assert len(result) == len(X)
 
     def test_prefixed_feature_names_mapped_correctly(self):
         """Exercises the '__' prefix branch (num__form_index → form_index)."""
