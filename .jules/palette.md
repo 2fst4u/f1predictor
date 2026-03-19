@@ -73,3 +73,11 @@
 ## $(date +%Y-%m-%d) - Abbreviated Badges and Screen Readers
 **Learning:** Tiny prefixes used in UI badges (like "v" for version or "M:" for model) lack context and are read confusingly by screen readers as standalone letters.
 **Action:** For single-letter or abbreviated visual badges, hide the abbreviation using `aria-hidden="true"` and provide the full context in an adjacent `<span class="sr-only">` (e.g., "App Version").
+
+## $(date +%Y-%m-%d) - Hidden Fallback Text Value
+**Learning:** When adding fallback inner HTML text to Alpine.js `x-text` bindings, ensure the parent container is not initially hidden (e.g., via `x-cloak` or `x-show`); otherwise, the fallback text provides no visible UX or accessibility benefit as it remains hidden until Alpine populates the data and replaces the text entirely.
+**Action:** When applying fallback inner HTML text to Alpine.js `x-text` bindings, ensure the parent container is visible on initial load. If it's conditionally rendered, focus on other enhancements.
+
+## $(date +%Y-%m-%d) - Focus-Visible for Summary Elements
+**Learning:** `<summary>` elements inside `<details>` provide native, interactive disclosure widgets, but default browser focus rings on them can be inconsistent or illegible on custom dark backgrounds. Furthermore, using standard `focus:ring` applies rings on mouse clicks, which can be visually jarring.
+**Action:** Explicitly style `<summary>` tags with `focus:outline-none focus-visible:ring-2` to ensure keyboard navigators have a clear, high-contrast focus indicator, while mouse users get a clean click experience.
