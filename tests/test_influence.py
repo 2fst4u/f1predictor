@@ -59,8 +59,8 @@ def _make_feature_df(n_drivers=5, feature_names=None):
 
 class TestComputeShapValues:
 
-    def test_returns_none_when_shap_missing(self):
-        """Should return None gracefully when shap is not installed."""
+    def test_returns_fallback_when_shap_missing(self):
+        """Should return fallback contributions when shap is not installed."""
         from f1pred.models import compute_shap_values
 
         pipe, n_features, n_drivers = _make_pipe(n_features=3, n_drivers=5)
@@ -69,7 +69,8 @@ class TestComputeShapValues:
 
         with patch.dict("sys.modules", {"shap": None}):
             result = compute_shap_values(pipe, X, features)
-        assert result is None
+        assert isinstance(result, list)
+        assert len(result) == len(X)
 
     def test_returns_list_of_dicts_with_shap_installed(self):
         """When shap is available, returns one dict per driver."""
@@ -112,8 +113,8 @@ class TestComputeShapValues:
         # Should still return a list (via positional fallback)
         assert result is None or isinstance(result, list)
 
-    def test_returns_none_on_explainer_exception(self):
-        """If TreeExplainer raises, compute_shap_values returns None."""
+    def test_returns_fallback_on_explainer_exception(self):
+        """If TreeExplainer raises, compute_shap_values falls back to proxy contributions."""
         pytest.importorskip("shap")
         from f1pred.models import compute_shap_values
         import shap as shap_lib
@@ -124,7 +125,8 @@ class TestComputeShapValues:
 
         with patch.object(shap_lib, "TreeExplainer", side_effect=RuntimeError("boom")):
             result = compute_shap_values(pipe, X, feature_names)
-        assert result is None
+        assert isinstance(result, list)
+        assert len(result) == len(X)
 
     def test_prefixed_feature_names_mapped_correctly(self):
         """Exercises the '__' prefix branch (num__form_index → form_index)."""

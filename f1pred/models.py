@@ -570,8 +570,8 @@ def compute_shap_values(
     try:
         import shap as shap_lib
     except ImportError:
-        logger.debug("[models] shap library not installed; skipping SHAP computation")
-        return None
+        logger.debug("[models] shap library not installed; using fallback feature contributions")
+        return _fallback_feature_contributions(pipe, X, features)
 
     try:
         model = pipe.named_steps["model"]
@@ -590,11 +590,23 @@ def compute_shap_values(
         # Build explainer — TreeExplainer works natively for LightGBM, XGBoost,
         # and sklearn GBM without needing a background dataset.
         explainer = shap_lib.TreeExplainer(model)
-        shap_values = explainer.shap_values(X_transformed)
+        # Using check_additivity=False to prevent additivity check failures which are common with LightGBM/XGBoost
+        try:
+            shap_values = explainer.shap_values(X_transformed, check_additivity=False)
+        except Exception:
+            shap_values = explainer.shap_values(X_transformed)
+
+        # Extract raw values from Explanation objects (newer shap versions)
+        if hasattr(shap_values, "values"):
+            shap_values = shap_values.values
+
+        # Scikit-learn's GradientBoostingRegressor can sometimes return a single-item list of arrays
+        if isinstance(shap_values, list) and len(shap_values) > 0:
+            shap_values = shap_values[0]
 
         # shap_values shape: (n_drivers, n_transformed_features)
         if shap_values is None or len(shap_values) == 0:
-            return None
+            return _fallback_feature_contributions(pipe, X, features)
 
         # Map transformed feature names back to original feature names.
         # For numeric features the mapping is 1-to-1.
@@ -639,7 +651,68 @@ def compute_shap_values(
         return result
 
     except Exception as e:
-        logger.debug("[models] SHAP computation error: %s", e)
+        logger.debug("[models] SHAP computation error: %s; using fallback feature contributions", e)
+        return _fallback_feature_contributions(pipe, X, features)
+
+
+def _fallback_feature_contributions(
+    pipe: Any,
+    X: 'pd.DataFrame',
+    features: List[str],
+) -> Optional[List[Dict[str, float]]]:
+    """Fallback per-driver feature contributions when SHAP is unavailable.
+
+    Uses transformed feature values scaled by model feature importance.
+    This is not a true Shapley attribution but provides a stable per-driver,
+    per-feature directional influence estimate for UI display.
+    """
+    try:
+        import numpy as np
+
+        model = pipe.named_steps["model"]
+        pre = pipe.named_steps["pre"]
+
+        X_infer = X[features].copy() if set(features).issubset(X.columns) else X.reindex(columns=features)
+        X_transformed = pre.transform(X_infer)
+
+        try:
+            transformed_names = list(pre.get_feature_names_out())
+        except Exception:
+            transformed_names = [f"f{i}" for i in range(X_transformed.shape[1])]
+
+        importances = getattr(model, "feature_importances_", None)
+        if importances is None:
+            coef = getattr(model, "coef_", None)
+            if coef is not None:
+                importances = np.abs(np.asarray(coef)).ravel()
+
+        if importances is None or len(importances) != X_transformed.shape[1]:
+            importances = np.ones(X_transformed.shape[1], dtype=float)
+
+        weighted = np.asarray(X_transformed, dtype=float) * np.asarray(importances, dtype=float)
+
+        result: List[Dict[str, float]] = []
+        for i in range(weighted.shape[0]):
+            contrib: Dict[str, float] = {}
+            for j, tname in enumerate(transformed_names):
+                if "__" in str(tname):
+                    _, rest = str(tname).split("__", 1)
+                    orig_col = None
+                    for feat in features:
+                        if rest == feat or rest.startswith(feat + "_"):
+                            orig_col = feat
+                            break
+                    if orig_col is None:
+                        orig_col = rest
+                else:
+                    orig_col = str(tname)
+
+                contrib[orig_col] = contrib.get(orig_col, 0.0) + float(weighted[i, j])
+            result.append(contrib)
+
+        return result
+    except Exception as e:
+        logger.debug("[models] Fallback feature contribution error: %s", e)
         return None
 
 

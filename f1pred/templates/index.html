@@ -238,6 +238,7 @@
                                             <th scope="col" class="px-0.5 py-2 sm:p-4 text-right"><abbr title="Did Not Finish Probability" class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">DNF</abbr></th>
                                         </tr>
                                     </thead>
+                                    <tbody>
                                         <template x-for="(p, index) in data.predictions" :key="p.driverId">
                                             <tr :class="getTeamClass(p.constructorName)" class="text-sm sm:text-base">
                                                 <!-- Position -->
@@ -251,45 +252,47 @@
                                                         <div class="font-semibold text-gray-200 truncate max-w-[120px] sm:max-w-none" x-text="p.name"></div>
                                                     </div>
                                                     <!-- Influence panel — sits under driver name, spans visually via the driver cell -->
-                                                    <div x-show="p.ensemble_components || (p.shap_values && getSortedShap(p.shap_values).length > 0)"
+                                                    <div x-show="p.ensemble_components || hasShapFactors(p.shap_values)"
                                                          class="mt-1 pb-2">
-                                                        <!-- Model Mix bar -->
-                                                        <template x-if="p.ensemble_components">
-                                                            <div class="mb-1.5">
-                                                                <div class="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Model Mix</div>
-                                                                <div class="flex items-center gap-0.5 h-2 rounded overflow-hidden w-36 sm:w-48" aria-hidden="true">
-                                                                    <div class="h-full bg-cyan-500"   :style="'width:' + (p.ensemble_components.gbm   * 100).toFixed(1) + '%'" :title="'GBM '           + (p.ensemble_components.gbm   * 100).toFixed(0) + '%'"></div>
-                                                                    <div class="h-full bg-yellow-400" :style="'width:' + (p.ensemble_components.elo   * 100).toFixed(1) + '%'" :title="'Elo '           + (p.ensemble_components.elo   * 100).toFixed(0) + '%'"></div>
-                                                                    <div class="h-full bg-purple-500" :style="'width:' + (p.ensemble_components.bt    * 100).toFixed(1) + '%'" :title="'Bradley-Terry ' + (p.ensemble_components.bt    * 100).toFixed(0) + '%'"></div>
-                                                                    <div class="h-full bg-green-400"  :style="'width:' + (p.ensemble_components.mixed * 100).toFixed(1) + '%'" :title="'Mixed-Effects ' + (p.ensemble_components.mixed * 100).toFixed(0) + '%'"></div>
+                                                        <div class="flex flex-col md:flex-row gap-3 md:gap-4 md:items-start">
+                                                            <!-- Model Mix bar -->
+                                                            <template x-if="p.ensemble_components">
+                                                                <div class="md:w-44 md:flex-shrink-0">
+                                                                    <div class="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">Model Mix</div>
+                                                                    <div class="flex items-center gap-0.5 h-2 rounded overflow-hidden w-36 sm:w-44" aria-hidden="true">
+                                                                        <div class="h-full bg-cyan-500"   :style="'width:' + (p.ensemble_components.gbm   * 100).toFixed(1) + '%'" :title="'GBM '           + (p.ensemble_components.gbm   * 100).toFixed(0) + '%'"></div>
+                                                                        <div class="h-full bg-yellow-400" :style="'width:' + (p.ensemble_components.elo   * 100).toFixed(1) + '%'" :title="'Elo '           + (p.ensemble_components.elo   * 100).toFixed(0) + '%'"></div>
+                                                                        <div class="h-full bg-purple-500" :style="'width:' + (p.ensemble_components.bt    * 100).toFixed(1) + '%'" :title="'Bradley-Terry ' + (p.ensemble_components.bt    * 100).toFixed(0) + '%'"></div>
+                                                                        <div class="h-full bg-green-400"  :style="'width:' + (p.ensemble_components.mixed * 100).toFixed(1) + '%'" :title="'Mixed-Effects ' + (p.ensemble_components.mixed * 100).toFixed(0) + '%'"></div>
+                                                                    </div>
+                                                                    <div class="flex gap-2 mt-0.5 flex-wrap">
+                                                                        <span class="text-[9px] text-cyan-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-cyan-500 mr-0.5 align-middle"></span>GBM <span x-text="(p.ensemble_components.gbm * 100).toFixed(0) + '%'"></span></span>
+                                                                        <span class="text-[9px] text-yellow-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 mr-0.5 align-middle"></span>Elo <span x-text="(p.ensemble_components.elo * 100).toFixed(0) + '%'"></span></span>
+                                                                        <span class="text-[9px] text-purple-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-purple-500 mr-0.5 align-middle"></span>BT <span x-text="(p.ensemble_components.bt * 100).toFixed(0) + '%'"></span></span>
+                                                                        <span class="text-[9px] text-green-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-green-400 mr-0.5 align-middle"></span>Mix <span x-text="(p.ensemble_components.mixed * 100).toFixed(0) + '%'"></span></span>
+                                                                    </div>
                                                                 </div>
-                                                                <div class="flex gap-2 mt-0.5 flex-wrap">
-                                                                    <span class="text-[9px] text-cyan-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-cyan-500 mr-0.5 align-middle"></span>GBM <span x-text="(p.ensemble_components.gbm * 100).toFixed(0) + '%'"></span></span>
-                                                                    <span class="text-[9px] text-yellow-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 mr-0.5 align-middle"></span>Elo <span x-text="(p.ensemble_components.elo * 100).toFixed(0) + '%'"></span></span>
-                                                                    <span class="text-[9px] text-purple-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-purple-500 mr-0.5 align-middle"></span>BT <span x-text="(p.ensemble_components.bt * 100).toFixed(0) + '%'"></span></span>
-                                                                    <span class="text-[9px] text-green-400"><span class="inline-block w-1.5 h-1.5 rounded-full bg-green-400 mr-0.5 align-middle"></span>Mix <span x-text="(p.ensemble_components.mixed * 100).toFixed(0) + '%'"></span></span>
-                                                                </div>
-                                                            </div>
-                                                        </template>
-                                                        <!-- SHAP factors -->
-                                                        <template x-if="p.shap_values && getSortedShap(p.shap_values).length > 0">
-                                                            <div>
-                                                                <div class="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">
-                                                                    Factors <span class="normal-case font-normal text-gray-600">(green = helps, red = hurts)</span>
-                                                                </div>
-                                                                <div class="flex flex-wrap gap-x-2 gap-y-0.5">
-                                                                    <template x-for="feat in getSortedShap(p.shap_values)" :key="feat.key">
-                                                                        <div class="flex items-center gap-0.5 text-[9px]">
-                                                                            <span :class="feat.val < 0 ? 'text-green-400' : 'text-red-400'" class="font-bold w-2 text-center" x-text="feat.val < 0 ? '▲' : '▼'"></span>
-                                                                            <div class="w-6 sm:w-10 h-1.5 bg-gray-700 rounded overflow-hidden">
-                                                                                <div class="h-full rounded" :class="feat.val < 0 ? 'bg-green-500' : 'bg-red-500'" :style="'width:' + Math.min(100, feat.absPct).toFixed(0) + '%'"></div>
+                                                            </template>
+                                                            <!-- SHAP factors -->
+                                                            <template x-if="hasShapFactors(p.shap_values)">
+                                                                <div class="min-w-0">
+                                                                    <div class="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">
+                                                                        Factors <span class="normal-case font-normal text-gray-600">(green = helps, red = hurts)</span>
+                                                                    </div>
+                                                                    <div class="flex flex-wrap gap-x-2 gap-y-0.5">
+                                                                        <template x-for="feat in getSortedShap(p.shap_values)" :key="feat.key">
+                                                                            <div class="flex items-center gap-0.5 text-[9px]">
+                                                                                <span :class="feat.val < 0 ? 'text-green-400' : 'text-red-400'" class="font-bold w-2 text-center" x-text="feat.val < 0 ? '▲' : '▼'"></span>
+                                                                                <div class="w-6 sm:w-10 h-1.5 bg-gray-700 rounded overflow-hidden">
+                                                                                    <div class="h-full rounded" :class="feat.val < 0 ? 'bg-green-500' : 'bg-red-500'" :style="'width:' + Math.min(100, feat.absPct).toFixed(0) + '%'"></div>
+                                                                                </div>
+                                                                                <span class="text-gray-400" x-text="feat.label"></span>
                                                                             </div>
-                                                                            <span class="text-gray-400" x-text="feat.label"></span>
-                                                                        </div>
-                                                                    </template>
+                                                                        </template>
+                                                                    </div>
                                                                 </div>
-                                                            </div>
-                                                        </template>
+                                                            </template>
+                                                        </div>
                                                     </div>
                                                 </td>
                                                 <!-- Team -->
@@ -339,6 +342,38 @@
                                         </template>
                                     </tbody>
                                 </table>
+
+                                <div class="mt-3 rounded border border-gray-700 bg-gray-900/40 p-3">
+                                    <div class="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Influence Legend</div>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-gray-300">
+                                        <div>
+                                            <div class="font-semibold text-gray-200 mb-1">Model Mix (ensemble blend)</div>
+                                            <div class="space-y-0.5">
+                                                <div><span class="text-cyan-400 font-semibold">GBM</span> = gradient boosting pace model output.</div>
+                                                <div><span class="text-yellow-400 font-semibold">Elo</span> = driver skill rating signal.</div>
+                                                <div><span class="text-purple-400 font-semibold">BT</span> = Bradley-Terry pairwise strength signal.</div>
+                                                <div><span class="text-green-400 font-semibold">Mix</span> = mixed-effects model signal.</div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div class="font-semibold text-gray-200 mb-1">Factor Impact Direction</div>
+                                            <div><span class="text-green-400 font-semibold">▲ Green</span> = improves predicted finish (helps).</div>
+                                            <div><span class="text-red-400 font-semibold">▼ Red</span> = worsens predicted finish (hurts).</div>
+                                            <div class="mt-1 text-gray-400">Bar length shows relative influence magnitude for that driver.</div>
+                                        </div>
+                                    </div>
+                                    <details class="mt-3 border-t border-gray-700 pt-2">
+                                        <summary class="cursor-pointer text-[10px] font-bold uppercase tracking-widest text-gray-400 hover:text-gray-200">Input Variable Glossary</summary>
+                                        <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1 text-[10px]">
+                                            <template x-for="entry in getFeatureLegendEntries()" :key="entry.key">
+                                                <div class="flex justify-between gap-2 text-gray-300 border-b border-gray-800/60 pb-0.5">
+                                                    <span class="truncate" x-text="entry.label"></span>
+                                                    <span class="text-gray-500 font-mono" x-text="entry.key"></span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </details>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -626,22 +661,59 @@
                     constructorId:                'Constructor',
                 },
 
+                _normalizeShap(shapValues) {
+                    if (!shapValues) return {};
+
+                    if (typeof shapValues === 'string') {
+                        try {
+                            const parsed = JSON.parse(shapValues);
+                            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+                        } catch (_) {
+                            return {};
+                        }
+                    }
+
+                    if (Array.isArray(shapValues)) {
+                        const firstObj = shapValues.find(v => v && typeof v === 'object' && !Array.isArray(v));
+                        return firstObj || {};
+                    }
+
+                    if (typeof shapValues === 'object') {
+                        return shapValues;
+                    }
+
+                    return {};
+                },
+
+                hasShapFactors(shapValues) {
+                    const normalized = this._normalizeShap(shapValues);
+                    return Object.keys(normalized).length > 0;
+                },
+
+                getFeatureLegendEntries() {
+                    return Object.entries(this._featureLabels)
+                        .map(([key, label]) => ({ key, label }))
+                        .sort((a, b) => a.label.localeCompare(b.label));
+                },
+
                 // Returns sorted SHAP feature array for a driver, with labels and
                 // percentage-of-max magnitude (for bar width scaling).
                 getSortedShap(shapValues) {
-                    if (!shapValues || typeof shapValues !== 'object') return [];
-                    const entries = Object.entries(shapValues)
-                        .map(([key, val]) => ({
-                            key,
-                            val,
-                            absVal: Math.abs(val),
-                            label: this._featureLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-                        }))
-                        .filter(e => e.absVal > 1e-6)
-                        .sort((a, b) => b.absVal - a.absVal);
+                    const normalized = this._normalizeShap(shapValues);
+                    const entries = Object.entries(normalized)
+                        .map(([key, val]) => {
+                            const numVal = Number(val);
+                            return {
+                                key,
+                                val: Number.isFinite(numVal) ? numVal : 0,
+                                absVal: Math.abs(Number.isFinite(numVal) ? numVal : 0),
+                                label: this._featureLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+                            };
+                        })
+                        .sort((a, b) => b.absVal - a.absVal)
+                        .slice(0, 5);
 
-                    // Scale bar widths: largest feature = 100%
-                    const maxAbs = entries.length > 0 ? entries[0].absVal : 1;
+                    const maxAbs = (entries.length > 0 && entries[0].absVal > 0) ? entries[0].absVal : 1;
                     return entries.map(e => ({ ...e, absPct: (e.absVal / maxAbs) * 100 }));
                 }
             }
