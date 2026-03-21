@@ -328,7 +328,7 @@ class TestPrintInfluenceRow:
 
         row = pd.Series({
             "ensemble_components": None,
-            "shap_values": {"form_index": 0.9},
+            "shap_values": {"temp_skill": 0.9},
         })
         _print_influence_row(row, max_name=18, max_team=12, has_grid=False)
         out = capsys.readouterr().out
@@ -340,7 +340,7 @@ class TestPrintInfluenceRow:
 
         row = pd.Series({
             "ensemble_components": None,
-            "shap_values": {"form_index": -0.9},
+            "shap_values": {"temp_skill": -0.9},
         })
         _print_influence_row(row, max_name=18, max_team=12, has_grid=False)
         out = capsys.readouterr().out

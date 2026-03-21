@@ -367,18 +367,31 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
 
     # Fit model on training data
     Xmat_train = X_train[features].copy()
-    if Xmat_train.shape[1] == 0:
-        Xmat_train = pd.DataFrame({"const": np.ones(len(X_train), dtype=float)})
-        pipe = Pipeline(steps=[("pre", "passthrough"), ("model", model)])
     
-    pipe.fit(Xmat_train, y)
+    # Handle edge cases: 0 rows (no history) or 0 columns (no features found)
+    if len(Xmat_train) == 0:
+        yhat = np.zeros(len(X), dtype=float)
+        # Dummy pipeline for shap compute
+        from sklearn.dummy import DummyRegressor
+        pipe = Pipeline(steps=[("pre", "passthrough"), ("model", DummyRegressor(strategy="constant", constant=0.0))])
+        Xmat_train = pd.DataFrame({"const": np.zeros(1, dtype=float)})
+        pipe.fit(Xmat_train, [0.0])
+        features = ["const"]
+    else:
+        if Xmat_train.shape[1] == 0:
+            Xmat_train = pd.DataFrame({"const": np.ones(len(X_train), dtype=float)})
+            pipe = Pipeline(steps=[("pre", "passthrough"), ("model", model)])
+            features = ["const"]
 
-    # Predict on the current event (inference target), not the training data
-    # Align inference columns to training features for consistency
-    X_infer = X[features].copy() if set(features).issubset(X.columns) else X.reindex(columns=features)
-    if Xmat_train.shape[1] == 0 or (Xmat_train.columns.tolist() == ["const"]):
-        X_infer = pd.DataFrame({"const": np.ones(len(X), dtype=float)})
-    yhat = pipe.predict(X_infer)
+        pipe.fit(Xmat_train, y)
+
+        # Predict on the current event (inference target), not the training data
+        # Align inference columns to training features for consistency
+        X_infer = X[features].copy() if set(features).issubset(X.columns) else X.reindex(columns=features)
+        if features == ["const"]:
+            X_infer = pd.DataFrame({"const": np.ones(len(X), dtype=float)})
+
+        yhat = pipe.predict(X_infer)
 
     # Build baseline from form indices (for robustness)
     # Use appropriate form index as the baseline for this session type
