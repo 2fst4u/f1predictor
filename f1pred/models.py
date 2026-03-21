@@ -56,17 +56,31 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
 
     races["points"] = races["points"].fillna(0.0)
 
+    # Ensure circuitId exists (might be missing in mocked historical data)
+    if "circuitId" not in races.columns:
+        races = races.assign(circuitId=None)
+
     # Identify the most recent events (by unique (season, round) pairs)
-    event_keys = races[["season", "round", "date"]].drop_duplicates().sort_values("date")
+    event_keys = races[["season", "round", "date", "circuitId"]].drop_duplicates().sort_values("date")
     event_keys = event_keys.tail(max_events)
 
     rows = []
 
     # ⚡ Bolt: Pre-extract numpy arrays to avoid pandas overhead in the loop
-    # Optimization: Factorize driver IDs once to use np.bincount for aggregations
+    # Factorize driver and team IDs once to use np.bincount for aggregations
     driver_ids = races["driverId"].values
     d_codes, uniques = pd.factorize(driver_ids)
     n_drivers = len(uniques)
+
+    # Safely extract constructorId (might not exist in mocked training data)
+    if "constructorId" in races.columns:
+        races_cons = races["constructorId"].values
+    else:
+        races_cons = np.array([None] * len(races))
+
+    team_ids = races_cons
+    t_codes, t_uniques = pd.factorize(team_ids)
+    n_teams = len(t_uniques)
 
     # Pre-calculate base values (position and points)
     races_pos = races["position"].values.astype(float)
@@ -78,6 +92,7 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     races_seasons = races["season"].values
     races_rounds = races["round"].values
     races_sessions = races["session"].values
+    races_circuits = races["circuitId"].values
 
     # Extract qualifying data for qualifying_form_index calculation
     # Ensure qpos column exists for dropna subset check
@@ -85,17 +100,18 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         hist = hist.assign(qpos=np.nan)
 
     qual = hist[hist["session"].isin(["qualifying", "sprint_qualifying"])].dropna(subset=["driverId", "qpos", "date"]).copy()
+    if not qual.empty and "constructorId" in qual.columns:
+        qual["team_avg"] = qual.groupby(["season", "round", "constructorId"])["qpos"].transform("mean")
+        qual["q_delta"] = qual["team_avg"] - qual["qpos"]
+    else:
+        qual["q_delta"] = 0.0
+
     qual_driver_ids = qual["driverId"].values
     q_dcodes = pd.Series(range(n_drivers), index=uniques).reindex(qual_driver_ids).fillna(-1).astype(int).values
     qual_pos = qual["qpos"].values.astype(float)
+    qual_delta = qual["q_delta"].values.astype(float)
     qual_dates = pd.to_datetime(qual["date"], utc=True).values
     qual_seasons = qual["season"].values
-
-    # Safely extract constructorId (might not exist in mocked training data)
-    if "constructorId" in races.columns:
-        races_cons = races["constructorId"].values
-    else:
-        races_cons = np.array([None] * len(races))
 
     # Handle NaN grids gracefully in numpy arrays
     races_grid = races["grid"].values
@@ -153,13 +169,46 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         form_index = np.zeros(n_drivers, dtype=float)
         form_index[valid] = wval_sum[valid] / np.maximum(w_sum[valid], 1e-6)
 
-        # --- Calculate qualifying_form_index for these samples ---
+        # --- Calculate team_form_index ---
+        p_pts = races_pts[prior_mask]
+        p_t_codes = t_codes[prior_mask]
+        t_valid_mask = p_t_codes >= 0
+        tw_sum = np.bincount(p_t_codes[t_valid_mask], weights=w[t_valid_mask], minlength=n_teams)
+        twval_sum = np.bincount(p_t_codes[t_valid_mask], weights=(p_pts[t_valid_mask] * w[t_valid_mask]), minlength=n_teams)
+        t_valid = tw_sum > 0
+        team_form_index = np.zeros(n_teams, dtype=float)
+        team_form_index[t_valid] = twval_sum[t_valid] / np.maximum(tw_sum[t_valid], 1e-6)
+
+        # --- Calculate grid_finish_delta (racecraft) ---
+        # gain = grid - position
+        p_gains = races_grid_float[prior_mask] - races_pos[prior_mask]
+        valid_gain = ~np.isnan(p_gains)
+        gf_index = np.zeros(n_drivers, dtype=float)
+        if np.any(valid_gain):
+            gw_sum = np.bincount(p_dcodes[valid_gain], weights=w[valid_gain], minlength=n_drivers)
+            gwval_sum = np.bincount(p_dcodes[valid_gain], weights=(p_gains[valid_gain] * w[valid_gain]), minlength=n_drivers)
+            g_valid = gw_sum > 0
+            gf_index[g_valid] = gwval_sum[g_valid] / np.maximum(gw_sum[g_valid], 1e-6)
+
+        # --- Calculate circuit proficiency ---
+        cid = getattr(evt_row, "circuitId")
+        c_mask = prior_mask & (races_circuits == cid)
+        c_avg_pos = np.full(n_drivers, 15.0, dtype=float)
+        if np.any(c_mask):
+            cw_sum = np.bincount(p_dcodes[c_mask[prior_mask]], minlength=n_drivers)
+            cwval_sum = np.bincount(p_dcodes[c_mask[prior_mask]], weights=races_pos[c_mask], minlength=n_drivers)
+            c_valid = cw_sum > 0
+            c_avg_pos[c_valid] = cwval_sum[c_valid] / np.maximum(cw_sum[c_valid], 1e-6)
+
+        # --- Calculate qualifying_form_index & teammate_delta ---
         q_form_index = np.zeros(n_drivers, dtype=float)
+        tm_delta_index = np.zeros(n_drivers, dtype=float)
         prior_q_mask = qual_dates < d_val
         if np.any(prior_q_mask):
             pq_dates = qual_dates[prior_q_mask]
             pq_season = qual_seasons[prior_q_mask]
             pq_pos = qual_pos[prior_q_mask]
+            pq_qdelta = qual_delta[prior_q_mask]
             pq_dcodes_sub = q_dcodes[prior_q_mask]
 
             # Remove any drivers not in our main unique set
@@ -167,6 +216,7 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
             pq_dates = pq_dates[valid_pq]
             pq_season = pq_season[valid_pq]
             pq_pos = pq_pos[valid_pq]
+            pq_qdelta = pq_qdelta[valid_pq]
             pq_dcodes_sub = pq_dcodes_sub[valid_pq]
 
             if len(pq_pos) > 0:
@@ -179,11 +229,14 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                 wq[boost_q_mask] *= qual_boost_factor
 
                 wqval = -pq_pos * wq
+                wqval_delta = pq_qdelta * wq
                 wq_sum = np.bincount(pq_dcodes_sub, weights=wq, minlength=n_drivers)
                 wqval_sum = np.bincount(pq_dcodes_sub, weights=wqval, minlength=n_drivers)
+                wqdelta_sum = np.bincount(pq_dcodes_sub, weights=wqval_delta, minlength=n_drivers)
 
                 valid_q = wq_sum > 0
-                q_form_index[valid_q] = wqval_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
+                q_form_index[valid_q] = wval_sum_val = wqval_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
+                tm_delta_index[valid_q] = wqdelta_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
 
         # Build samples for the current event
         evt_indices = np.where(evt_mask)[0]
@@ -193,11 +246,16 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
             if not valid[code]:
                 continue
 
+            t_code = t_codes[idx]
             sample = {
                 "driverId": uniques[code],
-                "constructorId": races_cons[idx],
+                "constructorId": t_uniques[t_code] if t_code >= 0 else None,
                 "form_index": float(form_index[code]),
                 "qualifying_form_index": float(q_form_index[code]),
+                "team_form_index": float(team_form_index[t_code]) if t_code >= 0 else 0.0,
+                "grid_finish_delta": float(gf_index[code]),
+                "teammate_delta": float(tm_delta_index[code]),
+                "circuit_avg_pos": float(c_avg_pos[code]),
                 "grid": float(races_grid_float[idx]),
                 "is_race": 1 if races_sessions[idx] == "race" else 0,
                 "is_qualifying": 0,
