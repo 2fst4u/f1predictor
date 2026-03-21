@@ -690,7 +690,9 @@
 
                 hasShapFactors(shapValues) {
                     const normalized = this._normalizeShap(shapValues);
-                    return Object.keys(normalized).length > 0;
+                    const hiddenFeats = ["form_index", "qualifying_form_index", "grid", "is_race", "is_qualifying", "is_sprint"];
+                    const visibleKeys = Object.keys(normalized).filter(k => !hiddenFeats.includes(k));
+                    return visibleKeys.length > 0;
                 },
 
                 getFeatureLegendEntries() {
@@ -703,7 +705,9 @@
                 // percentage-of-max magnitude (for bar width scaling).
                 getSortedShap(shapValues) {
                     const normalized = this._normalizeShap(shapValues);
+                    const hiddenFeats = ["form_index", "qualifying_form_index", "grid", "is_race", "is_qualifying", "is_sprint"];
                     const entries = Object.entries(normalized)
+                        .filter(([key, _]) => !hiddenFeats.includes(key))
                         .map(([key, val]) => {
                             const numVal = Number(val);
                             return {
@@ -713,6 +717,8 @@
                                 label: this._featureLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
                             };
                         })
+                        // Filter out features with exactly 0.0 influence to avoid confusing empty bars
+                        .filter(e => e.absVal > 0)
                         .sort((a, b) => b.absVal - a.absVal)
                         .slice(0, 5);
 

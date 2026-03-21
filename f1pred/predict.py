@@ -881,7 +881,7 @@ def run_predictions_for_event(
                         "model_version": cfg.app.model_version,
                         "weights": calibrated_weights,
                         "modelling_cfg": cfg.modelling,
-                        "_cache_breaker": "v7_exclude_form_index_grid",
+                        "_cache_breaker": "v9_hide_obvious_shap",
                     })):
                         spinner.update(f"Predicting {event_title} - {sess}: Using cached result...")
                         ranked = cached_hit["ranked"]
@@ -1354,8 +1354,13 @@ def _print_influence_row(
     # 2. Top SHAP features
     shap = r.get("shap_values")
     if shap and isinstance(shap, dict):
+        # Filter out dominant/obvious variables so the UI highlights
+        # granular, interesting factors (like weather or track mastery).
+        hidden_feats = {"form_index", "qualifying_form_index", "grid", "is_race", "is_qualifying", "is_sprint"}
+        filtered_shap = {k: v for k, v in shap.items() if k not in hidden_feats}
+
         # Sort by absolute magnitude, descending
-        sorted_feats = sorted(shap.items(), key=lambda kv: abs(kv[1]), reverse=True)
+        sorted_feats = sorted(filtered_shap.items(), key=lambda kv: abs(kv[1]), reverse=True)
         top_feats = sorted_feats[:max_shap_features]
         if top_feats:
             shap_tokens: List[str] = []

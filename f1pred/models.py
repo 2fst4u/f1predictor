@@ -282,17 +282,10 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
         y = -X_train[target_col].astype(float).values
 
     # Features (exclude identifiers, session meta, and target to prevent leakage)
-    # Exclude target_col to prevent target leakage.
-    # Exclude both form indices so the model is forced to learn from underlying features
-    # (e.g., weather, circuit, team) rather than taking a shortcut using the highly
-    # correlated opposite session's form index.
-    # Exclude `grid` and session flags to prevent the model from double-counting the
-    # grid position (handled explicitly later) and using session types as statistical
-    # crutches, forcing it to learn pure pace and skill.
+    # Note: we only exclude the current target column so the other index can be used as a feature
     exclude_cols = [
         "driverId", "name", "code", "constructorId", "constructorName", "number",
-        "session_type", target_col, "form_index", "qualifying_form_index", "current_quali_pos",
-        "grid", "is_race", "is_qualifying", "is_sprint"
+        "session_type", target_col, "current_quali_pos"
     ]
     
     # Also exclude columns that are entirely NaN in the training set
