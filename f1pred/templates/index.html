@@ -754,8 +754,7 @@
                                 label: this._featureLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
                             };
                         })
-                        // Filter out features with near-zero influence to avoid confusing empty bars
-                        .filter(e => e.absVal > 1e-9)
+                        // Show all factors to fill horizontal space, regardless of magnitude
                         .sort((a, b) => b.absVal - a.absVal)
                         .slice(0, limit);
 
