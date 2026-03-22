@@ -1,5 +1,44 @@
 {
-  "ensemble": {},
-  "blending": {},
-  "_note": "Cleared to force fresh calibration. All parameters will be learned from data on next run."
+  "ensemble": {
+    "w_gbm": 0.4,
+    "w_elo": 0.2,
+    "w_bt": 0.2,
+    "w_mixed": 0.2,
+    "w_gbm_quali": 0.7000000000000001,
+    "w_elo_quali": 0.10000000000000002,
+    "w_bt_quali": 0.10000000000000002,
+    "w_mixed_quali": 0.10000000000000002
+  },
+  "blending": {
+    "gbm_weight": 0.75,
+    "baseline_weight": 0.25,
+    "baseline_team_factor": 0.3,
+    "baseline_driver_team_factor": 0.2,
+    "grid_factor": 0.8,
+    "current_season_weight": 8.0,
+    "current_season_qualifying_weight": 8.0,
+    "current_quali_factor": 0.5,
+    "analytical_win_weight": 0.5
+  },
+  "dnf": {
+    "alpha": 2.0,
+    "beta": 8.0,
+    "driver_weight": 0.6,
+    "team_weight": 0.4
+  },
+  "simulation": {
+    "noise_factor": 0.15,
+    "min_noise": 0.05
+  },
+  "recency": {
+    "half_life_base": 120.0,
+    "half_life_team": 240.0
+  },
+  "elo": {
+    "k": 20.0
+  },
+  "objective_score": -0.6313079365540561,
+  "last_race_id": "2026_2",
+  "calibration_version": "efe1f5c11374",
+  "calibration_timestamp": "2026-03-22T06:22:30.178248+00:00"
 }

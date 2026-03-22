@@ -442,7 +442,7 @@
                 },
 
                 async init() {
-                    // Ensure windowWidth is correct on start
+                    // Ensure windowWidth is correct on start and reactive to resize
                     this.windowWidth = window.innerWidth;
                     window.addEventListener('resize', () => {
                         this.windowWidth = window.innerWidth;
@@ -754,8 +754,8 @@
                                 label: this._featureLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
                             };
                         })
-                        // Filter out features with exactly 0.0 influence to avoid confusing empty bars
-                        .filter(e => e.absVal > 0)
+                        // Filter out features with near-zero influence to avoid confusing empty bars
+                        .filter(e => e.absVal > 1e-9)
                         .sort((a, b) => b.absVal - a.absVal)
                         .slice(0, limit);
 
