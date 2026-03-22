@@ -65,6 +65,37 @@ When predicting a race before qualifying has occurred:
 
 This allows accurate race predictions even before the grid is known, and accounts for grid penalties and unexpected qualifying results when actual data is available.
 
+## Input Variables
+
+The model uses a variety of engineered features to capture driver talent, car performance, and track conditions. These factors are categorized as follows:
+
+### Performance & Form
+- **Race Form (`form_index`)**: A recency-weighted score of a driver's finishing positions and points. Higher values indicate better current form.
+- **Qualifying Form (`qualifying_form_index`)**: A recency-weighted index of a driver's qualifying performance.
+- **Team Strength (`team_form_index`)**: The recent performance level of the constructor, representing the car's competitive ceiling.
+- **Driver-Team Fit (`driver_team_form_index`)**: Measures how well a driver performs with their current team, accounting for "Team Tenure" (familiarity with the car).
+- **Team Tenure (`team_tenure_events`)**: The number of races the driver has completed with their current constructor.
+
+### Comparative Metrics
+- **vs Teammate (`teammate_delta`)**: The average qualifying advantage over their teammate. A positive value means they consistently out-qualify their peer.
+- **Overtaking Skill (`grid_finish_delta`)**: The average number of positions a driver gains (or loses) between their starting grid and final finish, measuring racecraft.
+
+### Track-Specific Factors
+- **Circuit History (`circuit_avg_pos`)**: The driver's historical average finishing position at this specific track.
+- **Circuit Experience (`circuit_experience`)**: Total number of starts the driver has at this circuit.
+- **Circuit DNF Rate (`circuit_dnf_rate`)**: The driver's personal retirement rate at this track.
+- **Pass Difficulty (`circuit_overtake_difficulty`)**: A track-wide metric calculating how easy or hard it is to gain positions based on historical data.
+- **Track DNF Rate (`global_circuit_dnf_rate`)**: The overall historical retirement rate for all drivers at this circuit.
+
+### Session & Grid
+- **Grid Position (`grid`)**: The starting position for the race. This acts as a mathematical "anchor" for race predictions.
+- **Quali Position (`current_quali_pos`)**: The actual qualifying result achieved during the current race weekend.
+
+### Weather & Conditions
+- **Weather Impact (`weather_effect`)**: The total predicted influence of atmospheric conditions on a driver's performance.
+- **Condition Skills (`temp_skill`, `rain_skill`, `wind_skill`, `pressure_skill`)**: Driver-specific proficiency scores for various weather conditions, derived from historical performance correlations.
+- **Atmospheric Data (`weather_temp_mean`, `weather_rain_sum`, etc.)**: Raw metrics (temperature, rain, wind, pressure, humidity) for the session window.
+
 ## Configuration
 
 All settings live in `config.yaml`. The main things you might want to tweak:
