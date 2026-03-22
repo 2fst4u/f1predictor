@@ -725,15 +725,16 @@
 
                 getFactorLimit() {
                     const w = this.windowWidth || window.innerWidth;
-                    // Extremely aggressive scaling to fill horizontal space.
-                    // Each factor component is roughly 70px wide.
-                    // Desktop: Subtract ~320px for the Model Mix sidebar.
+                    // Aggressively scale to fill horizontal space.
+                    // Each factor component is roughly 65px wide.
+                    // Desktop: Subtract ~200px for the Model Mix sidebar.
                     // Mobile: Use full width minus small padding.
-                    const available = w >= 1024 ? (w - 320) : (w - 40);
-                    const count = Math.floor(available / 70);
-                    // Show at least 6 (to avoid the "only 4" issue on mobile/small views)
-                    // and up to 25 on very wide screens.
-                    return Math.max(6, Math.min(25, count));
+                    const available = w >= 1024 ? (w - 200) : (w - 40);
+                    const count = Math.floor(available / 65);
+                    // Show at least 8 factors on desktop (lg), 6 elsewhere
+                    // and up to 30 on very wide screens.
+                    const min = w >= 1024 ? 8 : 6;
+                    return Math.max(min, Math.min(30, count));
                 },
 
                 // Returns sorted SHAP feature array for a driver, with labels and
