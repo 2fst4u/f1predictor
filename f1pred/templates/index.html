@@ -442,6 +442,8 @@
                 },
 
                 async init() {
+                    // Ensure windowWidth is correct on start
+                    this.windowWidth = window.innerWidth;
                     window.addEventListener('resize', () => {
                         this.windowWidth = window.innerWidth;
                     });
@@ -722,9 +724,12 @@
                 },
 
                 getFactorLimit() {
-                    if (this.windowWidth < 768) return 5;
-                    // Dynamically grow: 5 base + 1 more for every ~100px past mobile breakpoint
-                    return Math.min(15, 5 + Math.floor((this.windowWidth - 768) / 100));
+                    // Estimate available width: full width on mobile, width minus sidebar/mix on desktop
+                    const available = this.windowWidth < 768 ? (this.windowWidth - 40) : (this.windowWidth - 350);
+                    // Each factor component is roughly 75px wide (icon + bar + text)
+                    const count = Math.floor(available / 75);
+                    // Show at least 5, up to 15
+                    return Math.max(5, Math.min(15, count));
                 },
 
                 // Returns sorted SHAP feature array for a driver, with labels and
