@@ -421,9 +421,13 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     
     # Also exclude columns that are entirely NaN in the training set
     all_nan_cols = [c for c in X_train.columns if c not in exclude_cols and X_train[c].isna().all()]
-    exclude_cols.extend(all_nan_cols)
+    # Keep columns that are in X (inference) even if they are all-NaN in history,
+    # so they can show up in SHAP (with 0 influence if needed).
+    cols_to_exclude = [c for c in all_nan_cols if c not in X.columns]
+    exclude_cols.extend(cols_to_exclude)
     
     features, num_cols, cat_cols = _split_feature_columns(X_train, exclude=exclude_cols)
+    logger.debug("[models] Final feature set (%d): %s", len(features), features)
 
     # Build preprocessing pipeline
     num_pipe = Pipeline(steps=[

@@ -881,7 +881,7 @@ def run_predictions_for_event(
                         "model_version": cfg.app.model_version,
                         "weights": calibrated_weights,
                         "modelling_cfg": cfg.modelling,
-                        "_cache_breaker": "v9_hide_obvious_shap",
+                        "_cache_breaker": "v10_aggressive_shap",
                     })):
                         spinner.update(f"Predicting {event_title} - {sess}: Using cached result...")
                         ranked = cached_hit["ranked"]
