@@ -725,16 +725,14 @@
 
                 getFactorLimit() {
                     const w = this.windowWidth || window.innerWidth;
-                    // Aggressively scale to fill horizontal space.
-                    // Each factor component is roughly 65px wide.
-                    // Desktop: Subtract ~200px for the Model Mix sidebar.
-                    // Mobile: Use full width minus small padding.
-                    const available = w >= 1024 ? (w - 200) : (w - 40);
-                    const count = Math.floor(available / 65);
-                    // Show at least 8 factors on desktop (lg), 6 elsewhere
-                    // and up to 30 on very wide screens.
-                    const min = w >= 1024 ? 8 : 6;
-                    return Math.max(min, Math.min(30, count));
+                    // Dynamically scale factor graphs to fill available horizontal space.
+                    // Each factor component is roughly 95px wide for good legibility.
+                    // Desktop: Subtract ~280px for the Model Mix sidebar.
+                    // Mobile: Use full width minus padding.
+                    const available = w >= 1024 ? (w - 280) : (w - 40);
+                    const count = Math.floor(available / 95);
+                    // Balanced limits: at least 5 factors, at most 15.
+                    return Math.max(5, Math.min(15, count));
                 },
 
                 // Returns sorted SHAP feature array for a driver, with labels and
@@ -754,7 +752,8 @@
                                 label: this._featureLabels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
                             };
                         })
-                        // Show all factors to fill horizontal space, regardless of magnitude
+                        // Filter out features with near-zero influence to keep data meaningful
+                        .filter(e => e.absVal > 1e-5)
                         .sort((a, b) => b.absVal - a.absVal)
                         .slice(0, limit);
 
