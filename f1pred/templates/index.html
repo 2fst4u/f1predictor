@@ -327,7 +327,7 @@
                                                                 <div class="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-0.5">
                                                                     Factors <span class="normal-case font-normal text-gray-600">(green = helps, red = hurts)</span>
                                                                 </div>
-                                                                <div class="flex flex-nowrap md:flex-wrap gap-x-1.5 sm:gap-x-2 gap-y-0.5 overflow-x-auto md:overflow-visible no-scrollbar">
+                                                                <div class="flex flex-nowrap gap-x-1.5 sm:gap-x-2 gap-y-0.5 overflow-x-auto md:overflow-hidden no-scrollbar">
                                                                     <template x-for="feat in getSortedShap(p.shap_values)" :key="feat.key">
                                                                         <div class="flex items-center flex-shrink-0 gap-0.5 text-[8px] sm:text-[9px]">
                                                                             <span class="sr-only" x-text="feat.val < 0 ? 'Improves position:' : 'Worsens position:'"></span>
@@ -430,6 +430,7 @@
                 error: null,
                 logs: [],
                 currentLog: 'Initializing',
+                windowWidth: window.innerWidth,
 
                 async refreshData() {
                     this.params.season = '';
@@ -441,6 +442,10 @@
                 },
 
                 async init() {
+                    window.addEventListener('resize', () => {
+                        this.windowWidth = window.innerWidth;
+                    });
+
                     try {
                         // Load Config
                         const configResp = await fetch('/api/config');
@@ -716,6 +721,12 @@
                         .sort((a, b) => a.label.localeCompare(b.label));
                 },
 
+                getFactorLimit() {
+                    if (this.windowWidth < 768) return 5;
+                    // Dynamically grow: 5 base + 1 more for every ~100px past mobile breakpoint
+                    return Math.min(15, 5 + Math.floor((this.windowWidth - 768) / 100));
+                },
+
                 // Returns sorted SHAP feature array for a driver, with labels and
                 // percentage-of-max magnitude (for bar width scaling).
                 getSortedShap(shapValues) {
@@ -735,7 +746,7 @@
                         // Filter out features with exactly 0.0 influence to avoid confusing empty bars
                         .filter(e => e.absVal > 0)
                         .sort((a, b) => b.absVal - a.absVal)
-                        .slice(0, 5);
+                        .slice(0, this.getFactorLimit());
 
                     const maxAbs = (entries.length > 0 && entries[0].absVal > 0) ? entries[0].absVal : 1;
                     return entries.map(e => ({ ...e, absPct: (e.absVal / maxAbs) * 100 }));
