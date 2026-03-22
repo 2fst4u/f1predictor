@@ -724,18 +724,23 @@
                 },
 
                 getFactorLimit() {
-                    // Estimate available width: full width on mobile, width minus sidebar/mix on desktop
-                    const available = this.windowWidth < 768 ? (this.windowWidth - 40) : (this.windowWidth - 350);
-                    // Each factor component is roughly 75px wide (icon + bar + text)
-                    const count = Math.floor(available / 75);
-                    // Show at least 5, up to 15
-                    return Math.max(5, Math.min(15, count));
+                    const w = this.windowWidth || window.innerWidth;
+                    // Extremely aggressive scaling to fill horizontal space.
+                    // Each factor component is roughly 70px wide.
+                    // Desktop: Subtract ~320px for the Model Mix sidebar.
+                    // Mobile: Use full width minus small padding.
+                    const available = w >= 1024 ? (w - 320) : (w - 40);
+                    const count = Math.floor(available / 70);
+                    // Show at least 6 (to avoid the "only 4" issue on mobile/small views)
+                    // and up to 25 on very wide screens.
+                    return Math.max(6, Math.min(25, count));
                 },
 
                 // Returns sorted SHAP feature array for a driver, with labels and
                 // percentage-of-max magnitude (for bar width scaling).
                 getSortedShap(shapValues) {
                     const normalized = this._normalizeShap(shapValues);
+                    const limit = this.getFactorLimit();
                     const hiddenFeats = ["form_index", "qualifying_form_index", "grid", "is_race", "is_qualifying", "is_sprint"];
                     const entries = Object.entries(normalized)
                         .filter(([key, _]) => !hiddenFeats.includes(key))
@@ -751,7 +756,7 @@
                         // Filter out features with exactly 0.0 influence to avoid confusing empty bars
                         .filter(e => e.absVal > 0)
                         .sort((a, b) => b.absVal - a.absVal)
-                        .slice(0, this.getFactorLimit());
+                        .slice(0, limit);
 
                     const maxAbs = (entries.length > 0 && entries[0].absVal > 0) ? entries[0].absVal : 1;
                     return entries.map(e => ({ ...e, absPct: (e.absVal / maxAbs) * 100 }));
