@@ -50,45 +50,86 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         return None
 
     # Include both race and sprint for general pace training
-    races = hist[hist["session"].isin(["race", "sprint"])].dropna(subset=["driverId", "position", "date"]).copy()
-    if len(races) < 40:  # not enough data to meaningfully train
+    # For features like DNF rate, we need the full history including non-finishes
+    races_full = hist[hist["session"].isin(["race", "sprint"])].dropna(subset=["driverId", "date"]).copy()
+    if len(races_full) < 40:  # not enough data to meaningfully train
+        return None
+
+    # For the target variable (pace), we only use finishes
+    races = races_full.dropna(subset=["position"]).copy()
+    if len(races) < 20:
         return None
 
     races["points"] = races["points"].fillna(0.0)
+    races_full["points"] = races_full["points"].fillna(0.0)
 
     # Ensure circuitId exists (might be missing in mocked historical data)
+    if "circuitId" not in races_full.columns:
+        races_full = races_full.assign(circuitId=None)
     if "circuitId" not in races.columns:
         races = races.assign(circuitId=None)
 
     # Identify the most recent events (by unique (season, round) pairs)
-    event_keys = races[["season", "round", "date", "circuitId"]].drop_duplicates().sort_values("date")
+    event_keys = races_full[["season", "round", "date", "circuitId"]].drop_duplicates().sort_values("date")
     event_keys = event_keys.tail(max_events)
 
     rows = []
 
     # ⚡ Bolt: Pre-extract numpy arrays to avoid pandas overhead in the loop
     # Factorize driver and team IDs once to use np.bincount for aggregations
-    driver_ids = races["driverId"].values
-    d_codes, uniques = pd.factorize(driver_ids)
+    driver_ids_full = races_full["driverId"].values
+    d_codes_full, uniques = pd.factorize(driver_ids_full)
     n_drivers = len(uniques)
 
-    # Safely extract constructorId (might not exist in mocked training data)
-    if "constructorId" in races.columns:
-        races_cons = races["constructorId"].values
-    else:
-        races_cons = np.array([None] * len(races))
+    # Map races finishes back to these codes
+    d_codes = pd.Series(range(n_drivers), index=uniques).reindex(races["driverId"]).values
 
-    team_ids = races_cons
-    t_codes, t_uniques = pd.factorize(team_ids)
+    # Safely extract constructorId
+    if "constructorId" in races_full.columns:
+        races_cons_full = races_full["constructorId"].values
+    else:
+        races_cons_full = np.array([None] * len(races_full))
+
+    team_ids_full = races_cons_full
+    t_codes_full, t_uniques = pd.factorize(team_ids_full)
     n_teams = len(t_uniques)
 
-    # Pre-calculate base values (position and points)
+    # Map races finishes back to team codes
+    # Ensure constructorId exists in races
+    if "constructorId" not in races.columns:
+        races = races.assign(constructorId=None)
+    t_codes = pd.Series(range(n_teams), index=t_uniques).reindex(races["constructorId"]).fillna(-1).astype(int).values
+
+    # Pre-calculate base values (position and points) for races (finishes)
     races_pos = races["position"].values.astype(float)
     races_pts = races["points"].values.astype(float)
     races_val_base = -races_pos + races_pts
 
+    # Pre-calculate DNF status from races_full
+    if "is_dnf" in races_full.columns:
+        r_full_dnf = races_full["is_dnf"].astype(float).values
+    else:
+        rf_pos = races_full["position"].values
+        rf_status = races_full["status"].astype(str).str.lower().values if "status" in races_full.columns else np.array(["finished"] * len(races_full))
+        # Use a vectorized check for DNF status matching features.py
+        is_dnf_status = pd.Series(rf_status).str.contains(
+            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
+        ).values
+        r_full_dnf = ((pd.isna(rf_pos.astype(float))) | is_dnf_status).astype(float)
+
+    # Pre-calculate driver-team pairs for driver_team_form_index
+    # Ensure constructorId exists (it might be missing in some test datasets)
+    if "constructorId" not in races.columns:
+        races = races.assign(constructorId=None)
+
+    dt_keys = (races["driverId"].astype(str) + "_" + races["constructorId"].astype(str)).values
+    dt_codes, dt_uniques = pd.factorize(dt_keys)
+    n_dt = len(dt_uniques)
+
     # Extract keys and other required data
     races_dates = pd.to_datetime(races["date"], utc=True).values
+    races_full_dates = pd.to_datetime(races_full["date"], utc=True).values
+    races_full_circuits = races_full["circuitId"].values
     races_seasons = races["season"].values
     races_rounds = races["round"].values
     races_sessions = races["session"].values
@@ -190,15 +231,42 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
             g_valid = gw_sum > 0
             gf_index[g_valid] = gwval_sum[g_valid] / np.maximum(gw_sum[g_valid], 1e-6)
 
-        # --- Calculate circuit proficiency ---
+        # --- Calculate driver_team_form_index & tenure ---
+        dtw_sum = np.bincount(dt_codes[prior_mask], weights=w, minlength=n_dt)
+        dtwval_sum = np.bincount(dt_codes[prior_mask], weights=wval, minlength=n_dt)
+        dt_counts = np.bincount(dt_codes[prior_mask], minlength=n_dt)
+        dt_valid = dtw_sum > 0
+        dt_form = np.zeros(n_dt, dtype=float)
+        dt_form[dt_valid] = dtwval_sum[dt_valid] / np.maximum(dtw_sum[dt_valid], 1e-6)
+        dt_tenure = dt_counts.astype(float)
+
+        # --- Calculate circuit proficiency (using races_full for DNF rate) ---
         cid = getattr(evt_row, "circuitId")
-        c_mask = prior_mask & (races_circuits == cid)
+        p_full_mask = races_full_dates < d_val
+        c_mask = p_full_mask & (races_full_circuits == cid)
+
         c_avg_pos = np.full(n_drivers, 15.0, dtype=float)
+        c_dnf_rate = np.zeros(n_drivers, dtype=float)
+        c_exp = np.zeros(n_drivers, dtype=float)
+
         if np.any(c_mask):
-            cw_sum = np.bincount(p_dcodes[c_mask[prior_mask]], minlength=n_drivers)
-            cwval_sum = np.bincount(p_dcodes[c_mask[prior_mask]], weights=races_pos[c_mask], minlength=n_drivers)
+            p_full_dcodes_masked = d_codes_full[c_mask]
+            p_full_dnf_masked = r_full_dnf[c_mask]
+
+            cw_sum = np.bincount(p_full_dcodes_masked, minlength=n_drivers)
+            cd_sum = np.bincount(p_full_dcodes_masked, weights=p_full_dnf_masked, minlength=n_drivers)
             c_valid = cw_sum > 0
-            c_avg_pos[c_valid] = cwval_sum[c_valid] / np.maximum(cw_sum[c_valid], 1e-6)
+            c_dnf_rate[c_valid] = cd_sum[c_valid] / np.maximum(cw_sum[c_valid], 1e-6)
+            c_exp[c_valid] = cw_sum[c_valid]
+
+        # Average position needs finishes only
+        c_fin_mask = (races_dates < d_val) & (races_circuits == cid)
+        if np.any(c_fin_mask):
+            p_fin_dcodes_masked = d_codes[c_fin_mask]
+            cwf_sum = np.bincount(p_fin_dcodes_masked, minlength=n_drivers)
+            cwfval_sum = np.bincount(p_fin_dcodes_masked, weights=races_pos[c_fin_mask], minlength=n_drivers)
+            cf_valid = cwf_sum > 0
+            c_avg_pos[cf_valid] = cwfval_sum[cf_valid] / np.maximum(cwf_sum[cf_valid], 1e-6)
 
         # --- Calculate qualifying_form_index & teammate_delta ---
         q_form_index = np.zeros(n_drivers, dtype=float)
@@ -247,15 +315,20 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                 continue
 
             t_code = t_codes[idx]
+            dt_code = dt_codes[idx]
             sample = {
                 "driverId": uniques[code],
                 "constructorId": t_uniques[t_code] if t_code >= 0 else None,
                 "form_index": float(form_index[code]),
                 "qualifying_form_index": float(q_form_index[code]),
                 "team_form_index": float(team_form_index[t_code]) if t_code >= 0 else 0.0,
+                "driver_team_form_index": float(dt_form[dt_code]),
+                "team_tenure_events": float(dt_tenure[dt_code]),
                 "grid_finish_delta": float(gf_index[code]),
                 "teammate_delta": float(tm_delta_index[code]),
                 "circuit_avg_pos": float(c_avg_pos[code]),
+                "circuit_dnf_rate": float(c_dnf_rate[code]),
+                "circuit_experience": float(c_exp[code]),
                 "grid": float(races_grid_float[idx]),
                 "is_race": 1 if races_sessions[idx] == "race" else 0,
                 "is_qualifying": 0,
@@ -348,9 +421,13 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     
     # Also exclude columns that are entirely NaN in the training set
     all_nan_cols = [c for c in X_train.columns if c not in exclude_cols and X_train[c].isna().all()]
-    exclude_cols.extend(all_nan_cols)
+    # Keep columns that are in X (inference) even if they are all-NaN in history,
+    # so they can show up in SHAP (with 0 influence if needed).
+    cols_to_exclude = [c for c in all_nan_cols if c not in X.columns]
+    exclude_cols.extend(cols_to_exclude)
     
     features, num_cols, cat_cols = _split_feature_columns(X_train, exclude=exclude_cols)
+    logger.debug("[models] Final feature set (%d): %s", len(features), features)
 
     # Build preprocessing pipeline
     num_pipe = Pipeline(steps=[
