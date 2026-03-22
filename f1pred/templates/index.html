@@ -41,16 +41,16 @@
     <div class="min-h-screen">
         <!-- Header -->
         <header class="f1-red shadow-lg p-4">
-            <div class="container mx-auto flex justify-between items-center">
-                <h1 class="text-2xl font-black tracking-tighter italic">F1 OUTCOME PREDICTOR</h1>
-                <div class="flex items-center space-x-2">
-                    <span class="text-[10px] font-bold text-white text-opacity-60 uppercase tracking-tighter">
+            <div class="container mx-auto flex justify-between items-center flex-wrap gap-2">
+                <h1 class="text-xl md:text-2xl font-black tracking-tighter italic whitespace-nowrap">F1 OUTCOME PREDICTOR</h1>
+                <div class="flex items-center space-x-2 min-w-0">
+                    <span class="text-[10px] font-bold text-white text-opacity-60 uppercase tracking-tighter truncate max-w-[80px] sm:max-w-none inline-block">
                         <span class="sr-only">Model Version </span><span aria-hidden="true">M:</span><span x-text="config.model_version"></span>
                     </span>
-                    <span class="text-xs font-bold bg-black bg-opacity-20 px-2 py-1 rounded">
+                    <span class="text-xs font-bold bg-black bg-opacity-20 px-2 py-1 rounded truncate max-w-[60px] sm:max-w-none inline-block">
                         <span class="sr-only">App Version </span><span aria-hidden="true">v</span><span x-text="config.app_version"></span>
                     </span>
-                    <button @click="refreshData()" :disabled="loading" aria-label="Refresh data" :title="loading ? 'Prediction in progress' : 'Refresh data'" class="bg-black bg-opacity-20 hover:bg-opacity-30 focus:outline-none focus:ring-2 focus:ring-white p-2 rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed">
+                    <button @click="refreshData()" :disabled="loading" aria-label="Refresh data" :title="loading ? 'Prediction in progress' : 'Refresh data'" class="bg-black bg-opacity-20 hover:bg-opacity-30 focus:outline-none focus:ring-2 focus:ring-white p-2 rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
                         <i class="fas fa-sync-alt" :class="loading ? 'animate-spin' : ''" aria-hidden="true"></i>
                     </button>
                 </div>
