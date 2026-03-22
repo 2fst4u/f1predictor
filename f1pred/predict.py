@@ -1807,3 +1807,4 @@ def print_session_console(
 
     # Print legend explaining abbreviations
     print(f"\n{Style.DIM}Legend: Avg=Predicted Mean Pos, Top3=Podium Prob, {win_label}=Win/Pole Prob, DNF=Retirement Prob, Actual=Result (*=Exact, ~=Close), Chg=Grid Delta{Style.RESET_ALL}")
+    print(f"{Style.DIM}Models: GBM=AI Speed Prediction, Elo=Skill Rating (Chess-style), BT=Head-to-Head Ranking, Mix=Driver vs Car Strength{Style.RESET_ALL}")

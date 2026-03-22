@@ -47,7 +47,11 @@ The app fetches data from free, public APIs:
 1. **Roster inference** – For future races, the entry list comes from the most recent completed event
 2. **Feature engineering** – Driver form, team performance, weather conditions, teammate comparisons, starting grid
 3. **Grid position handling** – Uses actual grid from race results when available; for pre-race predictions, runs a qualifying simulation to estimate starting positions
-4. **Model training** – Gradient boosting (LightGBM/XGBoost/sklearn) trained on historical data
+4. **Model training** – An ensemble of four specialized models is trained fresh on historical data:
+    - **GBM (AI Brain)**: Analyzes patterns like weather and recent momentum to predict raw speed.
+    - **Elo (Skill Score)**: A Chess-style rating that tracks a driver's talent relative to their rivals.
+    - **BT (Head-to-Head)**: Determines strength by seeing who consistently finishes ahead of whom.
+    - **Mix (Talent Separator)**: Mathematically separates a driver's skill from the car's performance.
 5. **DNF estimation** – Separate classifier for retirement probability
 6. **Monte Carlo simulation** – 5000 draws to get win probability, podium chances, and expected position
 
