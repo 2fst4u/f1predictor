@@ -477,12 +477,13 @@
                 },
 
                 async fetchSchedule() {
-                    if (!this.params.season) {
+                    const season = String(this.params.season || '');
+                    if (!season) {
                         this.schedule = [];
                         this._lastScheduleSeason = null;
                         return;
                     }
-                    if (this.params.season === this._lastScheduleSeason) {
+                    if (season === String(this._lastScheduleSeason)) {
                         return;
                     }
                     this.scheduleLoading = true;
@@ -510,23 +511,29 @@
                 },
 
                 async fetchEventStatus() {
+                    const currentSeason = String(this.params.season || '');
+                    const currentRound = String(this.params.round || '');
+
                     // Only clear results if the newly selected event differs from the results we already have.
-                    // This prevents clearing results when simply navigating back to the same event or on re-fetches.
-                    if (this.results && (this.results.season != this.params.season || this.results.round != this.params.round)) {
-                        this.results = null;
+                    // Use robust string comparison to avoid type mismatch issues.
+                    if (this.results) {
+                        if (String(this.results.season) !== currentSeason || String(this.results.round) !== currentRound) {
+                            this.results = null;
+                        }
                     }
 
                     // Skip fetch if this specific event status was already loaded.
-                    if (this.params.season === this._lastStatusSeason && this.params.round === this._lastStatusRound) {
+                    if (currentSeason === String(this._lastStatusSeason) && currentRound === String(this._lastStatusRound)) {
                         return;
                     }
 
-                    this.eventSessions = [];
-                    if (!this.params.season || !this.params.round) {
+                    if (!currentSeason || !currentRound) {
+                        this.eventSessions = [];
                         this._lastStatusSeason = null;
                         this._lastStatusRound = null;
                         return;
                     }
+                    this.eventSessions = [];
                     this.statusLoading = true;
                     try {
                         const resp = await fetch(`/api/event-status/${this.params.season}/${this.params.round}`);
@@ -559,8 +566,8 @@
                         console.error("Failed to fetch event status", e);
                     } finally {
                         this.statusLoading = false;
-                        this._lastStatusSeason = this.params.season;
-                        this._lastStatusRound = this.params.round;
+                        this._lastStatusSeason = String(this.params.season);
+                        this._lastStatusRound = String(this.params.round);
                     }
                 },
 
