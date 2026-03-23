@@ -1,10 +1,15 @@
 import os
 import json
 import pytest
-from playwright.sync_api import Page, expect
 
-@pytest.mark.skipif(os.environ.get("CI") == "true", reason="Skipping Playwright tests in CI environment")
-def test_model_mix_width_and_offsets(page: Page):
+try:
+    from playwright.sync_api import Page, expect
+    HAS_PLAYWRIGHT = True
+except ImportError:
+    HAS_PLAYWRIGHT = False
+
+@pytest.mark.skipif(not HAS_PLAYWRIGHT or os.environ.get("CI") == "true", reason="Skipping Playwright tests in CI environment or if playwright is missing")
+def test_model_mix_width_and_offsets(page: "Page"):
     """Verify Model Mix graph width and factor limit offsets in the UI."""
     abs_path = os.path.abspath("f1pred/templates/index.html")
     page.goto(f"file://{abs_path}")
