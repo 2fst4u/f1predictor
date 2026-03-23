@@ -527,11 +527,17 @@ def _run_single_prediction(
     
     # Monte Carlo simulation
     draws = cfg.modelling.monte_carlo.draws
+
+    # Calculate a unique but deterministic seed for this session
+    import hashlib
+    seed_str = f"{cfg.app.random_seed}_{season_i}_{round_i}_{sess}"
+    session_seed = int(hashlib.md5(seed_str.encode("utf-8")).hexdigest(), 16) % (2**32)
+
     prob_matrix, mean_pos, pairwise = simulate_grid(
         combined_pace,
         dnf_prob,
         draws=draws,
-        random_seed=cfg.app.random_seed,
+        random_seed=session_seed,
         noise_factor=cfg.modelling.simulation.noise_factor,
         min_noise=cfg.modelling.simulation.min_noise,
         max_penalty_base=cfg.modelling.simulation.max_penalty_base,
@@ -1028,11 +1034,17 @@ def run_predictions_for_event(
                         # Monte Carlo simulation
                         spinner.update("Simulating Monte Carlo...")
                         draws = cfg.modelling.monte_carlo.draws
+
+                        # Calculate a unique but deterministic seed for this session
+                        import hashlib
+                        seed_str = f"{cfg.app.random_seed}_{season_i}_{round_i}_{sess}"
+                        session_seed = int(hashlib.md5(seed_str.encode("utf-8")).hexdigest(), 16) % (2**32)
+
                         prob_matrix, mean_pos, pairwise = simulate_grid(
                             combined_pace,
                             dnf_prob,
                             draws=draws,
-                            random_seed=cfg.app.random_seed,
+                            random_seed=session_seed,
                             noise_factor=cfg.modelling.simulation.noise_factor,
                             min_noise=cfg.modelling.simulation.min_noise,
                             max_penalty_base=cfg.modelling.simulation.max_penalty_base,
