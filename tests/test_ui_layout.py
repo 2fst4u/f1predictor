@@ -71,20 +71,20 @@ def test_model_mix_width_and_offsets(page: "Page"):
     page.evaluate("Alpine.$data(document.querySelector('[x-data]')).windowWidth = 1200")
     limit_large = page.evaluate("Alpine.$data(document.querySelector('[x-data]')).getFactorLimit()")
     # Expected for 1200px: w >= 1024 -> offset = 380. containerW = 1200.
-    # available = 1200 - 380 = 820. count = floor(820 / 156) = 5.
-    assert limit_large == 5
+    # available = 1200 - 380 = 820. count = floor(820 / 126) = 6.
+    assert limit_large == 6
 
     # Test Desktop (Medium Viewport)
     page.set_viewport_size({"width": 800, "height": 800})
     page.evaluate("Alpine.$data(document.querySelector('[x-data]')).windowWidth = 800")
     limit_medium = page.evaluate("Alpine.$data(document.querySelector('[x-data]')).getFactorLimit()")
     # Expected for 800px: w < 1024 -> offset = 350. containerW = 800.
-    # available = 800 - 350 = 450. count = floor(450 / 156) = 2.
-    assert limit_medium == 2
+    # available = 800 - 350 = 450. count = floor(450 / 126) = 3.
+    assert limit_medium == 3
 
     # Test Mobile
     page.set_viewport_size({"width": 400, "height": 800})
     page.evaluate("Alpine.$data(document.querySelector('[x-data]')).windowWidth = 400")
     limit_mobile = page.evaluate("Alpine.$data(document.querySelector('[x-data]')).getFactorLimit()")
-    # Expected for 400px: w < 768 -> floor((400 - 32) / 119) = floor(368 / 119) = 3.
+    # Expected for 400px: w < 768 -> floor((400 - 32) / 94) = floor(368 / 94) = 3.
     assert limit_mobile == 3
