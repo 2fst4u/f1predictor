@@ -28,6 +28,8 @@ __all__ = [
     "build_session_features",
     "collect_historical_results",
     "compute_form_indices",
+    "compute_sprint_form",
+    "compute_sprint_qualifying_form",
     "compute_teammate_delta",
     "compute_grid_finish_delta",
     "compute_circuit_proficiency",
@@ -167,7 +169,7 @@ def _empty_feature_frame() -> pd.DataFrame:
         "weather_effect",
         "temp_skill", "rain_skill", "wind_skill", "pressure_skill",
         "teammate_delta", "grid_finish_delta",
-        "session_type", "is_race", "is_qualifying", "is_sprint"
+        "session_type", "is_race", "is_qualifying", "is_sprint", "sprint_form_index", "sprint_qualifying_form_index"
     ])
 
 
@@ -563,6 +565,31 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
     return sums[["driverId", "form_index"]]
 
 
+
+def compute_sprint_form(df: pd.DataFrame, ref_date: datetime, half_life_days: int,
+                        current_season: Optional[int] = None, sprint_boost_factor: float = 1.0) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["driverId", "sprint_form_index"])
+    # Include only sprint results for sprint form
+    dfg = df[df["session"] == "sprint"].copy()
+    if dfg.empty:
+        return pd.DataFrame(columns=["driverId", "sprint_form_index"])
+    dfg = dfg.dropna(subset=["driverId", "position", "date"])
+    dfg["points"] = dfg["points"].fillna(0.0)
+    dfg["pos_score"] = -dfg["position"].astype(float)
+    dfg["pts_score"] = dfg["points"].astype(float)
+    w = exponential_weights(dfg["date"], ref_date, half_life_days)
+    if current_season is not None and "season" in dfg.columns:
+        # Boost current season sprints
+        is_cur_sprint = (dfg["season"] == current_season) & (dfg["session"] == "sprint")
+        w = np.where(is_cur_sprint, w * sprint_boost_factor, w)
+    dfg["w"] = w
+    dfg["weighted_val"] = (dfg["pos_score"] + dfg["pts_score"]) * dfg["w"]
+    sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
+    sums["sprint_form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
+    return sums[["driverId", "sprint_form_index"]]
+
+
 def compute_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days: int,
                             current_season: Optional[int] = None, boost_factor: float = 1.0) -> pd.DataFrame:
     """Recency-weighted qualifying performance index."""
@@ -589,6 +616,30 @@ def compute_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days
     sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
     sums["qualifying_form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
     return sums[["driverId", "qualifying_form_index"]]
+
+
+
+def compute_sprint_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days: int,
+                                   current_season: Optional[int] = None, boost_factor: float = 1.0) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["driverId", "sprint_qualifying_form_index"])
+
+    dfg = df[df["session"] == "sprint_qualifying"].copy()
+    if dfg.empty or "qpos" not in dfg.columns:
+        return pd.DataFrame(columns=["driverId", "sprint_qualifying_form_index"])
+
+    dfg = dfg.dropna(subset=["driverId", "qpos", "date"])
+    dfg["pos_score"] = -dfg["qpos"].astype(float)
+
+    w = exponential_weights(dfg["date"], ref_date, half_life_days)
+    if current_season is not None and boost_factor != 1.0 and "season" in dfg.columns:
+        w = np.where(dfg["season"] == current_season, w * boost_factor, w)
+    dfg["w"] = w
+    dfg["weighted_val"] = dfg["pos_score"] * dfg["w"]
+
+    sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
+    sums["sprint_qualifying_form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
+    return sums[["driverId", "sprint_qualifying_form_index"]]
 
 
 def compute_circuit_proficiency(df: pd.DataFrame, circuit_id: str, ref_date: datetime) -> pd.DataFrame:
@@ -1312,6 +1363,22 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
     except Exception as e:
         logger.info(f"[features] Qualifying form failed: {e}")
         qual_form = pd.DataFrame(columns=["driverId", "qualifying_form_index"])
+    try:
+        sprint_form = compute_sprint_form(hist, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.base,
+                                            current_season=s_int, sprint_boost_factor=qual_boost)
+        logger.info(f"[features] Sprint form computed for {len(sprint_form)} drivers")
+    except Exception as e:
+        logger.info(f"[features] Sprint form failed: {e}")
+        sprint_form = pd.DataFrame(columns=["driverId", "sprint_form_index"])
+
+    try:
+        sprint_qual_form = compute_sprint_qualifying_form(hist, ref_date, cfg.modelling.recency_half_life_days.base,
+                                            current_season=s_int, boost_factor=qual_boost)
+        logger.info(f"[features] Sprint Qualifying form computed for {len(sprint_qual_form)} drivers")
+    except Exception as e:
+        logger.info(f"[features] Sprint Qualifying form failed: {e}")
+        sprint_qual_form = pd.DataFrame(columns=["driverId", "sprint_qualifying_form_index"])
+
 
     # Merge features
     X = _empty_feature_frame()
@@ -1324,6 +1391,8 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
 
         X = X.merge(form, on="driverId", how="left")
         X = X.merge(qual_form, on="driverId", how="left")
+        X = X.merge(sprint_form, on="driverId", how="left")
+        X = X.merge(sprint_qual_form, on="driverId", how="left")
         X = X.merge(team_idx, on="constructorId", how="left")
         X = X.merge(drv_team_form, on="driverId", how="left")
         X = X.merge(beta_df, on="driverId", how="left")
@@ -1360,8 +1429,13 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         # Dynamically derive defaults from the distribution of knowns
         # For form index (score where higher = better, e.g. -1.0 > -20.0), a rookie should get a NEUTRAL score (median).
         # This allows their car performance (team features) to determine their initial predicted position.
+
         neutral_form = form["form_index"].median() if not form.empty else -10.0
         neutral_qual_form = qual_form["qualifying_form_index"].median() if not qual_form.empty else -10.0
+
+        neutral_sprint_form = sprint_form["sprint_form_index"].median() if not sprint_form.empty else neutral_form
+        neutral_sprint_qual_form = sprint_qual_form["sprint_qualifying_form_index"].median() if not sprint_qual_form.empty else neutral_qual_form
+
         neutral_team_form = team_idx["team_form_index"].median() if not team_idx.empty else -10.0
         neutral_drv_team_form = drv_team_form["driver_team_form_index"].median() if not drv_team_form.empty else -10.0
         
@@ -1381,6 +1455,8 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         defaults = {
             "form_index": neutral_form,
             "qualifying_form_index": neutral_qual_form,
+            "sprint_form_index": neutral_sprint_form,
+            "sprint_qualifying_form_index": neutral_sprint_qual_form,
             "team_form_index": neutral_team_form,
             "driver_team_form_index": neutral_drv_team_form,
             "team_tenure_events": 0.0,

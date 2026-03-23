@@ -1295,6 +1295,8 @@ def _build_ensemble_components(
 _FEATURE_LABELS: Dict[str, str] = {
     "form_index":                "Race Form",
     "qualifying_form_index":     "Quali Form",
+    "sprint_form_index":         "Sprint Form",
+    "sprint_qualifying_form_index": "Sprint Quali Form",
     "driver_team_form_index":    "Driver-Team Fit",
     "team_form_index":           "Team Strength",
     "teammate_delta":            "vs Teammate",
