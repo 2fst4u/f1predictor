@@ -327,12 +327,12 @@
                                                                 <div class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-0.5">
                                                                     Factors <span class="normal-case font-normal text-gray-600">(green = helps, red = hurts)</span>
                                                                 </div>
-                                                                <div class="flex flex-nowrap gap-x-1 gap-y-0.5 overflow-hidden no-scrollbar">
+                                                                <div class="flex flex-nowrap gap-x-0.5 gap-y-0.5 overflow-hidden no-scrollbar">
                                                                     <template x-for="feat in getSortedShap(p.shap_values, windowWidth)" :key="feat.key + '_' + windowWidth">
-                                                                        <div class="flex items-center flex-shrink-0 gap-1 text-xs w-[110px]">
+                                                                        <div class="flex items-center flex-shrink-0 gap-0.5 text-xs w-[117px]">
                                                                             <span class="sr-only" x-text="feat.val < 0 ? 'Improves position:' : 'Worsens position:'"></span>
                                                                             <span aria-hidden="true" :class="feat.val < 0 ? 'text-green-400' : 'text-red-400'" class="font-bold w-3 text-center" x-text="feat.val < 0 ? '▲' : '▼'"></span>
-                                                                            <div class="w-8 h-1.5 bg-gray-700 rounded overflow-hidden flex-shrink-0" aria-hidden="true">
+                                                                            <div class="w-6 sm:w-8 h-1.5 bg-gray-700 rounded overflow-hidden flex-shrink-0" aria-hidden="true">
                                                                                 <div class="h-full rounded" :class="feat.val < 0 ? 'bg-green-500' : 'bg-red-500'" :style="'width:' + Math.min(100, feat.absPct).toFixed(0) + '%'"></div>
                                                                             </div>
                                                                             <span class="text-gray-400 truncate flex-1" x-text="feat.label" :title="feat.label"></span>
@@ -801,16 +801,16 @@
                     const w = this.windowWidth || window.innerWidth;
                     const containerW = Math.min(w, 1400);
                     // Mobile should only show as many as can fit
-                    if (w < 768) return Math.floor((w - 32) / 114);
+                    if (w < 768) return Math.floor((w - 32) / 119);
 
                     // Sidebar (w-44 = 176px) is side-by-side at >= 768px (md breakpoint).
                     // sidebar(176) + gap(16) = 192 (was gap-x-8 = 32px)
                     // responsive padding (approximate): 120-150px
-                    const offset = w >= 1024 ? 320 : 290;
+                    const offset = w >= 1024 ? 300 : 270;
                     const available = containerW - offset;
 
-                    // Fixed budget of 114px (110px item + 4px gap).
-                    const count = Math.floor(available / 114);
+                    // Fixed budget of 119px (117px item + 2px gap).
+                    const count = Math.floor(available / 119);
                     return Math.max(1, Math.min(20, count));
                 },
 
