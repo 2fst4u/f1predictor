@@ -431,6 +431,9 @@
                 logs: [],
                 currentLog: 'Initializing',
                 windowWidth: window.innerWidth,
+                _lastStatusSeason: null,
+                _lastStatusRound: null,
+                _lastScheduleSeason: null,
 
                 async refreshData() {
                     this.params.season = '';
@@ -438,6 +441,9 @@
                     this.params.sessions = [];
                     this.results = null;
                     this.activeSession = null;
+                    this._lastStatusSeason = null;
+                    this._lastStatusRound = null;
+                    this._lastScheduleSeason = null;
                     await this.init();
                 },
 
@@ -473,6 +479,10 @@
                 async fetchSchedule() {
                     if (!this.params.season) {
                         this.schedule = [];
+                        this._lastScheduleSeason = null;
+                        return;
+                    }
+                    if (this.params.season === this._lastScheduleSeason) {
                         return;
                     }
                     this.scheduleLoading = true;
@@ -495,13 +505,26 @@
                         console.error("Failed to fetch schedule", e);
                     } finally {
                         this.scheduleLoading = false;
+                        this._lastScheduleSeason = this.params.season;
                     }
                 },
 
                 async fetchEventStatus() {
+                    // Only clear results if the newly selected event differs from the results we already have.
+                    // This prevents clearing results when simply navigating back to the same event or on re-fetches.
+                    if (this.results && (this.results.season != this.params.season || this.results.round != this.params.round)) {
+                        this.results = null;
+                    }
+
+                    // Skip fetch if this specific event status was already loaded.
+                    if (this.params.season === this._lastStatusSeason && this.params.round === this._lastStatusRound) {
+                        return;
+                    }
+
                     this.eventSessions = [];
-                    this.results = null;
                     if (!this.params.season || !this.params.round) {
+                        this._lastStatusSeason = null;
+                        this._lastStatusRound = null;
                         return;
                     }
                     this.statusLoading = true;
@@ -536,6 +559,8 @@
                         console.error("Failed to fetch event status", e);
                     } finally {
                         this.statusLoading = false;
+                        this._lastStatusSeason = this.params.season;
+                        this._lastStatusRound = this.params.round;
                     }
                 },
 
