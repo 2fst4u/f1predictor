@@ -709,7 +709,7 @@
 
                 hasShapFactors(shapValues) {
                     const normalized = this._normalizeShap(shapValues);
-                    const hiddenFeats = ["form_index", "qualifying_form_index", "grid", "is_race", "is_qualifying", "is_sprint"];
+                    const hiddenFeats = ["form_index", "qualifying_form_index", "sprint_form_index", "sprint_qualifying_form_index", "grid", "is_race", "is_qualifying", "is_sprint"];
                     const visibleKeys = Object.keys(normalized).filter(k => !hiddenFeats.includes(k));
                     return visibleKeys.length > 0;
                 },
@@ -742,7 +742,7 @@
                 getSortedShap(shapValues, trigger) {
                     const normalized = this._normalizeShap(shapValues);
                     const limit = this.getFactorLimit();
-                    const hiddenFeats = ["form_index", "qualifying_form_index", "grid", "is_race", "is_qualifying", "is_sprint"];
+                    const hiddenFeats = ["form_index", "qualifying_form_index", "sprint_form_index", "sprint_qualifying_form_index", "grid", "is_race", "is_qualifying", "is_sprint"];
                     const entries = Object.entries(normalized)
                         .filter(([key, _]) => !hiddenFeats.includes(key))
                         .map(([key, val]) => {

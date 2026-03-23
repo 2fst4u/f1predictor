@@ -1370,7 +1370,7 @@ def _print_influence_row(
     if shap and isinstance(shap, dict):
         # Filter out dominant/obvious variables so the UI highlights
         # granular, interesting factors (like weather or track mastery).
-        hidden_feats = {"form_index", "qualifying_form_index", "grid", "is_race", "is_qualifying", "is_sprint"}
+        hidden_feats = {"form_index", "qualifying_form_index", "sprint_form_index", "sprint_qualifying_form_index", "grid", "is_race", "is_qualifying", "is_sprint"}
         filtered_shap = {k: v for k, v in shap.items() if k not in hidden_feats}
 
         # Sort by absolute magnitude, descending
