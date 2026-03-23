@@ -327,7 +327,7 @@
                                                                 <div class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-0.5">
                                                                     Factors <span class="normal-case font-normal text-gray-600">(green = helps, red = hurts)</span>
                                                                 </div>
-                                                                <div class="flex flex-nowrap gap-x-2 gap-y-0.5 overflow-x-auto md:overflow-hidden no-scrollbar">
+                                                                <div class="flex flex-nowrap gap-x-2 gap-y-0.5 overflow-hidden no-scrollbar">
                                                                     <template x-for="feat in getSortedShap(p.shap_values, windowWidth)" :key="feat.key + '_' + windowWidth">
                                                                         <div class="flex items-center flex-shrink-0 gap-1 text-xs w-[140px]">
                                                                             <span class="sr-only" x-text="feat.val < 0 ? 'Improves position:' : 'Worsens position:'"></span>
@@ -800,8 +800,8 @@
                 getFactorLimit() {
                     const w = this.windowWidth || window.innerWidth;
                     const containerW = Math.min(w, 1400);
-                    // Mobile is scrollable, return a baseline of 5
-                    if (w < 768) return 5;
+                    // Mobile should only show as many as can fit
+                    if (w < 768) return Math.floor((w - 32) / 148);
 
                     // Sidebar (w-44 = 176px) is side-by-side at >= 768px (md breakpoint).
                     // sidebar(176) + gap(32) = 208
