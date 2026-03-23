@@ -62,8 +62,8 @@
             <div class="card p-4 md:p-6 mb-4 md:mb-8 shadow-xl">
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 items-end">
                     <div>
-                        <label for="input-season" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Season <span class="text-red-500" aria-hidden="true">*</span><span class="sr-only"> (required)</span></label>
-                        <select id="input-season" x-model="params.season" @change="fetchSchedule()" :disabled="loading" aria-required="true"
+                        <label for="input-season" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Season</label>
+                        <select id="input-season" x-model="params.season" @change="fetchSchedule()" :disabled="loading"
                                 class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
                             <option value="" x-text="seasons.length ? 'Select Season' : 'Loading seasons...'"></option>
                             <template x-for="s in seasons" :key="s.season">
@@ -72,8 +72,8 @@
                         </select>
                     </div>
                     <div>
-                        <label for="input-round" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round <span class="text-red-500" aria-hidden="true">*</span><span class="sr-only"> (required)</span></label>
-                        <select id="input-round" x-model="params.round" @change="fetchEventStatus()" :disabled="!params.season || scheduleLoading || loading" :title="!params.season ? 'Select a season first' : (scheduleLoading ? 'Loading schedule...' : (loading ? 'Prediction in progress' : 'Select a round'))" aria-required="true"
+                        <label for="input-round" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
+                        <select id="input-round" x-model="params.round" @change="fetchEventStatus()" :disabled="!params.season || scheduleLoading || loading" :title="!params.season ? 'Select a season first' : (scheduleLoading ? 'Loading schedule...' : (loading ? 'Prediction in progress' : 'Select a round'))"
                                 class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
                             <option value="" x-text="scheduleLoading ? 'Loading rounds...' : 'Select Round'"></option>
                             <template x-for="(r, index) in schedule" :key="r.round || index">
@@ -82,8 +82,8 @@
                         </select>
                     </div>
                     <div class="col-span-2 md:col-span-1">
-                        <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider" id="sessions-label">Sessions <span class="text-red-500" aria-hidden="true">*</span><span class="sr-only"> (required)</span></label>
-                        <div class="flex flex-wrap gap-2 mt-1" role="group" aria-labelledby="sessions-label" aria-required="true">
+                        <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider" id="sessions-label">Sessions</label>
+                        <div class="flex flex-wrap gap-2 mt-1" role="group" aria-labelledby="sessions-label">
                             <template x-for="s in eventSessions" :key="s.id">
                                 <button @click="toggleSession(s.id)"
                                         :disabled="loading"
@@ -112,7 +112,8 @@
                     <div class="col-span-2 md:col-span-1">
                         <button @click="runPrediction()" :disabled="loading || !params.season || !params.round || params.sessions.length === 0"
                                 :title="(!params.season || !params.round) ? 'Select a season and round to predict' : (params.sessions.length === 0 ? 'Select at least one session' : '')"
-                                class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-95 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-900">
+                                class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 disabled:cursor-not-allowed group relative transition transform active:scale-95 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-900">
+                            <span class="sr-only" x-show="(!params.season || !params.round || params.sessions.length === 0)">Requires Season, Round, and Session to be selected</span>
                             <span x-show="!loading">RUN PREDICTION</span>
                             <span x-show="loading" class="flex items-center justify-center">
                                 <i class="fas fa-spinner animate-spin mr-2" aria-hidden="true"></i> PROCESSING...
@@ -241,7 +242,7 @@
                                         </tr>
                                     </thead>
                                     <template x-for="(p, index) in data.predictions" :key="p.driverId">
-                                        <tbody class="border-none hover:bg-white/5 transition-colors">
+                                        <tbody class="border-none">
                                             <tr :class="getTeamClass(p.constructorName)" class="text-sm sm:text-base">
                                                 <!-- Position -->
                                                 <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 text-center font-black italic text-base sm:text-lg align-top"
