@@ -560,9 +560,17 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
         w = np.where(is_cur_sprint, w * sprint_boost_factor, w)
     dfg["w"] = w
     dfg["weighted_val"] = (dfg["pos_score"] + dfg["pts_score"]) * dfg["w"]
-    sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
-    sums["form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
-    return sums[["driverId", "form_index"]]
+    dfg = dfg.dropna(subset=["driverId"])
+
+    driver_codes, uniques = pd.factorize(dfg["driverId"])
+    w_sum = np.bincount(driver_codes, weights=dfg["w"])
+    val_sum = np.bincount(driver_codes, weights=dfg["weighted_val"])
+
+    sums = pd.DataFrame({
+        "driverId": uniques,
+        "form_index": val_sum / np.clip(w_sum, 1e-6, None)
+    })
+    return sums
 
 
 
@@ -585,9 +593,17 @@ def compute_sprint_form(df: pd.DataFrame, ref_date: datetime, half_life_days: in
         w = np.where(is_cur_sprint, w * sprint_boost_factor, w)
     dfg["w"] = w
     dfg["weighted_val"] = (dfg["pos_score"] + dfg["pts_score"]) * dfg["w"]
-    sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
-    sums["sprint_form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
-    return sums[["driverId", "sprint_form_index"]]
+    dfg = dfg.dropna(subset=["driverId"])
+
+    driver_codes, uniques = pd.factorize(dfg["driverId"])
+    w_sum = np.bincount(driver_codes, weights=dfg["w"])
+    val_sum = np.bincount(driver_codes, weights=dfg["weighted_val"])
+
+    sums = pd.DataFrame({
+        "driverId": uniques,
+        "sprint_form_index": val_sum / np.clip(w_sum, 1e-6, None)
+    })
+    return sums
 
 
 def compute_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days: int,
@@ -612,10 +628,17 @@ def compute_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_life_days
         w = np.where(dfg["season"] == current_season, w * boost_factor, w)
     dfg["w"] = w
     dfg["weighted_val"] = dfg["pos_score"] * dfg["w"]
+    dfg = dfg.dropna(subset=["driverId"])
 
-    sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
-    sums["qualifying_form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
-    return sums[["driverId", "qualifying_form_index"]]
+    driver_codes, uniques = pd.factorize(dfg["driverId"])
+    w_sum = np.bincount(driver_codes, weights=dfg["w"])
+    val_sum = np.bincount(driver_codes, weights=dfg["weighted_val"])
+
+    sums = pd.DataFrame({
+        "driverId": uniques,
+        "qualifying_form_index": val_sum / np.clip(w_sum, 1e-6, None)
+    })
+    return sums
 
 
 
@@ -636,10 +659,17 @@ def compute_sprint_qualifying_form(df: pd.DataFrame, ref_date: datetime, half_li
         w = np.where(dfg["season"] == current_season, w * boost_factor, w)
     dfg["w"] = w
     dfg["weighted_val"] = dfg["pos_score"] * dfg["w"]
+    dfg = dfg.dropna(subset=["driverId"])
 
-    sums = dfg.groupby("driverId")[["weighted_val", "w"]].sum().reset_index()
-    sums["sprint_qualifying_form_index"] = sums["weighted_val"] / sums["w"].clip(lower=1e-6)
-    return sums[["driverId", "sprint_qualifying_form_index"]]
+    driver_codes, uniques = pd.factorize(dfg["driverId"])
+    w_sum = np.bincount(driver_codes, weights=dfg["w"])
+    val_sum = np.bincount(driver_codes, weights=dfg["weighted_val"])
+
+    sums = pd.DataFrame({
+        "driverId": uniques,
+        "sprint_qualifying_form_index": val_sum / np.clip(w_sum, 1e-6, None)
+    })
+    return sums
 
 
 def compute_circuit_proficiency(df: pd.DataFrame, circuit_id: str, ref_date: datetime) -> pd.DataFrame:
@@ -730,17 +760,20 @@ def compute_driver_team_form(
     races["w"] = w
 
     races["weighted_val"] = (races["pos_score"] + races["pts_score"]) * races["w"]
+    races = races.dropna(subset=["driverId"])
 
-    # We need both the weighted sum/sum of weights AND the count of rows
-    agg = races.groupby("driverId").agg(
-        weighted_val_sum=("weighted_val", "sum"),
-        w_sum=("w", "sum"),
-        team_tenure_events=("driverId", "count")
-    ).reset_index()
+    driver_codes, uniques = pd.factorize(races["driverId"])
+    w_sum = np.bincount(driver_codes, weights=races["w"])
+    val_sum = np.bincount(driver_codes, weights=races["weighted_val"])
+    events_count = np.bincount(driver_codes)
 
-    agg["driver_team_form_index"] = agg["weighted_val_sum"] / agg["w_sum"].clip(lower=1e-6)
+    agg = pd.DataFrame({
+        "driverId": uniques,
+        "driver_team_form_index": val_sum / np.clip(w_sum, 1e-6, None),
+        "team_tenure_events": events_count
+    })
 
-    return agg[["driverId", "driver_team_form_index", "team_tenure_events"]]
+    return agg
 
 
 def compute_teammate_delta(
@@ -791,14 +824,20 @@ def compute_teammate_delta(
 
     # Weighted aggregation
     valid_q["weighted_delta"] = valid_q["delta"] * valid_q["w"]
+    valid_q = valid_q.dropna(subset=["driverId"])
 
     # Group by driver and sum weighted delta and weights
-    agg = valid_q.groupby("driverId")[["weighted_delta", "w"]].sum().reset_index()
+    driver_codes, uniques = pd.factorize(valid_q["driverId"])
+    w_sum = np.bincount(driver_codes, weights=valid_q["w"])
+    delta_sum = np.bincount(driver_codes, weights=valid_q["weighted_delta"])
 
     # Calculate final metric
-    agg["teammate_delta"] = agg["weighted_delta"] / agg["w"].replace(0, 1e-6)
+    agg = pd.DataFrame({
+        "driverId": uniques,
+        "teammate_delta": delta_sum / np.clip(w_sum, 1e-6, None)
+    })
 
-    return agg[["driverId", "teammate_delta"]]
+    return agg
 
 
 def compute_circuit_globals(hist: pd.DataFrame, circuit_id: str, ref_date: datetime) -> Dict[str, float]:
@@ -869,9 +908,17 @@ def compute_grid_finish_delta(
     races["w"] = w
 
     races["weighted_gain"] = races["gain"] * races["w"]
-    sums = races.groupby("driverId")[["weighted_gain", "w"]].sum().reset_index()
-    sums["grid_finish_delta"] = sums["weighted_gain"] / sums["w"].clip(lower=1e-6)
-    return sums[["driverId", "grid_finish_delta"]]
+    races = races.dropna(subset=["driverId"])
+
+    driver_codes, uniques = pd.factorize(races["driverId"])
+    w_sum = np.bincount(driver_codes, weights=races["w"])
+    gain_sum = np.bincount(driver_codes, weights=races["weighted_gain"])
+
+    sums = pd.DataFrame({
+        "driverId": uniques,
+        "grid_finish_delta": gain_sum / np.clip(w_sum, 1e-6, None)
+    })
+    return sums
 
 
 def _aggregate_weather(om: OpenMeteoClient, lat: float, lon: float, event_dt: datetime) -> Dict[str, float]:
