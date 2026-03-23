@@ -153,6 +153,7 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     qual_delta = qual["q_delta"].values.astype(float)
     qual_dates = pd.to_datetime(qual["date"], utc=True).values
     qual_seasons = qual["season"].values
+    qual_sessions = qual["session"].values
 
     # Handle NaN grids gracefully in numpy arrays
     races_grid = races["grid"].values
@@ -205,10 +206,22 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         w_sum = np.bincount(p_dcodes, weights=w, minlength=n_drivers)
         wval_sum = np.bincount(p_dcodes, weights=wval, minlength=n_drivers)
 
+
         # Compute form index safely
         valid = w_sum > 0
         form_index = np.zeros(n_drivers, dtype=float)
         form_index[valid] = wval_sum[valid] / np.maximum(w_sum[valid], 1e-6)
+
+        # --- Calculate sprint_form_index ---
+        is_sprint = (p_sess == "sprint")
+        sprint_form_index = np.zeros(n_drivers, dtype=float)
+        valid_sprint = np.zeros(n_drivers, dtype=bool)
+        if np.any(is_sprint):
+            sw_sum = np.bincount(p_dcodes[is_sprint], weights=w[is_sprint], minlength=n_drivers)
+            swval_sum = np.bincount(p_dcodes[is_sprint], weights=wval[is_sprint], minlength=n_drivers)
+            valid_sprint = sw_sum > 0
+            sprint_form_index[valid_sprint] = swval_sum[valid_sprint] / np.maximum(sw_sum[valid_sprint], 1e-6)
+
 
         # --- Calculate team_form_index ---
         p_pts = races_pts[prior_mask]
@@ -268,9 +281,13 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
             cf_valid = cwf_sum > 0
             c_avg_pos[cf_valid] = cwfval_sum[cf_valid] / np.maximum(cwf_sum[cf_valid], 1e-6)
 
+
         # --- Calculate qualifying_form_index & teammate_delta ---
         q_form_index = np.zeros(n_drivers, dtype=float)
         tm_delta_index = np.zeros(n_drivers, dtype=float)
+        sprint_q_form_index = np.zeros(n_drivers, dtype=float)
+        valid_sq = np.zeros(n_drivers, dtype=bool)
+
         prior_q_mask = qual_dates < d_val
         if np.any(prior_q_mask):
             pq_dates = qual_dates[prior_q_mask]
@@ -302,9 +319,22 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                 wqval_sum = np.bincount(pq_dcodes_sub, weights=wqval, minlength=n_drivers)
                 wqdelta_sum = np.bincount(pq_dcodes_sub, weights=wqval_delta, minlength=n_drivers)
 
+
                 valid_q = wq_sum > 0
                 q_form_index[valid_q] = wval_sum_val = wqval_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
                 tm_delta_index[valid_q] = wqdelta_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
+
+                # --- Calculate sprint_qualifying_form_index ---
+                pq_sessions = qual_sessions[prior_q_mask][valid_pq]
+                is_sq = (pq_sessions == "sprint_qualifying")
+                sprint_q_form_index = np.zeros(n_drivers, dtype=float)
+                valid_sq = np.zeros(n_drivers, dtype=bool)
+                if np.any(is_sq):
+                    sqw_sum = np.bincount(pq_dcodes_sub[is_sq], weights=wq[is_sq], minlength=n_drivers)
+                    sqwval_sum = np.bincount(pq_dcodes_sub[is_sq], weights=wqval[is_sq], minlength=n_drivers)
+                    valid_sq = sqw_sum > 0
+                    sprint_q_form_index[valid_sq] = sqwval_sum[valid_sq] / np.maximum(sqw_sum[valid_sq], 1e-6)
+
 
         # Build samples for the current event
         evt_indices = np.where(evt_mask)[0]
@@ -323,6 +353,8 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                 "qualifying_form_index": float(q_form_index[code]),
                 "team_form_index": float(team_form_index[t_code]) if t_code >= 0 else 0.0,
                 "driver_team_form_index": float(dt_form[dt_code]),
+                "sprint_form_index": float(sprint_form_index[code]) if valid_sprint[code] else float(form_index[code]),
+                "sprint_qualifying_form_index": float(sprint_q_form_index[code]) if valid_sq[code] else float(q_form_index[code]),
                 "team_tenure_events": float(dt_tenure[dt_code]),
                 "grid_finish_delta": float(gf_index[code]),
                 "teammate_delta": float(tm_delta_index[code]),
@@ -398,14 +430,30 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
         X_train = X
         logger.info("[models] Training GBM on current event (%d rows, no historical X available)", len(X))
 
+
     # Target: use appropriate form index for the session type
     # form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
-    is_quali_session = session_type in ("qualifying", "sprint_qualifying")
-    target_col = "qualifying_form_index" if is_quali_session else "form_index"
+    if session_type == "sprint":
+        target_col = "sprint_form_index"
+    elif session_type == "sprint_qualifying":
+        target_col = "sprint_qualifying_form_index"
+    else:
+        is_quali_session = session_type in ("qualifying", "sprint_qualifying")
+        target_col = "qualifying_form_index" if is_quali_session else "form_index"
 
     if target_col not in X_train.columns:
         # Fallback to general form if specific form is missing
-        target_col = "form_index" if target_col == "qualifying_form_index" else "qualifying_form_index"
+        if target_col == "sprint_form_index":
+            target_col = "form_index"
+        elif target_col == "sprint_qualifying_form_index":
+            target_col = "qualifying_form_index"
+            if target_col not in X_train.columns:
+                target_col = "form_index"
+        elif target_col == "qualifying_form_index":
+            target_col = "form_index"
+        else:
+            target_col = "qualifying_form_index"
+
 
     if target_col not in X_train.columns:
         y = np.zeros(len(X_train), dtype=float)
