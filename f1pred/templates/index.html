@@ -242,7 +242,7 @@
                                         </tr>
                                     </thead>
                                     <template x-for="(p, index) in data.predictions" :key="p.driverId">
-                                        <tbody class="border-none">
+                                        <tbody class="border-none hover:bg-white/5 transition-colors">
                                             <tr :class="getTeamClass(p.constructorName)" class="text-sm sm:text-base">
                                                 <!-- Position -->
                                                 <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 text-center font-black italic text-base sm:text-lg align-top"
