@@ -112,7 +112,8 @@
                     <div class="col-span-2 md:col-span-1">
                         <button @click="runPrediction()" :disabled="loading || !params.season || !params.round || params.sessions.length === 0"
                                 :title="(!params.season || !params.round) ? 'Select a season and round to predict' : (params.sessions.length === 0 ? 'Select at least one session' : '')"
-                                class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-95 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-900">
+                                class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 disabled:cursor-not-allowed group relative transition transform active:scale-95 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-900">
+                            <span class="sr-only" x-show="(!params.season || !params.round || params.sessions.length === 0)">Requires Season, Round, and Session to be selected</span>
                             <span x-show="!loading">RUN PREDICTION</span>
                             <span x-show="loading" class="flex items-center justify-center">
                                 <i class="fas fa-spinner animate-spin mr-2" aria-hidden="true"></i> PROCESSING...
