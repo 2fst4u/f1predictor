@@ -435,7 +435,43 @@
                 _lastStatusRound: null,
                 _lastScheduleSeason: null,
 
+                saveState() {
+                    try {
+                        const state = {
+                            params: this.params,
+                            results: this.results,
+                            activeSession: this.activeSession,
+                            _lastStatusSeason: this._lastStatusSeason,
+                            _lastStatusRound: this._lastStatusRound,
+                            _lastScheduleSeason: this._lastScheduleSeason
+                        };
+                        localStorage.setItem('f1_pred_state', JSON.stringify(state));
+                    } catch (e) {
+                        console.warn("Failed to save state to localStorage", e);
+                    }
+                },
+
+                loadState() {
+                    try {
+                        const saved = localStorage.getItem('f1_pred_state');
+                        if (saved) {
+                            const state = JSON.parse(saved);
+                            this.params = state.params || this.params;
+                            this.results = state.results || null;
+                            this.activeSession = state.activeSession || null;
+                            this._lastStatusSeason = state._lastStatusSeason || null;
+                            this._lastStatusRound = state._lastStatusRound || null;
+                            this._lastScheduleSeason = state._lastScheduleSeason || null;
+                            return true;
+                        }
+                    } catch (e) {
+                        console.warn("Failed to load state from localStorage", e);
+                    }
+                    return false;
+                },
+
                 async refreshData() {
+                    localStorage.removeItem('f1_pred_state');
                     this.params.season = '';
                     this.params.round = '';
                     this.params.sessions = [];
@@ -451,24 +487,36 @@
                     // Initialize windowWidth
                     this.windowWidth = window.innerWidth;
 
+                    const hasLoadedState = this.loadState();
+
                     try {
                         // Load Config
                         const configResp = await fetch('/api/config');
                         if (!configResp.ok) throw new Error(`HTTP ${configResp.status}`);
                         this.config = await configResp.json();
-                        this.params.sessions = this.config.default_sessions || ['qualifying', 'race'];
+
+                        if (!hasLoadedState) {
+                            this.params.sessions = this.config.default_sessions || ['qualifying', 'race'];
+                        }
 
                         // Load Seasons
                         const seasonsResp = await fetch('/api/seasons');
                         if (!seasonsResp.ok) throw new Error(`HTTP ${seasonsResp.status}`);
                         this.seasons = await seasonsResp.json();
 
-                        // Pre-select if available
-                        if (this.config.next_event) {
+                        // Pre-select if available AND we didn't load from state
+                        if (!hasLoadedState && this.config.next_event) {
                             this.params.season = this.config.next_event.season || '';
                             await this.fetchSchedule();
                             this.params.round = this.config.next_event.round || '';
                             await this.fetchEventStatus();
+                        } else if (hasLoadedState && this.params.season) {
+                            // If we have state, still fetch schedule to populate dropdowns
+                            // but our guard logic in fetchSchedule will handle idempotency
+                            const oldLastScheduleSeason = this._lastScheduleSeason;
+                            this._lastScheduleSeason = null; // Force fetch for dropdowns
+                            await this.fetchSchedule();
+                            this._lastScheduleSeason = oldLastScheduleSeason;
                         }
                     } catch (e) {
                         console.error("Failed to initialize app", e);
@@ -496,7 +544,7 @@
                         const data = await resp.json();
                         this.schedule = data.races || [];
                         // Reset round if current round is not in new schedule
-                        if (!this.schedule.some(r => r.round == this.params.round)) {
+                        if (!this.schedule.some(r => String(r.round) === String(this.params.round))) {
                             this.params.round = '';
                             this.eventSessions = [];
                         } else {
@@ -507,6 +555,7 @@
                     } finally {
                         this.scheduleLoading = false;
                         this._lastScheduleSeason = this.params.season;
+                        this.saveState();
                     }
                 },
 
@@ -514,15 +563,8 @@
                     const currentSeason = String(this.params.season || '');
                     const currentRound = String(this.params.round || '');
 
-                    // Only clear results if the newly selected event differs from the results we already have.
-                    // Use robust string comparison to avoid type mismatch issues.
-                    if (this.results) {
-                        if (String(this.results.season) !== currentSeason || String(this.results.round) !== currentRound) {
-                            this.results = null;
-                        }
-                    }
-
                     // Skip fetch if this specific event status was already loaded.
+                    // This is the primary guard against redundant calls during resize or layout shifts.
                     if (currentSeason === String(this._lastStatusSeason) && currentRound === String(this._lastStatusRound)) {
                         return;
                     }
@@ -533,6 +575,7 @@
                         this._lastStatusRound = null;
                         return;
                     }
+
                     this.eventSessions = [];
                     this.statusLoading = true;
                     try {
@@ -568,6 +611,7 @@
                         this.statusLoading = false;
                         this._lastStatusSeason = String(this.params.season);
                         this._lastStatusRound = String(this.params.round);
+                        this.saveState();
                     }
                 },
 
@@ -577,12 +621,12 @@
                     } else {
                         this.params.sessions.push(s);
                     }
+                    this.saveState();
                 },
 
                 async runPrediction() {
                     this.loading = true;
                     this.error = null;
-                    this.results = null;
                     this.logs = [];
                     this.currentLog = 'Starting prediction engine';
 
@@ -637,6 +681,7 @@
 
                         if (this.results && this.results.sessions) {
                             this.activeSession = Object.keys(this.results.sessions)[0];
+                            this.saveState();
                         } else if (!this.error) {
                             throw new Error("No results received from server");
                         }
