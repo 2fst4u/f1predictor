@@ -50,7 +50,7 @@
                     <span class="text-xs font-bold bg-black bg-opacity-20 px-2 py-1 rounded truncate max-w-[60px] sm:max-w-none inline-block">
                         <span class="sr-only">App Version </span><span aria-hidden="true">v</span><span x-text="config.app_version"></span>
                     </span>
-                    <button @click="refreshData()" :disabled="loading" aria-label="Refresh data" :title="loading ? 'Prediction in progress' : 'Refresh data'" class="bg-black bg-opacity-20 hover:bg-opacity-30 focus:outline-none focus:ring-2 focus:ring-white p-2 rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
+                    <button @click="refreshData()" :disabled="loading" aria-label="Refresh data" :title="loading ? 'Prediction in progress' : 'Refresh data'" class="bg-black bg-opacity-20 hover:bg-opacity-30 focus:outline-none focus-visible:ring-2 focus-visible:ring-white p-2 rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
                         <i class="fas fa-sync-alt" :class="loading ? 'animate-spin' : ''" aria-hidden="true"></i>
                     </button>
                 </div>
@@ -64,7 +64,7 @@
                     <div>
                         <label for="input-season" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Season</label>
                         <select id="input-season" x-model="params.season" @change="fetchSchedule()" :disabled="loading"
-                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
+                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
                             <option value="" x-text="seasons.length ? 'Select Season' : 'Loading seasons...'"></option>
                             <template x-for="s in seasons" :key="s.season">
                                 <option :value="s.season" x-text="s.season"></option>
@@ -74,7 +74,7 @@
                     <div>
                         <label for="input-round" class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
                         <select id="input-round" x-model="params.round" @change="fetchEventStatus()" :disabled="!params.season || scheduleLoading || loading" :title="!params.season ? 'Select a season first' : (scheduleLoading ? 'Loading schedule...' : (loading ? 'Prediction in progress' : 'Select a round'))"
-                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
+                                class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
                             <option value="" x-text="scheduleLoading ? 'Loading rounds...' : 'Select Round'"></option>
                             <template x-for="(r, index) in schedule" :key="r.round || index">
                                 <option :value="r.round" x-text="'Round ' + (r.round || index + 1) + ': ' + r.raceName"></option>
@@ -89,7 +89,7 @@
                                         :disabled="loading"
                                         :aria-pressed="params.sessions.includes(s.id).toString()"
                                         :class="params.sessions.includes(s.id) ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400'"
-                                        class="text-xs px-2 py-1 rounded border border-gray-700 hover:border-red-500 transition focus:outline-none focus:ring-2 focus:ring-red-500 flex items-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                                        class="text-xs px-2 py-1 rounded border border-gray-700 hover:border-red-500 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 flex items-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed">
                                     <span x-text="s.id.replace('_', ' ').toUpperCase()"></span>
                                     <template x-if="s.has_results">
                                         <span>
@@ -112,7 +112,7 @@
                     <div class="col-span-2 md:col-span-1">
                         <button @click="runPrediction()" :disabled="loading || !params.season || !params.round || params.sessions.length === 0"
                                 :title="(!params.season || !params.round) ? 'Select a season and round to predict' : (params.sessions.length === 0 ? 'Select at least one session' : '')"
-                                class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 disabled:cursor-not-allowed group relative transition transform active:scale-95 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-900">
+                                class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 disabled:cursor-not-allowed group relative transition transform active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900">
                             <span class="sr-only" x-show="(!params.season || !params.round || params.sessions.length === 0)">Requires Season, Round, and Session to be selected</span>
                             <span x-show="!loading">RUN PREDICTION</span>
                             <span x-show="loading" class="flex items-center justify-center">
@@ -130,7 +130,7 @@
                         <p class="font-bold">Error</p>
                         <p x-text="error"></p>
                     </div>
-                    <button @click="error = null" aria-label="Dismiss error" title="Dismiss error" class="text-red-300 hover:text-white focus:outline-none focus:ring-2 focus:ring-white rounded p-1 transition">
+                    <button @click="error = null" aria-label="Dismiss error" title="Dismiss error" class="text-red-300 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white rounded p-1 transition">
                         <i class="fas fa-times" aria-hidden="true"></i>
                     </button>
                 </div>
@@ -174,7 +174,7 @@
                                 :id="'tab-' + sess"
                                 :aria-controls="'panel-' + sess"
                                 :class="activeSession === sess ? 'border-red-600 text-red-500' : 'border-transparent text-gray-400 hover:text-gray-200'"
-                                class="py-3 px-2 sm:px-6 font-bold uppercase tracking-widest text-xs sm:text-sm border-b-2 transition whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                                class="py-3 px-2 sm:px-6 font-bold uppercase tracking-widest text-xs sm:text-sm border-b-2 transition whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:border-transparent"
                                 x-text="sess.replace('_', ' ')">
                         </button>
                     </template>
@@ -187,7 +187,7 @@
                          :id="'panel-' + sess"
                          :aria-labelledby="'tab-' + sess"
                          tabindex="0"
-                         class="focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 rounded-lg">
+                         class="focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-opacity-50 rounded-lg">
 
                         <!-- Weather Info -->
                         <div class="grid grid-cols-3 md:grid-cols-5 gap-2 sm:gap-4 mb-6">
