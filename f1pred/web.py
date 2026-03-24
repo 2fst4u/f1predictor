@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any, List, Optional
 import os
+import asyncio
 
 import json
 import math
@@ -15,6 +16,7 @@ from .util import get_logger, init_caches, ensure_dirs, __version__
 from .predict import run_predictions_for_event, resolve_event
 from .data.jolpica import JolpicaClient
 from .data.fastf1_backend import init_fastf1
+from .prediction_manager import PredictionManager
 
 logger = get_logger(__name__)
 
@@ -42,6 +44,7 @@ def _sanitize_for_json(v: Any, _math: Any = math) -> Any:
 # Global app and config
 app = FastAPI(title="F1 Prediction Web UI")
 _config: AppConfig = None
+_prediction_manager: Optional[PredictionManager] = None
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
@@ -67,7 +70,7 @@ async def add_security_headers(request: Request, call_next):
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
 def init_web(cfg: AppConfig):
-    global _config
+    global _config, _prediction_manager
     _config = cfg
 
     # Initialize directories (include fastf1_cache so init_fastf1 finds it)
@@ -82,6 +85,21 @@ def init_web(cfg: AppConfig):
 
     # Initialize HTTP cache
     init_caches(cfg)
+
+    # Start background prediction manager
+    poll_interval = getattr(cfg.app, 'auto_refresh_seconds', 3600)
+    _prediction_manager = PredictionManager(cfg, poll_interval=poll_interval)
+    _prediction_manager.start()
+    logger.info("Background prediction manager started (interval=%ds)", poll_interval)
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Clean shutdown of background prediction manager."""
+    global _prediction_manager
+    if _prediction_manager:
+        _prediction_manager.stop()
+        _prediction_manager = None
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -354,3 +372,63 @@ async def get_predictions_stream(
             yield f"data: {json.dumps(item)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/api/predictions/live")
+async def predictions_live():
+    """SSE endpoint for real-time prediction updates.
+
+    Sends:
+      - type=prediction: full current prediction state (on connect + each update)
+      - type=diff: position changes with reasons (when changes detected)
+      - type=status: manager status updates
+      - type=heartbeat: keepalive every 30s
+    """
+    if not _prediction_manager:
+        raise HTTPException(status_code=503, detail="Prediction manager not initialized")
+
+    subscriber_queue = _prediction_manager.subscribe()
+
+    async def event_generator():
+        try:
+            # Send initial state if available
+            latest = _prediction_manager.latest_results
+            if latest:
+                yield f"data: {json.dumps({'type': 'prediction', 'data': latest, 'timestamp': _prediction_manager.last_update})}\n\n"
+
+            # Send any recent diffs
+            diffs = _prediction_manager.latest_diffs
+            for diff in diffs[-5:]:  # Last 5 diffs
+                yield f"data: {json.dumps({'type': 'diff', 'data': diff, 'timestamp': diff.get('timestamp', '')})}\n\n"
+
+            # Send current status
+            yield f"data: {json.dumps({'type': 'status', 'status': _prediction_manager.status, 'last_update': _prediction_manager.last_update})}\n\n"
+
+            # Stream updates
+            while True:
+                try:
+                    event = await asyncio.wait_for(subscriber_queue.get(), timeout=30)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    # Send heartbeat
+                    yield f": heartbeat\n\n"
+                except Exception:
+                    break
+        finally:
+            _prediction_manager.unsubscribe(subscriber_queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/api/predictions/latest")
+async def predictions_latest():
+    """Return the latest cached prediction and recent diffs (polling fallback)."""
+    if not _prediction_manager:
+        raise HTTPException(status_code=503, detail="Prediction manager not initialized")
+
+    return {
+        "results": _prediction_manager.latest_results,
+        "diffs": _prediction_manager.latest_diffs,
+        "last_update": _prediction_manager.last_update,
+        "status": _prediction_manager.status,
+    }

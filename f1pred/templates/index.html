@@ -35,6 +35,25 @@
         .progress-fill { height: 100%; border-radius: 4px; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Live indicator pulse animation */
+        @keyframes pulse-live {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.85); }
+        }
+        .live-pulse { animation: pulse-live 2s ease-in-out infinite; }
+
+        /* Movement highlight flash */
+        @keyframes flash-up {
+            0% { background-color: rgba(34, 197, 94, 0.3); }
+            100% { background-color: transparent; }
+        }
+        @keyframes flash-down {
+            0% { background-color: rgba(239, 68, 68, 0.3); }
+            100% { background-color: transparent; }
+        }
+        .movement-up { animation: flash-up 3s ease-out forwards; }
+        .movement-down { animation: flash-down 3s ease-out forwards; }
     </style>
 </head>
 <body x-data="f1App()" x-init="init()" @resize.window.throttle.100ms="windowWidth = window.innerWidth">
@@ -44,6 +63,19 @@
             <div class="max-w-[1400px] w-full mx-auto flex justify-between items-center flex-wrap gap-2">
                 <h1 class="text-xl md:text-2xl font-black tracking-tighter italic whitespace-nowrap">F1 OUTCOME PREDICTOR</h1>
                 <div class="flex items-center space-x-2 min-w-0">
+                    <!-- Live indicator -->
+                    <template x-if="liveConnected">
+                        <span class="flex items-center space-x-1 bg-black bg-opacity-20 px-2 py-1 rounded" :title="'Live updates active. Last update: ' + (liveLastUpdate || 'never')">
+                            <span class="w-2 h-2 rounded-full bg-green-400 live-pulse" aria-hidden="true"></span>
+                            <span class="text-xs font-bold text-green-300 uppercase tracking-tighter">Live</span>
+                        </span>
+                    </template>
+                    <template x-if="!liveConnected && liveReconnecting">
+                        <span class="flex items-center space-x-1 bg-black bg-opacity-20 px-2 py-1 rounded" title="Reconnecting to live updates...">
+                            <span class="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" aria-hidden="true"></span>
+                            <span class="text-xs font-bold text-yellow-300 uppercase tracking-tighter">Reconnecting</span>
+                        </span>
+                    </template>
                     <span class="text-xs font-bold text-white text-opacity-60 uppercase tracking-tighter truncate max-w-[80px] sm:max-w-none inline-block">
                         <span class="sr-only">Model Version </span><span aria-hidden="true">M:</span><span x-text="config.model_version"></span>
                     </span>
@@ -157,6 +189,40 @@
                 </div>
             </div>
 
+            <!-- Recent Changes Panel -->
+            <template x-if="recentChanges.length > 0">
+                <div x-show="!loading" x-transition x-cloak class="card p-4 mb-4 md:mb-8 border-l-4 border-green-500 shadow-xl">
+                    <details open>
+                        <summary class="flex items-center cursor-pointer mb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 rounded">
+                            <i class="fas fa-exchange-alt mr-2 text-green-400" aria-hidden="true"></i>
+                            <h3 class="text-xs font-bold uppercase tracking-widest text-gray-400">Recent Position Changes</h3>
+                            <span class="ml-2 text-xs bg-green-600 text-white px-1.5 py-0.5 rounded-full" x-text="recentChanges.length"></span>
+                        </summary>
+                        <div class="space-y-2 max-h-48 overflow-y-auto">
+                            <template x-for="(change, ci) in recentChanges" :key="ci">
+                                <div class="bg-black bg-opacity-30 rounded p-2 text-sm flex items-center gap-3">
+                                    <span class="text-xs text-gray-500 font-mono w-14 flex-shrink-0" x-text="new Date(change.timestamp).toLocaleTimeString()"></span>
+                                    <span class="font-bold uppercase tracking-tighter w-10 text-center" :class="change.direction > 0 ? 'text-green-400' : 'text-red-400'">
+                                        <span x-text="change.code"></span>
+                                    </span>
+                                    <span class="text-gray-300 truncate" x-text="change.driver_name"></span>
+                                    <span class="flex items-center gap-1 flex-shrink-0">
+                                        <span class="text-gray-500" x-text="'P' + change.old_position"></span>
+                                        <i class="fas fa-long-arrow-alt-right text-gray-600" aria-hidden="true"></i>
+                                        <span class="font-bold" :class="change.direction > 0 ? 'text-green-400' : 'text-red-400'" x-text="'P' + change.new_position"></span>
+                                        <span :class="change.direction > 0 ? 'text-green-400' : 'text-red-400'">
+                                            <i class="fas" :class="change.direction > 0 ? 'fa-caret-up' : 'fa-caret-down'" aria-hidden="true"></i>
+                                            <span x-text="Math.abs(change.direction)"></span>
+                                        </span>
+                                    </span>
+                                    <span class="text-xs text-gray-500 truncate hidden sm:inline" x-text="change.reasons.join(', ')"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </details>
+                </div>
+            </template>
+
             <!-- Results Section -->
             <div x-show="results && !loading" x-transition x-cloak>
                 <div class="flex items-center justify-between mb-4">
@@ -243,7 +309,7 @@
                                     </thead>
                                     <template x-for="(p, index) in data.predictions" :key="p.driverId">
                                         <tbody class="border-none hover:bg-white/5 transition-colors">
-                                            <tr :class="getTeamClass(p.constructorName)" class="text-sm sm:text-base">
+                                            <tr :class="[getTeamClass(p.constructorName), getMovementClass(p.driverId, sess)]" class="text-sm sm:text-base transition-colors">
                                                 <!-- Position -->
                                                 <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 text-center font-black italic text-base sm:text-lg align-top"
                                                     :class="index === 0 ? 'text-yellow-400' : index === 1 ? 'text-gray-300' : index === 2 ? 'text-amber-600' : 'text-gray-500'"
@@ -251,6 +317,13 @@
                                                 <!-- Driver -->
                                                 <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 align-top">
                                                     <div class="flex items-center space-x-1 sm:space-x-3 mb-0.5">
+                                                        <!-- Movement arrow -->
+                                                        <template x-if="getDriverMovement(p.driverId, sess)">
+                                                            <span class="flex-shrink-0 text-xs font-bold flex items-center gap-0.5" :class="getDriverMovement(p.driverId, sess).direction > 0 ? 'text-green-400' : 'text-red-400'" :title="getDriverMovement(p.driverId, sess).reasons.join(', ')">
+                                                                <i class="fas" :class="getDriverMovement(p.driverId, sess).direction > 0 ? 'fa-caret-up' : 'fa-caret-down'" aria-hidden="true"></i>
+                                                                <span x-text="Math.abs(getDriverMovement(p.driverId, sess).direction)"></span>
+                                                            </span>
+                                                        </template>
                                                         <div class="font-bold uppercase tracking-tighter" x-text="p.code || '???'"></div>
                                                         <div class="font-semibold text-gray-200 truncate max-w-[120px] sm:max-w-none" x-text="p.name"></div>
                                                     </div>
@@ -438,6 +511,16 @@
                 _lastStatusRound: null,
                 _lastScheduleSeason: null,
 
+                // Live prediction state
+                liveConnected: false,
+                liveReconnecting: false,
+                liveLastUpdate: null,
+                _liveEventSource: null,
+                _liveReconnectTimer: null,
+                recentChanges: [],       // Array of DriverMovement objects
+                _movements: {},          // session -> { driverId -> movement object }
+                _movementTimers: {},     // driverId -> timeout id
+
                 saveState() {
                     try {
                         const state = {
@@ -525,6 +608,129 @@
                         console.error("Failed to initialize app", e);
                         this.error = "Failed to initialize application data. Check your connection.";
                     }
+
+                    // Start live SSE connection
+                    this.connectLive();
+                },
+
+                connectLive() {
+                    // Close existing connection if any
+                    if (this._liveEventSource) {
+                        this._liveEventSource.close();
+                        this._liveEventSource = null;
+                    }
+                    if (this._liveReconnectTimer) {
+                        clearTimeout(this._liveReconnectTimer);
+                        this._liveReconnectTimer = null;
+                    }
+
+                    this.liveReconnecting = true;
+
+                    const eventSource = new EventSource('/api/predictions/live');
+                    this._liveEventSource = eventSource;
+
+                    eventSource.onopen = () => {
+                        this.liveConnected = true;
+                        this.liveReconnecting = false;
+                        console.log('[Live] Connected to prediction stream');
+                    };
+
+                    eventSource.onmessage = (event) => {
+                        try {
+                            const payload = JSON.parse(event.data);
+                            this.handleLiveEvent(payload);
+                        } catch (e) {
+                            console.error('[Live] Failed to parse message', e);
+                        }
+                    };
+
+                    eventSource.onerror = () => {
+                        this.liveConnected = false;
+                        eventSource.close();
+                        this._liveEventSource = null;
+                        console.warn('[Live] Connection lost, reconnecting in 10s...');
+                        this.liveReconnecting = true;
+                        this._liveReconnectTimer = setTimeout(() => this.connectLive(), 10000);
+                    };
+                },
+
+                handleLiveEvent(payload) {
+                    if (payload.type === 'prediction' && payload.data) {
+                        // Only auto-update if user is viewing the same event
+                        const data = payload.data;
+                        const viewingSameEvent = (
+                            String(this.params.season) === String(data.season) &&
+                            String(this.params.round) === String(data.round)
+                        );
+
+                        if (viewingSameEvent || !this.results) {
+                            this.results = data;
+                            if (!this.activeSession && data.sessions) {
+                                this.activeSession = Object.keys(data.sessions)[0];
+                            }
+                            this.saveState();
+                        }
+
+                        this.liveLastUpdate = payload.timestamp
+                            ? new Date(payload.timestamp).toLocaleTimeString()
+                            : new Date().toLocaleTimeString();
+                    }
+
+                    if (payload.type === 'diff' && payload.data) {
+                        const diff = payload.data;
+
+                        // Store movements per session for row highlighting
+                        if (!this._movements[diff.session]) {
+                            this._movements[diff.session] = {};
+                        }
+
+                        for (const m of diff.movements || []) {
+                            // Add to recent changes
+                            this.recentChanges.unshift({
+                                ...m,
+                                session: diff.session,
+                                timestamp: diff.timestamp || new Date().toISOString(),
+                            });
+
+                            // Store for row highlighting
+                            this._movements[diff.session][m.driver_id] = m;
+
+                            // Auto-clear highlight after 30 seconds
+                            const timerId = `${diff.session}_${m.driver_id}`;
+                            if (this._movementTimers[timerId]) {
+                                clearTimeout(this._movementTimers[timerId]);
+                            }
+                            this._movementTimers[timerId] = setTimeout(() => {
+                                if (this._movements[diff.session]) {
+                                    delete this._movements[diff.session][m.driver_id];
+                                }
+                                delete this._movementTimers[timerId];
+                            }, 30000);
+                        }
+
+                        // Cap recent changes at 20
+                        if (this.recentChanges.length > 20) {
+                            this.recentChanges = this.recentChanges.slice(0, 20);
+                        }
+                    }
+
+                    if (payload.type === 'status') {
+                        if (payload.last_update) {
+                            this.liveLastUpdate = new Date(payload.last_update).toLocaleTimeString();
+                        }
+                    }
+                },
+
+                getDriverMovement(driverId, session) {
+                    const sessionMovements = this._movements[session];
+                    if (!sessionMovements) return null;
+                    return sessionMovements[driverId] || null;
+                },
+
+                getMovementClass(driverId, session) {
+                    const m = this.getDriverMovement(driverId, session);
+                    if (!m) return '';
+                    return m.direction > 0 ? 'movement-up' : 'movement-down';
                 },
 
                 async fetchSchedule() {

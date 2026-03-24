@@ -6,6 +6,7 @@ app:
   random_seed: 42
   timezone: "UTC"
   live_refresh_seconds: 600
+  auto_refresh_seconds: 3600  # Background prediction refresh interval (seconds)
   log_level: "WARNING"  # DEBUG, INFO, WARNING, ERROR - reduces default verbosity
 
 paths:

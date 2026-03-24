@@ -15,6 +15,7 @@ class AppSettings:
     timezone: str
     live_refresh_seconds: int
     log_level: str = "WARNING"
+    auto_refresh_seconds: int = 3600
 
 
 @dataclass
@@ -304,6 +305,12 @@ def load_config(path: str) -> AppConfig:
             refresh = app_cfg["live_refresh_seconds"]
             if not isinstance(refresh, int) or refresh < 10:
                 errors.append("app.live_refresh_seconds must be at least 10 seconds to prevent API abuse")
+
+        # Auto Refresh: Background prediction poll interval
+        if "auto_refresh_seconds" in app_cfg:
+            auto_refresh = app_cfg["auto_refresh_seconds"]
+            if not isinstance(auto_refresh, int) or auto_refresh < 60:
+                errors.append("app.auto_refresh_seconds must be at least 60 seconds")
 
     except KeyError as e:
         errors.append(str(e))
