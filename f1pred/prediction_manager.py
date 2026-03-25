@@ -28,7 +28,7 @@ __all__ = [
 # Human-readable reasons for variable changes
 _CHANGE_REASONS = {
     "weather": "Weather forecast updated",
-    "grid": "Grid positions updated (session results available)",
+    "grid": "Grid positions changed",
     "calibration": "Model calibration weights updated",
     "roster": "Driver roster changed",
     "features": "Driver form/stats updated",
@@ -115,34 +115,82 @@ def compute_prediction_diff(
     # Detect changed variables
     changed_vars: List[str] = []
 
-    # Weather change detection
+    # Weather change detection (uses tolerance)
     if old_weather and new_weather:
         weather_keys = ["temp_mean", "rain_sum", "wind_mean", "pressure_mean", "humidity_mean"]
         for wk in weather_keys:
             ov = old_weather.get(wk)
             nv = new_weather.get(wk)
             if ov is not None and nv is not None:
-                # Use relative threshold for meaningful change
                 if abs(ov - nv) > max(0.5, abs(ov) * 0.05):
                     changed_vars.append(_CHANGE_REASONS["weather"])
                     break
     elif (old_weather is None) != (new_weather is None):
         changed_vars.append(_CHANGE_REASONS["weather"])
 
-    # Grid change detection
-    old_grids = {p["driverId"]: p.get("grid") for p in old_predictions if p.get("driverId")}
-    new_grids = {p["driverId"]: p.get("grid") for p in new_predictions if p.get("driverId")}
-    if old_grids != new_grids:
+    # Grid change detection — only flag if a grid value meaningfully changed
+    # (i.e. None/missing → integer, or integer changed value)
+    def _normalise_grid(v):
+        """Normalise grid values: treat None, NaN, 0, and missing as 'unset'."""
+        if v is None:
+            return None
+        if isinstance(v, float):
+            import math
+            if math.isnan(v) or v == 0.0:
+                return None
+            return int(v)
+        if isinstance(v, int) and v == 0:
+            return None
+        return int(v) if isinstance(v, (int, float)) else None
+
+    old_grids = {p["driverId"]: _normalise_grid(p.get("grid"))
+                 for p in old_predictions if p.get("driverId")}
+    new_grids = {p["driverId"]: _normalise_grid(p.get("grid"))
+                 for p in new_predictions if p.get("driverId")}
+    # Only flag if at least one driver got a *new* grid value (None→int)
+    grid_changed = False
+    for did in set(old_grids) | set(new_grids):
+        og = old_grids.get(did)
+        ng = new_grids.get(did)
+        if og != ng and ng is not None:
+            grid_changed = True
+            break
+    if grid_changed:
         changed_vars.append(_CHANGE_REASONS["grid"])
 
-    # Feature-level change detection (form indices etc.)
+    # Feature-level change detection — use tolerance for floats
+    def _values_close(a, b, tol=1e-3):
+        """Check if two values are effectively equal, handling None/NaN."""
+        if a is None and b is None:
+            return True
+        if a is None or b is None:
+            return False
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            import math
+            if math.isnan(a) and math.isnan(b):
+                return True
+            if math.isnan(a) or math.isnan(b):
+                return False
+            return abs(a - b) < tol
+        return a == b
+
     feature_keys = ["form_index", "qualifying_form_index", "team_form_index",
                      "driver_team_form_index", "circuit_avg_pos"]
-    old_feats = {p["driverId"]: {k: p.get(k) for k in feature_keys}
-                 for p in old_predictions if p.get("driverId")}
-    new_feats = {p["driverId"]: {k: p.get(k) for k in feature_keys}
-                 for p in new_predictions if p.get("driverId")}
-    if old_feats != new_feats:
+    features_changed = False
+    for p_old in old_predictions:
+        did = p_old.get("driverId")
+        if not did:
+            continue
+        p_new = next((p for p in new_predictions if p.get("driverId") == did), None)
+        if not p_new:
+            continue
+        for fk in feature_keys:
+            if not _values_close(p_old.get(fk), p_new.get(fk)):
+                features_changed = True
+                break
+        if features_changed:
+            break
+    if features_changed:
         changed_vars.append(_CHANGE_REASONS["features"])
 
     if not changed_vars:
@@ -215,16 +263,19 @@ def compute_prediction_diff(
 
 
 def _fingerprint_predictions(predictions: List[Dict[str, Any]]) -> str:
-    """Generate a stable hash from prediction results for change detection."""
-    # Only hash the fields that matter for position ordering
+    """Generate a stable hash from prediction results for change detection.
+
+    Uses coarse rounding (2 decimal places) to avoid false diffs from
+    Monte Carlo probability jitter at rounding boundaries.
+    """
     key_data = []
     for p in sorted(predictions, key=lambda x: x.get("driverId", "")):
         key_data.append({
             "driverId": p.get("driverId"),
             "predicted_position": p.get("predicted_position"),
-            "p_win": round(p.get("p_win", 0), 4),
-            "p_top3": round(p.get("p_top3", 0), 4),
-            "mean_pos": round(p.get("mean_pos", 0), 4),
+            "p_win": round(p.get("p_win", 0), 2),
+            "p_top3": round(p.get("p_top3", 0), 2),
+            "mean_pos": round(p.get("mean_pos", 0), 1),
         })
     return hashlib.sha256(json.dumps(key_data, sort_keys=True).encode()).hexdigest()
 
@@ -370,8 +421,22 @@ class PredictionManager:
         event_title = f"{race_info.get('raceName', 'Event')} {season_i} R{round_i}"
         logger.info("[PredictionManager] Running predictions for %s", event_title)
 
-        # Determine sessions to predict
-        sessions = self.cfg.modelling.targets.session_types
+        # Determine sessions to predict — filter to only applicable sessions
+        # (sprint sessions only if the event is a sprint weekend)
+        all_sessions = self.cfg.modelling.targets.session_types
+        sessions = []
+        for s in all_sessions:
+            if s in ("qualifying", "race"):
+                sessions.append(s)
+            elif s == "sprint" and "Sprint" in race_info:
+                sessions.append(s)
+            elif s == "sprint_qualifying" and "SprintQualifying" in race_info:
+                sessions.append(s)
+
+        if not sessions:
+            sessions = ["qualifying", "race"]  # Fallback
+
+        logger.info("[PredictionManager] Sessions for %s: %s", event_title, sessions)
 
         def progress_cb(msg: str):
             self._broadcast({"type": "log", "message": msg})

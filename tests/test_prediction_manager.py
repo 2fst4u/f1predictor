@@ -112,7 +112,7 @@ class TestComputePredictionDiff:
         new = [self._make_pred("d1", 2, grid=5), self._make_pred("d2", 1, grid=1)]
         result = compute_prediction_diff("race", old, new)
         assert result is not None
-        assert "Grid positions updated (session results available)" in result.changed_variables
+        assert "Grid positions changed" in result.changed_variables
 
     def test_diff_with_shap_reasons(self):
         old = [
