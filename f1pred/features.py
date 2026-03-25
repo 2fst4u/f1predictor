@@ -164,7 +164,6 @@ def exponential_weights(dates: Union[List[datetime], pd.Series], ref_date: datet
 def _empty_feature_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=[
         "driverId", "constructorId", "form_index", "team_form_index",
-        "driver_team_form_index", "team_tenure_events",
         "weather_beta_temp", "weather_beta_pressure", "weather_beta_wind", "weather_beta_rain",
         "weather_effect",
         "temp_skill", "rain_skill", "wind_skill", "pressure_skill",
@@ -1336,10 +1335,6 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
     else:
         team_idx = pd.DataFrame(columns=["constructorId", "team_form_index"])
 
-    drv_team_form = compute_driver_team_form(
-        hist, roster, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.team, window_days=730,
-        current_season=s_int, boost_factor=boost
-    )
 
     # New dynamic features: teammate_delta & grid_finish_delta
     try:
@@ -1441,7 +1436,6 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         X = X.merge(sprint_form, on="driverId", how="left")
         X = X.merge(sprint_qual_form, on="driverId", how="left")
         X = X.merge(team_idx, on="constructorId", how="left")
-        X = X.merge(drv_team_form, on="driverId", how="left")
         X = X.merge(beta_df, on="driverId", how="left")
         X = X.merge(weather_df, on="driverId", how="left")
         X = X.merge(tm_delta, on="driverId", how="left")
@@ -1484,7 +1478,6 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         neutral_sprint_qual_form = sprint_qual_form["sprint_qualifying_form_index"].median() if not sprint_qual_form.empty else neutral_qual_form
 
         neutral_team_form = team_idx["team_form_index"].median() if not team_idx.empty else -10.0
-        neutral_drv_team_form = drv_team_form["driver_team_form_index"].median() if not drv_team_form.empty else -10.0
         
         # For deltas (teammate comparison), default to the median observed delta 
         # to assume a rookie is roughly average relative to their teammate initially.
@@ -1505,8 +1498,6 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
             "sprint_form_index": neutral_sprint_form,
             "sprint_qualifying_form_index": neutral_sprint_qual_form,
             "team_form_index": neutral_team_form,
-            "driver_team_form_index": neutral_drv_team_form,
-            "team_tenure_events": 0.0,
             # Weather betas: 0.0 is fine (no correlation)
             "weather_beta_temp": 0.0, 
             "weather_beta_pressure": 0.0, 
