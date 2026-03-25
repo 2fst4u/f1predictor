@@ -31,7 +31,6 @@ def test_pace_model_order_makes_sense(sample_features):
     # (form_index is HIGHER = BETTER: -position + points)
     sample_features['form_index'] = np.arange(len(sample_features), dtype=float)
     sample_features['team_form_index'] = 0.0
-    sample_features['driver_team_form_index'] = 0.0
 
     _, pace_hat, _, _ = train_pace_model(sample_features, session_type='race')
 

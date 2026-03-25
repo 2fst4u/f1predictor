@@ -89,7 +89,7 @@ PARAM_BOUNDS = [
     (0.05, 1.0),    # 0  gbm_weight
     (0.05, 1.0),    # 1  baseline_weight
     (0.2, 2.0),     # 2  baseline_team_factor
-    (0.0, 2.0),     # 3  baseline_driver_team_factor
+    (0.0, 0.0),     # 3  baseline_driver_team_factor (DEPRECATED — kept for vector compat)
     (0.1, 0.95),    # 4  grid_factor
     (0.0, 1.0),     # 5  ens_pace
     (0.0, 1.0),     # 6  ens_elo
@@ -119,7 +119,7 @@ PARAM_DEFAULTS = [
     0.75,   # 0  gbm_weight
     0.25,   # 1  baseline_weight
     0.3,    # 2  baseline_team_factor
-    0.2,    # 3  baseline_driver_team_factor
+    0.0,    # 3  baseline_driver_team_factor (DEPRECATED)
     0.8,    # 4  grid_factor
     0.4,    # 5  ens_pace
     0.2,    # 6  ens_elo
@@ -566,7 +566,6 @@ class CalibrationManager:
                 # Baseline components (boosted form as computed by features.py)
                 base_form = -X_evt["form_index"].fillna(0).astype(float).values
                 base_team = -X_evt.get("team_form_index", pd.Series(0, index=X_evt.index)).fillna(0).astype(float).values
-                base_dt = -X_evt.get("driver_team_form_index", pd.Series(0, index=X_evt.index)).fillna(0).astype(float).values
 
                 # Compute UNBOOSTED form indices for the same drivers so the
                 # objective function can recompute form = unboosted + boost * cur_season_only.
@@ -617,7 +616,6 @@ class CalibrationManager:
                         "gbm_raw": pace_hat[idx],
                         "base_form": base_form[idx],
                         "base_team": base_team[idx],
-                        "base_dt": base_dt[idx],
                         # Decomposed form: unboosted (all history) + current-season-only
                         "form_unboosted": unboosted_map.get(drv_id, base_form[idx]),
                         "form_cur_season": cur_form_map.get(drv_id, 0.0),
@@ -708,7 +706,6 @@ class CalibrationManager:
             arr_gbm_raw = df_calib["gbm_raw"].values
             _ = df_calib["base_form"].values
             arr_base_team = df_calib["base_team"].values
-            arr_base_dt = df_calib["base_dt"].values
             arr_elo = df_calib["elo"].values
             arr_bt = df_calib["bt"].values
             arr_mixed = df_calib["mixed"].values
@@ -786,8 +783,7 @@ class CalibrationManager:
                 # ---- Race objective ----
                 raw_pace = (wb_gbm * arr_gbm_raw
                             + wb_form * effective_form
-                            + wb_tm * arr_base_team
-                            + wb_dt * arr_base_dt)
+                            + wb_tm * arr_base_team)
 
                 grid_imp = np.clip(wb_grid, 0.0, 1.0)
 

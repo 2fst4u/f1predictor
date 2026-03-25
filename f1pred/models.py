@@ -117,14 +117,6 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         ).values
         r_full_dnf = ((pd.isna(rf_pos.astype(float))) | is_dnf_status).astype(float)
 
-    # Pre-calculate driver-team pairs for driver_team_form_index
-    # Ensure constructorId exists (it might be missing in some test datasets)
-    if "constructorId" not in races.columns:
-        races = races.assign(constructorId=None)
-
-    dt_keys = (races["driverId"].astype(str) + "_" + races["constructorId"].astype(str)).values
-    dt_codes, dt_uniques = pd.factorize(dt_keys)
-    n_dt = len(dt_uniques)
 
     # Extract keys and other required data
     races_dates = pd.to_datetime(races["date"], utc=True).values
@@ -244,14 +236,6 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
             g_valid = gw_sum > 0
             gf_index[g_valid] = gwval_sum[g_valid] / np.maximum(gw_sum[g_valid], 1e-6)
 
-        # --- Calculate driver_team_form_index & tenure ---
-        dtw_sum = np.bincount(dt_codes[prior_mask], weights=w, minlength=n_dt)
-        dtwval_sum = np.bincount(dt_codes[prior_mask], weights=wval, minlength=n_dt)
-        dt_counts = np.bincount(dt_codes[prior_mask], minlength=n_dt)
-        dt_valid = dtw_sum > 0
-        dt_form = np.zeros(n_dt, dtype=float)
-        dt_form[dt_valid] = dtwval_sum[dt_valid] / np.maximum(dtw_sum[dt_valid], 1e-6)
-        dt_tenure = dt_counts.astype(float)
 
         # --- Calculate circuit proficiency (using races_full for DNF rate) ---
         cid = getattr(evt_row, "circuitId")
@@ -345,17 +329,14 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                 continue
 
             t_code = t_codes[idx]
-            dt_code = dt_codes[idx]
             sample = {
                 "driverId": uniques[code],
                 "constructorId": t_uniques[t_code] if t_code >= 0 else None,
                 "form_index": float(form_index[code]),
                 "qualifying_form_index": float(q_form_index[code]),
                 "team_form_index": float(team_form_index[t_code]) if t_code >= 0 else 0.0,
-                "driver_team_form_index": float(dt_form[dt_code]),
                 "sprint_form_index": float(sprint_form_index[code]) if valid_sprint[code] else float(form_index[code]),
                 "sprint_qualifying_form_index": float(sprint_q_form_index[code]) if valid_sq[code] else float(q_form_index[code]),
-                "team_tenure_events": float(dt_tenure[dt_code]),
                 "grid_finish_delta": float(gf_index[code]),
                 "teammate_delta": float(tm_delta_index[code]),
                 "circuit_avg_pos": float(c_avg_pos[code]),
@@ -590,7 +571,6 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     
     # Blending weights from config or defaults
     w_base_team = 0.3
-    w_base_dt = 0.2
     w_grid = 0.8
     w_gbm = 0.75
     w_base = 0.25
@@ -601,7 +581,6 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
             w_gbm = cfg.modelling.blending.gbm_weight
             w_base = cfg.modelling.blending.baseline_weight
             w_base_team = cfg.modelling.blending.baseline_team_factor
-            w_base_dt = cfg.modelling.blending.baseline_driver_team_factor
             w_grid = getattr(cfg.modelling.blending, "grid_factor", 0.8)
             w_quali = getattr(cfg.modelling.blending, "current_quali_factor", 0.5)
         except AttributeError:
@@ -610,8 +589,6 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     if "team_form_index" in X.columns:
         # team_form_index is points-based, HIGHER = BETTER, so negate
         base = base - w_base_team * X["team_form_index"].astype(float).values
-    if "driver_team_form_index" in X.columns:
-        base = base - w_base_dt * X["driver_team_form_index"].astype(float).values
 
     # Add small jitter if baseline is flat (for tie-breaking)
     if np.nanstd(base) < 1e-9 and "driverId" in X.columns:

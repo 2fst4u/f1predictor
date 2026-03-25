@@ -175,7 +175,7 @@ def compute_prediction_diff(
         return a == b
 
     feature_keys = ["form_index", "qualifying_form_index", "team_form_index",
-                     "driver_team_form_index", "circuit_avg_pos"]
+                     "circuit_avg_pos"]
     features_changed = False
     for p_old in old_predictions:
         did = p_old.get("driverId")
