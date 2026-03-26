@@ -201,7 +201,7 @@ f1pred/
 Clear the cache and re-run:
 
 ```bash
-rm -rf cache/ fastf1_cache/ .cache/
+rm -rf cache/ .cache/
 python main.py --round next
 ```
 
