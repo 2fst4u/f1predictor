@@ -177,8 +177,8 @@
                 <div class="flex flex-col gap-4">
                     <div class="flex justify-between items-end gap-4">
                         <div class="flex items-center gap-2">
-                             <div class="text-xs text-gray-500 hidden md:block mr-2" x-show="lastPredictionTime">
-                                 Last prediction: <span x-text="lastPredictionTime"></span>
+                             <div class="text-xs text-gray-500 hidden md:block mr-2" x-show="liveLastUpdate">
+                                 Last prediction: <span x-text="liveLastUpdate"></span>
                              </div>
                         </div>
                     </div>
@@ -313,7 +313,7 @@
                 </div>
 
                 <!-- Session Content -->
-                <template x-for="[sess, data] in Object.entries(results?.sessions || {}).filter(([s]) => ['race', 'sprint'].includes(s))" :key="sess">
+                <template x-for="[sess, data] in Object.entries(results?.sessions || {})" :key="sess">
                     <div x-show="activeSession === sess || getAvailableSessions().length === 1" x-transition role="tabpanel" :id="'panel-' + sess"
                         :aria-labelledby="'tab-' + sess" tabindex="0"
                         class="focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-opacity-50 rounded-lg">
@@ -651,7 +651,7 @@
             <!-- Empty State -->
             <div x-show="!results && !loading" class="flex flex-col items-center justify-center py-20 text-gray-500">
                 <i class="fas fa-flag-checkered text-6xl mb-4 opacity-20" aria-hidden="true"></i>
-                <p class="text-xl font-light">Select a race and run prediction to start</p>
+                <p class="text-xl font-light">Select a race to view predictions</p>
             </div>
         </main>
 
@@ -927,6 +927,14 @@
                     return this.recentChanges.filter(c => c.session === this.activeSession);
                 },
 
+                getAvailableSessions() {
+                    if (!this.results || !this.results.sessions) return [];
+                    const order = ['sprint_qualifying', 'sprint', 'qualifying', 'race'];
+                    return Object.keys(this.results.sessions).sort((a, b) => {
+                        return order.indexOf(a) - order.indexOf(b);
+                    });
+                },
+
                 async fetchSchedule() {
                     const season = String(this.params.season || '');
                     if (!season) {
@@ -1027,14 +1035,19 @@
                     this.saveState();
                 },
 
-                selectRound(rnd) {
+                async selectRound(rnd) {
                     this.params.round = String(rnd);
                     if (this.allRoundsData[this.params.round]) {
                         this.results = this.allRoundsData[this.params.round];
                     } else {
                         this.results = null; 
                     }
-                    this.fetchEventStatus();
+                    await this.fetchEventStatus();
+
+                    // Automatically trigger prediction if results are missing for selected round
+                    if (!this.results && !this.loading) {
+                        this.runPrediction();
+                    }
                     this.saveState();
                 },
 
