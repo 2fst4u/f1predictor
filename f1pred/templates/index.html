@@ -701,6 +701,7 @@
                         const state = {
                             params: this.params,
                             results: this.results,
+                            allRoundsData: this.allRoundsData,
                             activeSession: this.activeSession,
                             _lastStatusSeason: this._lastStatusSeason,
                             _lastStatusRound: this._lastStatusRound,
@@ -719,6 +720,7 @@
                             const state = JSON.parse(saved);
                             this.params = state.params || this.params;
                             this.results = state.results || null;
+                            this.allRoundsData = state.allRoundsData || {};
                             this.activeSession = state.activeSession || null;
                             this._lastStatusSeason = state._lastStatusSeason || null;
                             this._lastStatusRound = state._lastStatusRound || null;
@@ -1097,6 +1099,9 @@
                                             });
                                         } else if (payload.type === 'results') {
                                             this.results = payload.data;
+                                            if (this.results && this.results.round) {
+                                                this.allRoundsData[this.results.round] = this.results;
+                                            }
                                         } else if (payload.type === 'error') {
                                             throw new Error(payload.message);
                                         }
