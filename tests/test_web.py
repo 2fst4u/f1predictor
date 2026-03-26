@@ -15,7 +15,7 @@ def client():
 def test_read_main(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert "F1 OUTCOME PREDICTOR" in response.text
+    assert "<title>F1 Outcome Predictor</title>" in response.text
 
 def test_get_config(client):
     response = client.get("/api/config")
