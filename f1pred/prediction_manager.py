@@ -376,34 +376,33 @@ class PredictionManager:
         """Main background loop: resolve next event, run predictions, detect changes."""
         # Brief startup delay to let the server finish initializing
         time.sleep(5)
+        cycle_count = 0
 
         while self._running:
             try:
-                self._run_prediction_cycle()
+                self._run_season_cycle(cycle_count)
             except Exception as e:
                 logger.warning("[PredictionManager] Prediction cycle failed: %s", e)
                 with self._lock:
                     self._status = "error"
                 self._broadcast({"type": "status", "status": "error", "message": str(e)})
 
+            cycle_count += 1
             # Sleep in small increments so we can stop quickly
             for _ in range(self.poll_interval):
                 if not self._running:
                     break
                 time.sleep(1)
 
-    def _run_prediction_cycle(self) -> None:
-        """Execute one prediction cycle: resolve event, predict, diff, broadcast."""
-        import math
-        from .predict import run_predictions_for_event, resolve_event
+    def _run_season_cycle(self, cycle_count: int) -> None:
+        """Orchestrate predicting all rounds across the season."""
         from .data.jolpica import JolpicaClient
+        from .predict import resolve_event
 
         with self._lock:
             self._status = "running"
-
         self._broadcast({"type": "status", "status": "running"})
 
-        # Resolve the next event
         jc = JolpicaClient(
             self.cfg.data_sources.jolpica.base_url,
             self.cfg.data_sources.jolpica.timeout_seconds,
@@ -411,18 +410,60 @@ class PredictionManager:
         )
 
         try:
-            season_i, round_i, race_info = resolve_event(jc, "current", "next")
+            curr_s, next_r, _ = resolve_event(jc, "current", "next")
         except Exception as e:
             logger.warning("[PredictionManager] Failed to resolve next event: %s", e)
+            curr_s, next_r = None, None
+
+        try:
+            s_str = str(curr_s) if curr_s else "current"
+            schedule = jc.get_season_schedule(s_str)
+            schedule = [r for r in schedule if r.get("round")]
+        except Exception as e:
+            logger.warning("[PredictionManager] Failed to fetch schedule: %s", e)
             with self._lock:
                 self._status = "error"
             return
+            
+        season = curr_s if curr_s else schedule[0].get("season")
+        
+        # Initialize the global season structure if needed
+        with self._lock:
+            if not self._latest_results or self._latest_results.get("season") != season:
+                self._latest_results = {"season": season, "rounds": {}}
 
+        # Process each round
+        for r_info in schedule:
+            if not self._running:
+                break
+                
+            round_i = int(r_info["round"])
+            
+            # Daily updates for non-next rounds. If interval is 3600s, 24 cycles = 1 day.
+            is_next = (round_i == next_r)
+            if not is_next:
+                if cycle_count % 24 != 0:
+                    with self._lock:
+                        has_data = str(round_i) in self._latest_results["rounds"]
+                    if has_data:
+                        continue  # skip to save time
+
+            self._predict_round(jc, season, round_i, r_info)
+            
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._status = "idle"
+            self._last_update = now
+            
+        self._broadcast({"type": "status", "status": "idle", "timestamp": now})
+
+    def _predict_round(self, jc, season_i, round_i, race_info) -> None:
+        import math
+        from .predict import run_predictions_for_event
+        
         event_title = f"{race_info.get('raceName', 'Event')} {season_i} R{round_i}"
         logger.info("[PredictionManager] Running predictions for %s", event_title)
 
-        # Determine sessions to predict — filter to only applicable sessions
-        # (sprint sessions only if the event is a sprint weekend)
         all_sessions = self.cfg.modelling.targets.session_types
         sessions = []
         for s in all_sessions:
@@ -432,16 +473,12 @@ class PredictionManager:
                 sessions.append(s)
             elif s == "sprint_qualifying" and "SprintQualifying" in race_info:
                 sessions.append(s)
-
         if not sessions:
-            sessions = ["qualifying", "race"]  # Fallback
-
-        logger.info("[PredictionManager] Sessions for %s: %s", event_title, sessions)
+            sessions = ["qualifying", "race"]
 
         def progress_cb(msg: str):
             self._broadcast({"type": "log", "message": msg})
 
-        # Run full prediction pipeline
         results = run_predictions_for_event(
             self.cfg,
             season=str(season_i),
@@ -453,11 +490,26 @@ class PredictionManager:
 
         if not results:
             logger.info("[PredictionManager] No results generated for %s", event_title)
-            with self._lock:
-                self._status = "idle"
             return
 
-        # Convert results to JSON-serializable format (same as web.py)
+        # Fetch actual results to determine if round is frozen and calculate deltas
+        actual_results = {}
+        try:
+            for s in sessions:
+                if s == "race":
+                    res = jc.get_race_results(str(season_i), str(round_i))
+                elif s == "qualifying":
+                    res = jc.get_qualifying_results(str(season_i), str(round_i))
+                elif s == "sprint":
+                    res = jc.get_sprint_results(str(season_i), str(round_i))
+                else:
+                    res = []
+                    
+                if res:
+                    actual_results[s] = res
+        except Exception as e:
+            logger.warning("Failed to fetch actual results for %s: %s", event_title, e)
+
         output = {
             "season": results["season"],
             "round": results["round"],
@@ -481,7 +533,27 @@ class PredictionManager:
         for sess, data in results["sessions"].items():
             ranked_df = data["ranked"]
             ranked_list = ranked_df.to_dict(orient="records")
+            
+            # Map actual results
+            sess_actuals = actual_results.get(sess, [])
+            actual_pos_map = {}
+            for row in sess_actuals:
+                driver_id = row.get("Driver", {}).get("driverId")
+                pos = row.get("position")
+                if driver_id and pos:
+                    try:
+                        actual_pos_map[driver_id] = int(pos)
+                    except ValueError:
+                        pass
+                        
+            is_frozen = len(actual_pos_map) > 0
+
             for row in ranked_list:
+                d_id = row.get("driverId")
+                if is_frozen and d_id in actual_pos_map:
+                    row["actual_position"] = actual_pos_map[d_id]
+                row["frozen"] = is_frozen
+                
                 for k, v in row.items():
                     row[k] = _sanitize(v)
 
@@ -489,17 +561,18 @@ class PredictionManager:
             output["sessions"][sess] = {
                 "predictions": ranked_list,
                 "weather": weather,
+                "frozen": is_frozen
             }
 
-            # Compute diff against previous run
+            cache_key = f"{round_i}_{sess}"
             new_fp = _fingerprint_predictions(ranked_list)
-            old_fp = self._previous_fingerprints.get(sess)
+            old_fp = self._previous_fingerprints.get(cache_key)
 
             if old_fp is not None and old_fp != new_fp:
-                old_preds = self._previous_predictions.get(sess, [])
-                old_weather = self._previous_weather.get(sess)
+                old_preds = self._previous_predictions.get(cache_key, [])
+                old_weather = self._previous_weather.get(cache_key)
                 diff = compute_prediction_diff(
-                    session=sess,
+                    session=f"R{round_i}_{sess}",
                     old_predictions=old_preds,
                     new_predictions=ranked_list,
                     old_weather=old_weather,
@@ -507,50 +580,31 @@ class PredictionManager:
                 )
                 if diff:
                     all_diffs.append(diff)
-                    logger.info(
-                        "[PredictionManager] %s %s: %d position changes detected",
-                        event_title, sess, len(diff.movements),
-                    )
 
-            # Update previous state
-            self._previous_fingerprints[sess] = new_fp
-            self._previous_predictions[sess] = ranked_list
-            self._previous_weather[sess] = weather
+            self._previous_fingerprints[cache_key] = new_fp
+            self._previous_predictions[cache_key] = ranked_list
+            self._previous_weather[cache_key] = weather
 
-        # Store and broadcast
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
-            self._latest_results = output
+            if not self._latest_results:
+                self._latest_results = {"season": season_i, "rounds": {}}
+            self._latest_results["rounds"][str(round_i)] = output
+            
             self._latest_diffs.extend(all_diffs)
-            # Keep only last 50 diffs
             if len(self._latest_diffs) > 50:
                 self._latest_diffs = self._latest_diffs[-50:]
             self._last_update = now
-            self._status = "idle"
 
-        # Broadcast full prediction
-        self._broadcast({
-            "type": "prediction",
-            "data": output,
-            "timestamp": now,
-        })
-
-        # Broadcast diffs if any
         for diff in all_diffs:
             self._broadcast({
                 "type": "diff",
                 "data": diff.to_dict(),
                 "timestamp": now,
             })
-
-        if not all_diffs:
-            self._broadcast({
-                "type": "status",
-                "status": "idle",
-                "message": f"No changes detected for {event_title}",
-                "timestamp": now,
-            })
-
-        logger.info(
-            "[PredictionManager] Cycle complete for %s (%d diffs)", event_title, len(all_diffs)
-        )
+            
+        self._broadcast({
+            "type": "prediction_round",
+            "data": output,
+            "timestamp": now,
+        })

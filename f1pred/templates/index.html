@@ -115,33 +115,15 @@
             animation: pulse-live 2s ease-in-out infinite;
         }
 
-        /* Movement highlight flash */
-        @keyframes flash-up {
-            0% {
-                background-color: rgba(34, 197, 94, 0.3);
-            }
-
-            100% {
-                background-color: transparent;
-            }
-        }
-
-        @keyframes flash-down {
-            0% {
-                background-color: rgba(239, 68, 68, 0.3);
-            }
-
-            100% {
-                background-color: transparent;
-            }
-        }
-
+        /* Movement highlight static backgrounds */
         .movement-up {
-            animation: flash-up 3s ease-out forwards;
+            background-color: rgba(34, 197, 94, 0.2);
+            transition: background-color 0.5s;
         }
 
         .movement-down {
-            animation: flash-down 3s ease-out forwards;
+            background-color: rgba(239, 68, 68, 0.2);
+            transition: background-color 0.5s;
         }
     </style>
 </head>
@@ -192,73 +174,31 @@
         <main class="max-w-[1400px] w-full mx-auto px-2 py-4 md:p-8">
             <!-- Controls -->
             <div class="card p-4 md:p-6 mb-4 md:mb-8 shadow-xl">
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 items-end">
-                    <div>
-                        <label for="input-season"
-                            class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Season</label>
-                        <select id="input-season" x-model="params.season" @change="fetchSchedule()" :disabled="loading"
-                            class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
-                            <option value="" x-text="seasons.length ? 'Select Season' : 'Loading seasons...'"></option>
-                            <template x-for="s in seasons" :key="s.season">
-                                <option :value="s.season" x-text="s.season"></option>
-                            </template>
-                        </select>
-                    </div>
-                    <div>
-                        <label for="input-round"
-                            class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">Round</label>
-                        <select id="input-round" x-model="params.round" @change="fetchEventStatus()"
-                            :disabled="!params.season || scheduleLoading || loading"
-                            :title="!params.season ? 'Select a season first' : (scheduleLoading ? 'Loading schedule...' : (loading ? 'Prediction in progress' : 'Select a round'))"
-                            class="w-full bg-gray-800 border border-gray-700 rounded p-1.5 md:p-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
-                            <option value="" x-text="scheduleLoading ? 'Loading rounds...' : 'Select Round'"></option>
-                            <template x-for="(r, index) in schedule" :key="r.round || index">
-                                <option :value="r.round" x-text="'Round ' + (r.round || index + 1) + ': ' + r.raceName">
-                                </option>
-                            </template>
-                        </select>
-                    </div>
-                    <div class="col-span-2 md:col-span-1">
-                        <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider"
-                            id="sessions-label">Sessions</label>
-                        <div class="flex flex-wrap gap-2 mt-1" role="group" aria-labelledby="sessions-label">
-                            <template x-for="s in eventSessions" :key="s.id">
-                                <button @click="toggleSession(s.id)" :disabled="loading"
-                                    :aria-pressed="params.sessions.includes(s.id).toString()"
-                                    :class="params.sessions.includes(s.id) ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400'"
-                                    class="text-xs px-2 py-1 rounded border border-gray-700 hover:border-red-500 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 flex items-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed">
-                                    <span x-text="s.id.replace('_', ' ').toUpperCase()"></span>
-                                    <template x-if="s.has_results">
-                                        <span>
-                                            <i class="fas fa-check-circle text-green-400 ml-1" aria-hidden="true"></i>
-                                            <span class="sr-only">Results available</span>
-                                        </span>
-                                    </template>
-                                </button>
-                            </template>
-                            <template x-if="statusLoading">
-                                <span class="text-xs px-2 py-1 text-gray-400 italic flex items-center">
-                                    <i class="fas fa-circle-notch fa-spin mr-1.5" aria-hidden="true"></i> Loading...
-                                </span>
-                            </template>
-                            <template x-if="!eventSessions.length && !statusLoading">
-                                <span class="text-xs text-gray-500 italic mt-1.5">Select a round...</span>
-                            </template>
+                <div class="flex flex-col gap-4">
+                    <div class="flex justify-between items-end gap-4">
+                        <div class="flex items-center gap-2">
+                             <div class="text-xs text-gray-500 hidden md:block mr-2" x-show="lastPredictionTime">
+                                 Last prediction: <span x-text="lastPredictionTime"></span>
+                             </div>
                         </div>
                     </div>
-                    <div class="col-span-2 md:col-span-1">
-                        <button @click="runPrediction()"
-                            :disabled="loading || !params.season || !params.round || params.sessions.length === 0"
-                            :title="(!params.season || !params.round) ? 'Select a season and round to predict' : (params.sessions.length === 0 ? 'Select at least one session' : '')"
-                            class="w-full f1-red hover:bg-red-700 text-white font-bold py-2 px-4 rounded shadow-lg disabled:opacity-50 disabled:cursor-not-allowed group relative transition transform active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900">
-                            <span class="sr-only"
-                                x-show="(!params.season || !params.round || params.sessions.length === 0)">Requires
-                                Season, Round, and Session to be selected</span>
-                            <span x-show="!loading">RUN PREDICTION</span>
-                            <span x-show="loading" class="flex items-center justify-center">
-                                <i class="fas fa-spinner animate-spin mr-2" aria-hidden="true"></i> PROCESSING...
-                            </span>
-                        </button>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Round (Auto-Predicted)</label>
+                        <div class="flex space-x-2 overflow-x-auto no-scrollbar pb-2" :class="{'opacity-50 pointer-events-none': scheduleLoading}">
+                            <template x-if="scheduleLoading">
+                                <span class="text-xs text-gray-500 italic mt-1.5 pt-1">Loading schedule...</span>
+                            </template>
+                            <template x-for="(r, index) in schedule" :key="r.round || index">
+                                <button @click="selectRound(r.round)"
+                                    :disabled="scheduleLoading || loading"
+                                    :class="params.round === r.round ? 'bg-red-600 text-white border-red-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'"
+                                    class="flex-shrink-0 text-xs px-3 py-1.5 rounded border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 flex flex-col items-center justify-center min-w-[70px] disabled:cursor-not-allowed">
+                                    <span class="font-bold mb-0.5 whitespace-nowrap" x-text="'Round ' + (r.round || index + 1)"></span>
+                                    <span class="text-[10px] uppercase tracking-tighter w-full max-w-[90px] truncate text-center" :class="params.round === r.round ? 'opacity-100' : 'opacity-75'" x-text="r.raceName.replace(' Grand Prix', '')"></span>
+                                </button>
+                            </template>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -359,8 +299,9 @@
 
                 <!-- Session Tabs -->
                 <div class="flex border-b border-gray-700 mb-6 overflow-x-auto" role="tablist"
+                    x-show="getAvailableSessions().length > 1"
                     aria-label="Session Results">
-                    <template x-for="(data, sess) in (results?.sessions || {})" :key="sess">
+                    <template x-for="sess in getAvailableSessions()" :key="sess">
                         <button @click="activeSession = sess" role="tab"
                             :aria-selected="(activeSession === sess).toString()" :id="'tab-' + sess"
                             :aria-controls="'panel-' + sess"
@@ -372,8 +313,8 @@
                 </div>
 
                 <!-- Session Content -->
-                <template x-for="(data, sess) in (results?.sessions || {})" :key="sess">
-                    <div x-show="activeSession === sess" x-transition role="tabpanel" :id="'panel-' + sess"
+                <template x-for="[sess, data] in Object.entries(results?.sessions || {}).filter(([s]) => ['race', 'sprint'].includes(s))" :key="sess">
+                    <div x-show="activeSession === sess || getAvailableSessions().length === 1" x-transition role="tabpanel" :id="'panel-' + sess"
                         :aria-labelledby="'tab-' + sess" tabindex="0"
                         class="focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-opacity-50 rounded-lg">
 
@@ -428,8 +369,12 @@
                                             <th scope="col" class="px-0.5 py-2 sm:p-4">Driver</th>
                                             <th scope="col" class="px-0.5 py-2 sm:p-4 hidden md:table-cell">Team</th>
                                             <th scope="col" class="px-0.5 py-2 sm:p-4 text-center"
-                                                x-show="hasGrid(sess)"><abbr title="Starting Grid Position"
-                                                    class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">Grid</abbr>
+                                                x-show="hasGrid(sess) && !data.frozen"><abbr title="Predicted finish compared to starting grid"
+                                                    class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">Grid & Exp Delta</abbr>
+                                            </th>
+                                            <th scope="col" class="px-0.5 py-2 sm:p-4 text-center text-blue-300"
+                                                x-show="data.frozen"><abbr title="Actual finish compared to predicted finish"
+                                                    class="cursor-help underline decoration-dotted decoration-blue-500 underline-offset-4 hover:text-blue-200 transition-colors">Real Pos & Acc.</abbr>
                                             </th>
                                             <th scope="col" class="px-0.5 py-2 sm:p-4">
                                                 <span class="hidden sm:inline"
@@ -486,22 +431,35 @@
                                                     <span class="text-sm text-gray-400"
                                                         x-text="p.constructorName">Team</span>
                                                 </td>
-                                                <!-- Grid -->
-                                                <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 text-center align-top"
-                                                    x-show="hasGrid(sess)">
-                                                    <div class="flex flex-col items-center">
-                                                        <span class="font-bold" x-text="p.grid || '--'"></span>
+                                                <!-- Grid & Pred Delta (Unfrozen) -->
+                                                <td class="px-0.5 pt-2 sm:pt-4 sm:px-4 text-center align-top"
+                                                    x-show="hasGrid(sess) && !data.frozen">
+                                                    <div class="flex flex-col items-center mt-1">
+                                                        <span class="text-[10px] text-gray-500 mb-0.5">Start P<span x-text="p.grid || '--'"></span></span>
                                                         <template x-if="p.grid && p.grid != p.predicted_position">
-                                                            <span class="text-xs"
-                                                                :class="p.grid > p.predicted_position ? 'text-green-500' : 'text-red-500'">
-                                                                <span class="sr-only"
-                                                                    x-text="p.grid > p.predicted_position ? 'Improves position by:' : 'Worsens position by:'"></span>
-                                                                <i class="fas"
-                                                                    :class="p.grid > p.predicted_position ? 'fa-caret-up' : 'fa-caret-down'"
-                                                                    aria-hidden="true"></i>
-                                                                <span
-                                                                    x-text="Math.abs(p.grid - p.predicted_position)"></span>
+                                                            <span class="text-sm font-bold" :class="p.grid > p.predicted_position ? 'text-green-500' : 'text-red-500'">
+                                                                <i class="fas" :class="p.grid > p.predicted_position ? 'fa-caret-up' : 'fa-caret-down'" aria-hidden="true"></i>
+                                                                <span x-text="Math.abs(p.grid - p.predicted_position)"></span>
                                                             </span>
+                                                        </template>
+                                                        <template x-if="p.grid && p.grid == p.predicted_position">
+                                                            <span class="text-sm font-bold text-gray-600">-</span>
+                                                        </template>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Actual & Accuracy (Frozen) -->
+                                                <td class="px-0.5 pt-2 sm:pt-4 sm:px-4 text-center align-top"
+                                                    x-show="data.frozen">
+                                                    <div class="flex flex-col items-center">
+                                                        <span class="font-black text-xl text-blue-400">P<span x-text="p.actual_position || '?'"></span></span>
+                                                        <template x-if="p.actual_position">
+                                                            <div class="flex items-center gap-1 mt-0.5" :title="'Predicted P' + p.predicted_position + ' vs Actual P' + p.actual_position">
+                                                                <span class="text-[10px] text-gray-400" x-text="p.actual_position == p.predicted_position ? 'Perfect' : 'Err:'"></span>
+                                                                <span class="text-xs font-bold" x-show="p.actual_position != p.predicted_position" :class="Math.abs(p.predicted_position - p.actual_position) <= 1 ? 'text-green-500' : (Math.abs(p.predicted_position - p.actual_position) >= 5 ? 'text-red-500' : 'text-yellow-500')">
+                                                                    <span x-text="Math.abs(p.predicted_position - p.actual_position)"></span>
+                                                                </span>
+                                                            </div>
                                                         </template>
                                                     </div>
                                                 </td>
@@ -550,51 +508,7 @@
                                                     class="px-2 md:px-8 lg:px-12 pb-3 border-t border-gray-800/50">
                                                     <div
                                                         class="flex flex-wrap md:flex-nowrap gap-x-4 gap-y-4 items-start">
-                                                        <!-- Model Mix bar -->
-                                                        <template x-if="p.ensemble_components">
-                                                            <div class="md:w-64 md:flex-shrink-0">
-                                                                <div
-                                                                    class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-0.5">
-                                                                    Model Mix</div>
-                                                                <div class="flex items-center gap-0.5 h-2 rounded overflow-hidden w-48 sm:w-64"
-                                                                    aria-hidden="true">
-                                                                    <div class="h-full bg-cyan-500"
-                                                                        :style="'width:' + (p.ensemble_components.gbm   * 100).toFixed(1) + '%'"
-                                                                        :title="'GBM '           + (p.ensemble_components.gbm   * 100).toFixed(0) + '%'">
-                                                                    </div>
-                                                                    <div class="h-full bg-yellow-400"
-                                                                        :style="'width:' + (p.ensemble_components.elo   * 100).toFixed(1) + '%'"
-                                                                        :title="'Elo '           + (p.ensemble_components.elo   * 100).toFixed(0) + '%'">
-                                                                    </div>
-                                                                    <div class="h-full bg-purple-500"
-                                                                        :style="'width:' + (p.ensemble_components.bt    * 100).toFixed(1) + '%'"
-                                                                        :title="'Bradley-Terry ' + (p.ensemble_components.bt    * 100).toFixed(0) + '%'">
-                                                                    </div>
-                                                                    <div class="h-full bg-green-400"
-                                                                        :style="'width:' + (p.ensemble_components.mixed * 100).toFixed(1) + '%'"
-                                                                        :title="'Mixed-Effects ' + (p.ensemble_components.mixed * 100).toFixed(0) + '%'">
-                                                                    </div>
-                                                                </div>
-                                                                <div class="flex gap-2 mt-0.5 flex-wrap">
-                                                                    <span class="text-xs text-cyan-400"><span
-                                                                            class="inline-block w-1.5 h-1.5 rounded-full bg-cyan-500 mr-0.5 align-middle"></span>GBM
-                                                                        <span
-                                                                            x-text="(p.ensemble_components.gbm * 100).toFixed(0) + '%'"></span></span>
-                                                                    <span class="text-xs text-yellow-400"><span
-                                                                            class="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 mr-0.5 align-middle"></span>Elo
-                                                                        <span
-                                                                            x-text="(p.ensemble_components.elo * 100).toFixed(0) + '%'"></span></span>
-                                                                    <span class="text-xs text-purple-400"><span
-                                                                            class="inline-block w-1.5 h-1.5 rounded-full bg-purple-500 mr-0.5 align-middle"></span>BT
-                                                                        <span
-                                                                            x-text="(p.ensemble_components.bt * 100).toFixed(0) + '%'"></span></span>
-                                                                    <span class="text-xs text-green-400"><span
-                                                                            class="inline-block w-1.5 h-1.5 rounded-full bg-green-400 mr-0.5 align-middle"></span>Mix
-                                                                        <span
-                                                                            x-text="(p.ensemble_components.mixed * 100).toFixed(0) + '%'"></span></span>
-                                                                </div>
-                                                            </div>
-                                                        </template>
+                                                        <!-- Model Mix bar removed per user request -->
                                                         <!-- SHAP factors -->
                                                         <template x-if="hasShapFactors(p.shap_values)">
                                                             <div class="min-w-0">
@@ -610,23 +524,26 @@
                                                                         x-for="feat in getSortedShap(p.shap_values, windowWidth)"
                                                                         :key="feat.key + '_' + windowWidth">
                                                                         <div
-                                                                            class="flex flex-col flex-shrink-0 gap-0.5 text-xs w-[90px] md:w-[110px]">
-                                                                            <div class="flex items-center gap-1 h-2">
+                                                                            class="flex flex-col flex-shrink-0 gap-0.5 text-xs w-[100px] md:w-[125px]">
+                                                                            <div class="flex items-center gap-1 h-3 mt-0.5 mb-0.5">
                                                                                 <span class="sr-only"
                                                                                     x-text="feat.val < 0 ? 'Improves position:' : 'Worsens position:'"></span>
                                                                                 <span aria-hidden="true"
                                                                                     :class="feat.val < 0 ? 'text-green-400' : 'text-red-400'"
-                                                                                    class="font-bold w-3 text-center"
+                                                                                    class="font-bold w-3 text-center text-[10px]"
                                                                                     x-text="feat.val < 0 ? '▲' : '▼'"></span>
-                                                                                <div class="w-10 md:w-12 h-2 bg-gray-700 rounded overflow-hidden flex-shrink-0"
+                                                                                <div class="w-8 md:w-12 h-2 bg-gray-700 rounded overflow-hidden flex-shrink-0"
                                                                                     aria-hidden="true">
                                                                                     <div class="h-full rounded"
                                                                                         :class="feat.val < 0 ? 'bg-green-500' : 'bg-red-500'"
                                                                                         :style="'width:' + Math.min(100, feat.absPct).toFixed(0) + '%'">
                                                                                     </div>
                                                                                 </div>
+                                                                                <span class="text-[10px] font-mono leading-none pt-[1px]" 
+                                                                                      :class="feat.val < 0 ? 'text-green-400' : 'text-red-400'"
+                                                                                      x-text="feat.absVal.toFixed(2)"></span>
                                                                             </div>
-                                                                            <span class="text-gray-400 truncate"
+                                                                            <span class="text-gray-400 truncate w-full"
                                                                                 x-text="feat.label"
                                                                                 :title="feat.label"></span>
                                                                         </div>

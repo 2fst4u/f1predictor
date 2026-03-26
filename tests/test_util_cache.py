@@ -99,18 +99,13 @@ def test_cache_get_error_handling(tmp_path, caplog):
 def test_cache_set_error_handling(tmp_path, caplog):
     cache = PredictionCache(cache_dir=str(tmp_path), max_entries=2)
 
-    # Make cache directory read-only to trigger exception during set
-    os.chmod(cache.cache_dir, 0o444)
-
     inputs = {"test": 2}
     results = {"val": 42}
 
-    try:
+    with patch.object(cache, '_generate_key', return_value="nonexistent_dir/file"):
         with caplog.at_level(logging.WARNING):
             cache.set(inputs, results)
         assert "Failed to save prediction cache" in caplog.text
-    finally:
-        os.chmod(cache.cache_dir, 0o755) # Restore permissions
 
 def test_cache_rolling_deletion_unlink_fails(tmp_path):
     cache = PredictionCache(cache_dir=str(tmp_path), max_entries=2)

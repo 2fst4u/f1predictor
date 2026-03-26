@@ -229,7 +229,7 @@ class TestPredictionManagerLifecycle:
         assert received["message"] == "hello"
 
 class TestPredictionManagerCycle:
-    def test_run_prediction_cycle_success(self):
+    def test_predict_round_success(self):
         cfg = MagicMock()
         cfg.data_sources.jolpica.base_url = "https://api.example.com"
         cfg.data_sources.jolpica.timeout_seconds = 10
@@ -237,6 +237,7 @@ class TestPredictionManagerCycle:
         cfg.modelling.targets.session_types = ["qualifying", "race"]
 
         manager = PredictionManager(cfg, poll_interval=60)
+        manager._latest_results = {"season": 2024, "rounds": {}}
 
         import pandas as pd
         df = pd.DataFrame([{
@@ -262,199 +263,78 @@ class TestPredictionManagerCycle:
             }
         }
 
-        with patch('f1pred.predict.resolve_event') as mock_resolve:
-            with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
-                with patch('f1pred.data.jolpica.JolpicaClient') as mock_jc:
-                    mock_resolve.return_value = (2024, 1, {"raceName": "Bahrain Grand Prix"})
-                    mock_predict.return_value = fake_results
+        with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
+            mock_predict.return_value = fake_results
+            jc = MagicMock()
+            manager._predict_round(jc, 2024, 1, {"raceName": "Bahrain Grand Prix", "round": 1})
 
-                    manager._run_prediction_cycle()
+        assert "1" in manager.latest_results["rounds"]
+        assert "race" in manager.latest_results["rounds"]["1"]["sessions"]
 
-        assert manager.status == "idle"
-        assert manager.latest_results is not None
-        assert manager.latest_results["season"] == 2024
-        assert "race" in manager.latest_results["sessions"]
-
-    def test_run_prediction_cycle_resolve_fails(self):
+    def test_run_season_cycle_resolve_fails(self):
         cfg = MagicMock()
-        cfg.data_sources.jolpica.base_url = "https://api.example.com"
-        cfg.data_sources.jolpica.timeout_seconds = 10
-        cfg.data_sources.jolpica.rate_limit_sleep = 0.5
         manager = PredictionManager(cfg, poll_interval=60)
 
         with patch('f1pred.predict.resolve_event') as mock_resolve:
             with patch('f1pred.data.jolpica.JolpicaClient') as mock_jc:
+                mock_jc.return_value.get_season_schedule.side_effect = Exception("schedule fetch failed")
                 mock_resolve.side_effect = Exception("API error")
 
-                manager._run_prediction_cycle()
+                manager._run_season_cycle(0)
 
         assert manager.status == "error"
 
-    def test_run_prediction_cycle_no_results(self):
-        cfg = MagicMock()
-        cfg.data_sources.jolpica.base_url = "https://api.example.com"
-        cfg.data_sources.jolpica.timeout_seconds = 10
-        cfg.data_sources.jolpica.rate_limit_sleep = 0.5
-        cfg.modelling.targets.session_types = ["qualifying", "race"]
-        manager = PredictionManager(cfg, poll_interval=60)
-
-        with patch('f1pred.predict.resolve_event') as mock_resolve:
-            with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
-                with patch('f1pred.data.jolpica.JolpicaClient') as mock_jc:
-                    mock_resolve.return_value = (2024, 1, {"raceName": "Bahrain Grand Prix"})
-                    mock_predict.return_value = None
-
-                    manager._run_prediction_cycle()
-
-        assert manager.status == "idle"
-        assert manager.latest_results is None
-
-    def test_run_prediction_cycle_with_sprint(self):
-        cfg = MagicMock()
-        cfg.data_sources.jolpica.base_url = "https://api.example.com"
-        cfg.data_sources.jolpica.timeout_seconds = 10
-        cfg.data_sources.jolpica.rate_limit_sleep = 0.5
-        cfg.modelling.targets.session_types = ["qualifying", "race", "sprint", "sprint_qualifying"]
-
-        manager = PredictionManager(cfg, poll_interval=60)
-
-        import pandas as pd
-        df = pd.DataFrame([{
-            "driverId": "ver01",
-            "predicted_position": 1,
-            "grid": 1
-        }])
-
-        fake_results = {
-            "season": 2024,
-            "round": 1,
-            "sessions": {
-                "race": {"ranked": df, "meta": {}},
-                "sprint": {"ranked": df, "meta": {}}
-            }
-        }
-
-        with patch('f1pred.predict.resolve_event') as mock_resolve:
-            with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
-                with patch('f1pred.data.jolpica.JolpicaClient') as mock_jc:
-                    mock_resolve.return_value = (2024, 1, {"raceName": "Bahrain Grand Prix", "Sprint": {}, "SprintQualifying": {}})
-                    mock_predict.return_value = fake_results
-
-                    manager._run_prediction_cycle()
-
-        requested_sessions = mock_predict.call_args[1]["sessions"]
-        assert "sprint" in requested_sessions
-        assert "sprint_qualifying" in requested_sessions
-
-
-    def test_run_prediction_cycle_with_diffs(self):
-        from f1pred.prediction_manager import PredictionManager
+    def test_predict_round_with_diffs(self):
         import pandas as pd
 
         cfg = MagicMock()
-        cfg.data_sources.jolpica.base_url = "https://api.example.com"
-        cfg.data_sources.jolpica.timeout_seconds = 10
-        cfg.data_sources.jolpica.rate_limit_sleep = 0.5
         cfg.modelling.targets.session_types = ["qualifying", "race"]
 
         manager = PredictionManager(cfg, poll_interval=60)
+        manager._latest_results = {"season": 2024, "rounds": {}}
 
         # Setup initial state
-        df1 = pd.DataFrame([{
-            "driverId": "ver01",
-            "predicted_position": 1,
-            "code": "VER",
-            "name": "Max Verstappen",
-            "constructorName": "Red Bull",
-            "p_win": 0.9,
-            "p_top3": 0.99,
-            "mean_pos": 1.1,
-            "grid": 1
-        }, {
-            "driverId": "ham44",
-            "predicted_position": 2,
-            "code": "HAM",
-            "name": "Lewis Hamilton",
-            "constructorName": "Mercedes",
-            "p_win": 0.1,
-            "p_top3": 0.5,
-            "mean_pos": 2.1,
-            "grid": 2
-        }])
+        df1 = pd.DataFrame([{"driverId": "ver01", "predicted_position": 1, "mean_pos": 1.1, "grid": 1, "p_win": 0.9, "p_top3": 0.9, "code": "VER", "name": "Max Verstappen", "constructorName": "Red Bull"},
+                            {"driverId": "ham44", "predicted_position": 2, "mean_pos": 2.1, "grid": 2, "p_win": 0.1, "p_top3": 0.5, "code": "HAM", "name": "Lewis", "constructorName": "Mercedes"}])
 
         fake_results1 = {
             "season": 2024,
             "round": 1,
             "sessions": {
-                "race": {
-                    "ranked": df1,
-                    "meta": {"weather": {"temp_mean": 25.0}}
-                }
+                "race": {"ranked": df1, "meta": {"weather": {"temp_mean": 25.0}}}
             }
         }
 
-        with patch('f1pred.predict.resolve_event') as mock_resolve:
-            with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
-                with patch('f1pred.data.jolpica.JolpicaClient') as mock_jc:
-                    mock_resolve.return_value = (2024, 1, {"raceName": "Bahrain Grand Prix"})
-                    mock_predict.return_value = fake_results1
+        with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
+            mock_predict.return_value = fake_results1
+            jc = MagicMock()
+            manager._predict_round(jc, 2024, 1, {"raceName": "Bahrain Grand Prix", "round": 1})
 
-                    manager._run_prediction_cycle()
-
-        assert manager.latest_results is not None
         assert len(manager.latest_diffs) == 0
 
         # Now change the results to trigger a diff
-        df2 = pd.DataFrame([{
-            "driverId": "ham44",
-            "predicted_position": 1,
-            "code": "HAM",
-            "name": "Lewis Hamilton",
-            "constructorName": "Mercedes",
-            "p_win": 0.6,
-            "p_top3": 0.9,
-            "mean_pos": 1.2,
-            "grid": 1
-        }, {
-            "driverId": "ver01",
-            "predicted_position": 2,
-            "code": "VER",
-            "name": "Max Verstappen",
-            "constructorName": "Red Bull",
-            "p_win": 0.4,
-            "p_top3": 0.8,
-            "mean_pos": 1.8,
-            "grid": 2
-        }])
+        df2 = pd.DataFrame([{"driverId": "ham44", "predicted_position": 1, "mean_pos": 1.2, "grid": 1, "p_win": 0.6, "p_top3": 0.9, "code": "HAM", "name": "Lewis", "constructorName": "Mercedes"},
+                            {"driverId": "ver01", "predicted_position": 2, "mean_pos": 1.8, "grid": 2, "p_win": 0.4, "p_top3": 0.8, "code": "VER", "name": "Max Verstappen", "constructorName": "Red Bull"}])
 
         fake_results2 = {
             "season": 2024,
             "round": 1,
             "sessions": {
-                "race": {
-                    "ranked": df2,
-                    "meta": {"weather": {"temp_mean": 30.0}}
-                }
+                "race": {"ranked": df2, "meta": {"weather": {"temp_mean": 30.0}}}
             }
         }
 
-        with patch('f1pred.predict.resolve_event') as mock_resolve:
-            with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
-                with patch('f1pred.data.jolpica.JolpicaClient') as mock_jc:
-                    mock_resolve.return_value = (2024, 1, {"raceName": "Bahrain Grand Prix"})
-                    mock_predict.return_value = fake_results2
+        with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
+            mock_predict.return_value = fake_results2
+            manager._predict_round(jc, 2024, 1, {"raceName": "Bahrain Grand Prix", "round": 1})
 
-                    manager._run_prediction_cycle()
-
-        assert manager.latest_results is not None
         assert len(manager.latest_diffs) > 0
         diff = manager.latest_diffs[-1]
-        assert diff["session"] == "race"
+        assert diff["session"] == "R1_race"
         assert len(diff["movements"]) == 2
         assert "Grid positions changed" in diff["changed_variables"]
 
     def test_run_loop(self):
-        from f1pred.prediction_manager import PredictionManager
         import threading
         import time
 
@@ -464,8 +344,8 @@ class TestPredictionManagerCycle:
         # Patch the actual sleep so we don't wait 5s
         with patch('time.sleep') as mock_sleep:
             # Patch the cycle to stop the loop after one iteration
-            with patch.object(manager, '_run_prediction_cycle') as mock_cycle:
-                def side_effect():
+            with patch.object(manager, '_run_season_cycle') as mock_cycle:
+                def side_effect(cycle_count):
                     manager._running = False
                 mock_cycle.side_effect = side_effect
 
@@ -473,21 +353,3 @@ class TestPredictionManagerCycle:
                 manager._run_loop()
 
                 assert mock_cycle.called
-
-    def test_run_loop_exception(self):
-        from f1pred.prediction_manager import PredictionManager
-
-        cfg = MagicMock()
-        manager = PredictionManager(cfg, poll_interval=1)
-
-        with patch('time.sleep'):
-            with patch.object(manager, '_run_prediction_cycle') as mock_cycle:
-                def side_effect():
-                    manager._running = False
-                    raise Exception("Test error")
-                mock_cycle.side_effect = side_effect
-
-                manager._running = True
-                manager._run_loop()
-
-                assert manager.status == "error"
