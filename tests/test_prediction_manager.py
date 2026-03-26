@@ -389,3 +389,76 @@ class TestPredictionManagerCycle:
                 manager._run_loop()
 
                 assert mock_cycle.called
+
+class TestPredictionManagerActualResults:
+    def test_predict_round_actuals_and_sanitize(self):
+        import pandas as pd
+        import datetime
+        from unittest.mock import MagicMock, patch
+        from f1pred.prediction_manager import PredictionManager
+
+        cfg = MagicMock()
+        cfg.data_sources.jolpica.base_url = "https://api.example.com"
+        cfg.data_sources.jolpica.timeout_seconds = 10
+        cfg.data_sources.jolpica.rate_limit_sleep = 0.5
+        cfg.modelling.targets.session_types = ["race", "qualifying", "sprint", "practice"]
+
+        manager = PredictionManager(cfg, poll_interval=60)
+        manager._latest_results = {"season": 2024, "rounds": {}}
+
+        date_obj = datetime.datetime(2024, 1, 1)
+
+        df_race = pd.DataFrame([{
+            "driverId": "ver01",
+            "predicted_position": 1,
+            "mean_pos": 1.5,
+            "p_win": 0.5,
+            "p_top3": 0.5,
+            "meta_list": [1, float("nan")],
+            "meta_dict": {"k": float("inf")},
+            "meta_date": date_obj,
+            "grid": 1,
+            "code": "VER",
+            "name": "Max Verstappen",
+            "constructorName": "Red Bull"
+        }])
+
+        fake_results = {
+            "season": 2024,
+            "round": 1,
+            "sessions": {
+                "race": {"ranked": df_race, "meta": {}},
+                "qualifying": {"ranked": pd.DataFrame(), "meta": {}},
+                "sprint": {"ranked": pd.DataFrame(), "meta": {}},
+                "practice": {"ranked": pd.DataFrame(), "meta": {}}
+            }
+        }
+
+        with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
+            mock_predict.return_value = fake_results
+            jc = MagicMock()
+
+            jc.get_race_results.return_value = [
+                {"Driver": {"driverId": "ver01"}, "position": "1"},
+                {"Driver": {"driverId": "ham44"}, "position": "invalid"}
+            ]
+
+            jc.get_qualifying_results.side_effect = Exception("API failed")
+            jc.get_sprint_results.return_value = []
+
+            manager._predict_round(jc, 2024, 1, {"raceName": "Bahrain Grand Prix", "round": 1})
+
+        # Check results
+        rounds = manager.latest_results.get("rounds", {})
+        assert "1" in rounds
+        r_session = rounds["1"]["sessions"]["race"]["predictions"]
+
+        # Check sanitization
+        first_row = r_session[0]
+        assert first_row["meta_list"] == [1, None]
+        assert first_row["meta_dict"] == {"k": None}
+        assert first_row["meta_date"] == date_obj.isoformat()
+
+        # Check actual results mapping
+        assert first_row["actual_position"] == 1
+        assert first_row["frozen"] is True
