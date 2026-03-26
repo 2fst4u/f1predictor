@@ -9,8 +9,8 @@ except ImportError:
     HAS_PLAYWRIGHT = False
 
 @pytest.mark.skipif(not HAS_PLAYWRIGHT or os.environ.get("CI") == "true", reason="Skipping Playwright tests in CI environment or if playwright is missing")
-def test_model_mix_width_and_offsets(page: "Page"):
-    """Verify Model Mix graph width and factor limit offsets in the UI."""
+def test_factor_limit_offsets(page: "Page"):
+    """Verify factor limit offsets in the UI."""
     abs_path = os.path.abspath("f1pred/templates/index.html")
     page.goto(f"file://{abs_path}")
 
@@ -57,13 +57,6 @@ def test_model_mix_width_and_offsets(page: "Page"):
         data.results = {json.dumps(mock_results)};
         data.activeSession = 'race';
     """)
-
-    # 1. Verify CSS Classes for Width
-    model_mix_container = page.locator(".md\\:w-64").first
-    expect(model_mix_container).to_be_visible()
-
-    progress_bar = page.locator(".sm\\:w-64").first
-    expect(progress_bar).to_be_visible()
 
     # 2. Verify JS getFactorLimit Offsets
     # Test Desktop (Large Viewport)

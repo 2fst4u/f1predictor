@@ -284,6 +284,42 @@ class TestPredictionManagerCycle:
 
         assert manager.status == "error"
 
+    def test_run_season_cycle_success(self):
+        cfg = MagicMock()
+        manager = PredictionManager(cfg, poll_interval=60)
+        manager._running = True
+
+        with patch('f1pred.data.jolpica.JolpicaClient') as mock_jc_class:
+            with patch('f1pred.predict.resolve_event') as mock_resolve:
+                mock_jc = mock_jc_class.return_value
+                # Mock resolve_event to return (current_season, next_round, current_event)
+                mock_resolve.return_value = ("2024", 2, MagicMock())
+
+                # Mock schedule
+                mock_schedule = [
+                    {"round": "1", "raceName": "Bahrain GP", "season": "2024"},
+                    {"round": "2", "raceName": "Saudi GP", "season": "2024"}
+                ]
+                mock_jc.get_season_schedule.return_value = mock_schedule
+
+                with patch.object(manager, '_predict_round') as mock_predict_round:
+                    manager._run_season_cycle(0)
+
+                    # Ensure _predict_round was called for the rounds
+                    # In cycle 0, round 1 is not next_round so it checks _latest_results
+                    # but _latest_results is populated directly with the loop
+                    # Actually _latest_results might skip if not in rounds and cycle_count % 24 != 0 and has_data
+                    # Round 1: cycle 0 % 24 == 0, so it will run even if has_data.
+                    # Round 2: is_next == True, so it will run regardless.
+                    assert mock_predict_round.call_count == 2
+
+                    # Assert arguments for the first call
+                    mock_predict_round.assert_any_call(mock_jc, "2024", 1, mock_schedule[0])
+                    # Assert arguments for the second call
+                    mock_predict_round.assert_any_call(mock_jc, "2024", 2, mock_schedule[1])
+
+        assert manager.status == "idle"
+
     def test_predict_round_with_diffs(self):
         import pandas as pd
 
