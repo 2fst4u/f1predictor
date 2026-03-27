@@ -269,13 +269,13 @@ def _fingerprint_predictions(predictions: List[Dict[str, Any]]) -> str:
     Monte Carlo probability jitter at rounding boundaries.
     """
     key_data = []
-    for p in sorted(predictions, key=lambda x: x.get("driverId", "")):
+    for p in sorted(predictions, key=lambda x: x.get("driverId", "") or ""):
         key_data.append({
             "driverId": p.get("driverId"),
             "predicted_position": p.get("predicted_position"),
-            "p_win": round(p.get("p_win", 0), 2),
-            "p_top3": round(p.get("p_top3", 0), 2),
-            "mean_pos": round(p.get("mean_pos", 0), 1),
+            "p_win": round(p.get("p_win") or 0, 2),
+            "p_top3": round(p.get("p_top3") or 0, 2),
+            "mean_pos": round(p.get("mean_pos") or 0, 1),
         })
     return hashlib.sha256(json.dumps(key_data, sort_keys=True).encode()).hexdigest()
 
