@@ -375,7 +375,7 @@ class PredictionManager:
     def _run_loop(self) -> None:
         """Main background loop: resolve next event, run predictions, detect changes."""
         # Brief startup delay to let the server finish initializing
-        time.sleep(5)
+        time.sleep(1)
         cycle_count = 0
 
         while self._running:
@@ -418,7 +418,11 @@ class PredictionManager:
         try:
             s_str = str(curr_s) if curr_s else "current"
             schedule = jc.get_season_schedule(s_str)
-            schedule = [r for r in schedule if r.get("round")]
+            # Prioritize next round: sort schedule so next_r comes first
+            schedule = sorted(
+                [r for r in schedule if r.get("round")],
+                key=lambda r: 0 if int(r["round"]) == next_r else int(r["round"])
+            )
         except Exception as e:
             logger.warning("[PredictionManager] Failed to fetch schedule: %s", e)
             with self._lock:

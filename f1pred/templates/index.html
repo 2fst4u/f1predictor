@@ -220,24 +220,27 @@
 
             <!-- Progress Logs -->
             <div x-show="loading" x-transition x-cloak class="card p-4 mb-8 border-l-4 border-blue-500">
-                <div class="flex items-center mb-2">
-                    <i class="fas fa-terminal mr-2 text-blue-400" aria-hidden="true"></i>
-                    <h3 class="text-xs font-bold uppercase tracking-widest text-gray-400">Prediction Progress</h3>
-                </div>
-                <div class="bg-black bg-opacity-30 rounded p-3 font-mono text-xs h-32 overflow-y-auto space-y-1"
-                    id="log-container" aria-live="polite">
-                    <template x-for="log in logs">
-                        <div class="flex">
-                            <span class="text-blue-500 mr-2" aria-hidden="true">></span>
-                            <span class="text-gray-300" x-text="log"></span>
+                <details>
+                    <summary class="flex items-center cursor-pointer mb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+                        <i class="fas fa-terminal mr-2 text-blue-400" aria-hidden="true"></i>
+                        <h3 class="text-xs font-bold uppercase tracking-widest text-gray-400">Prediction Progress</h3>
+                        <span class="ml-2 text-[10px] text-gray-500 italic" x-text="'(Processing Round ' + params.round + ')'"></span>
+                    </summary>
+                    <div class="bg-black bg-opacity-30 rounded p-3 font-mono text-xs h-32 overflow-y-auto space-y-1"
+                        id="log-container" aria-live="polite">
+                        <template x-for="log in logs">
+                            <div class="flex">
+                                <span class="text-blue-500 mr-2" aria-hidden="true">></span>
+                                <span class="text-gray-300" x-text="log"></span>
+                            </div>
+                        </template>
+                        <div class="flex items-center text-blue-400 animate-pulse">
+                            <span class="mr-2" aria-hidden="true">></span>
+                            <span x-text="currentLog"></span>
+                            <span class="ml-1" aria-hidden="true">...</span>
                         </div>
-                    </template>
-                    <div class="flex items-center text-blue-400 animate-pulse">
-                        <span class="mr-2" aria-hidden="true">></span>
-                        <span x-text="currentLog"></span>
-                        <span class="ml-1" aria-hidden="true">...</span>
                     </div>
-                </div>
+                </details>
             </div>
 
             <!-- Recent Changes Panel -->
@@ -789,7 +792,7 @@
                             // Trigger schedule and round selection concurrently
                             await Promise.all([
                                 this.fetchSchedule(),
-                                round ? this.selectRound(round) : Promise.resolve()
+                                round ? this.selectRound(round, true) : Promise.resolve()
                             ]);
                         } else if (hasLoadedState && this.params.season) {
                             // If we have state, still fetch schedule to populate dropdowns
@@ -1055,7 +1058,7 @@
                     this.saveState();
                 },
 
-                async selectRound(rnd) {
+                async selectRound(rnd, silent = false) {
                     const roundStr = String(rnd);
                     this.params.round = roundStr;
 
@@ -1074,7 +1077,8 @@
                     await this.fetchEventStatus();
 
                     // Trigger prediction if missing and not already being predicted
-                    if (!this.results && !this.loading && this.predictingRound !== roundStr) {
+                    // In silent mode (e.g. startup), we DON'T trigger a new prediction pipeline
+                    if (!this.results && !this.loading && !silent && this.predictingRound !== roundStr) {
                         await this.runPrediction();
                     }
                     this.saveState();
