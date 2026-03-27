@@ -868,14 +868,15 @@
 
                     if (payload.type === 'prediction_round' && payload.data) {
                         const data = payload.data;
-                        this.allRoundsData[String(data.round)] = data;
+                        const roundStr = String(data.round);
+                        this.allRoundsData[roundStr] = data;
 
                         const viewingSameEvent = (
                             String(this.params.season) === String(data.season) &&
-                            String(this.params.round) === String(data.round)
+                            String(this.params.round) === roundStr
                         );
 
-                        if (viewingSameEvent || !this.results) {
+                        if (viewingSameEvent) {
                             this.results = data;
                             if (!this.activeSession && data.sessions) {
                                 this.activeSession = Object.keys(data.sessions)[0];
