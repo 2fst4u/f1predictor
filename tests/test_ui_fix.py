@@ -9,67 +9,70 @@ except ImportError:
     HAS_PLAYWRIGHT = False
 
 @pytest.mark.skipif(not HAS_PLAYWRIGHT or os.environ.get("CI") == "true", reason="Skipping Playwright tests in CI environment or if playwright is missing")
-def test_ui_caching(page: "Page"):
-    """Verify UI caching logic in index.html."""
+def test_ui_logic_v3(page: "Page"):
+    """Verify UI logic v3: immediate load, caching and session updates."""
     abs_path = os.path.abspath("f1pred/templates/index.html")
     page.goto(f"file://{abs_path}")
 
     # Wait for Alpine.js
     page.wait_for_function("window.Alpine !== undefined")
 
-    # 1. Inject Mock Data for Round 1
-    mock_results_r1 = {
-        "season": "2024",
-        "round": "1",
-        "sessions": {
-            "race": {
-                "predictions": [{"driverId": "verstappen", "predicted_position": 1}],
-                "weather": {}
-            }
-        }
-    }
-
-    page.evaluate(f"""
-        const el = document.querySelector('[x-data]');
-        const data = Alpine.$data(el);
-        data.allRoundsData['1'] = {json.dumps(mock_results_r1)};
-        data.params.round = '1';
-        data.results = data.allRoundsData['1'];
-        data.activeSession = 'race';
-    """)
-
-    # 2. Mock runPrediction to detect calls
+    # 1. Mock runPrediction to detect calls
     page.evaluate("""
         const el = document.querySelector('[x-data]');
         const data = Alpine.$data(el);
         data._runPredictionCalled = false;
-        const originalRunPrediction = data.runPrediction;
         data.runPrediction = async function() {
             this._runPredictionCalled = true;
-            return; // Don't actually run it
+            // Simulate results being returned and cached
+            this.results = {
+                season: '2024',
+                round: this.params.round,
+                sessions: { race: { predictions: [] } }
+            };
+            this.allRoundsData[String(this.results.round)] = this.results;
         };
+        // Mock fetchEventStatus
+        data.fetchEventStatus = async function() { return; };
+        // Mock fetchSchedule
+        data.fetchSchedule = async function() { return; };
     """)
 
-    # 3. Mock fetchEventStatus to avoid actual network call
+    # 2. Test Initial Load Prediction
+    # Mock config with next_event
     page.evaluate("""
         const el = document.querySelector('[x-data]');
         const data = Alpine.$data(el);
-        data.fetchEventStatus = async function() { return; };
+        data.config = { next_event: { season: '2024', round: '1' } };
+        // Force init logic trigger for next_event if we weren't in init already
+        // Actually, let's just manually call the logic we added to init
     """)
 
-    # 4. Trigger selectRound for round 2 (UNC ACHED)
-    page.evaluate("Alpine.$data(document.querySelector('[x-data]')).selectRound('2')")
-
-    # Verify runPrediction WAS called for Round 2
-    was_called_r2 = page.evaluate("Alpine.$data(document.querySelector('[x-data]'))._runPredictionCalled")
-    assert was_called_r2 is True, "runPrediction should be called for uncached round 2"
-
-    # Reset the flag
-    page.evaluate("Alpine.$data(document.querySelector('[x-data]'))._runPredictionCalled = false")
-
-    # 5. Trigger selectRound for round 1 (CACHED)
+    # We call selectRound as if init() just did it
     page.evaluate("Alpine.$data(document.querySelector('[x-data]')).selectRound('1')")
 
-    # Verify runPrediction WAS NOT called for Round 1
-    was_called_r1 = page.evaluate("Alpine.$data(document.querySelector('[x-data]'))._runPredictionCalled")
-    assert was_called_r1 is False, "runPrediction should NOT be called for cached round 1"
+    # Verify runPrediction was called
+    assert page.evaluate("Alpine.$data(document.querySelector('[x-data]'))._runPredictionCalled") is True
+
+    # Reset flag
+    page.evaluate("Alpine.$data(document.querySelector('[x-data]'))._runPredictionCalled = false")
+
+    # 3. Test caching with mixed types (int vs string)
+    # Inject round 2 as int in cache
+    page.evaluate("""
+        const el = document.querySelector('[x-data]');
+        const data = Alpine.$data(el);
+        data.allRoundsData['2'] = { round: 2, sessions: { qualifying: {} } };
+    """)
+
+    # Select round 2
+    page.evaluate("Alpine.$data(document.querySelector('[x-data]')).selectRound(2)")
+
+    # Verify results are set from cache and runPrediction NOT called
+    results_round = page.evaluate("Alpine.$data(document.querySelector('[x-data]')).results.round")
+    assert results_round == 2
+    assert page.evaluate("Alpine.$data(document.querySelector('[x-data]'))._runPredictionCalled") is False
+
+    # Verify activeSession was updated to qualifying
+    active_session = page.evaluate("Alpine.$data(document.querySelector('[x-data]')).activeSession")
+    assert active_session == 'qualifying'

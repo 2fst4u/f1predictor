@@ -313,7 +313,7 @@
                 </div>
 
                 <!-- Session Content -->
-                <template x-for="[sess, data] in Object.entries(results?.sessions || {}).filter(([s]) => ['race', 'sprint'].includes(s))" :key="sess">
+                <template x-for="[sess, data] in Object.entries(results?.sessions || {})" :key="sess">
                     <div x-show="activeSession === sess || getAvailableSessions().length === 1" x-transition role="tabpanel" :id="'panel-' + sess"
                         :aria-labelledby="'tab-' + sess" tabindex="0"
                         class="focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-opacity-50 rounded-lg">
@@ -651,7 +651,7 @@
             <!-- Empty State -->
             <div x-show="!results && !loading" class="flex flex-col items-center justify-center py-20 text-gray-500">
                 <i class="fas fa-flag-checkered text-6xl mb-4 opacity-20" aria-hidden="true"></i>
-                <p class="text-xl font-light">Select a race to view cached predictions</p>
+                <p class="text-xl font-light">Select a race to view predictions</p>
             </div>
         </main>
 
@@ -701,6 +701,7 @@
                         const state = {
                             params: this.params,
                             results: this.results,
+                            allRoundsData: this.allRoundsData,
                             activeSession: this.activeSession,
                             _lastStatusSeason: this._lastStatusSeason,
                             _lastStatusRound: this._lastStatusRound,
@@ -719,6 +720,7 @@
                             const state = JSON.parse(saved);
                             this.params = state.params || this.params;
                             this.results = state.results || null;
+                            this.allRoundsData = state.allRoundsData || {};
                             this.activeSession = state.activeSession || null;
                             this._lastStatusSeason = state._lastStatusSeason || null;
                             this._lastStatusRound = state._lastStatusRound || null;
@@ -769,8 +771,9 @@
                         if (!hasLoadedState && this.config.next_event) {
                             this.params.season = this.config.next_event.season || '';
                             await this.fetchSchedule();
-                            this.params.round = this.config.next_event.round || '';
-                            await this.fetchEventStatus();
+                            if (this.config.next_event.round) {
+                                await this.selectRound(this.config.next_event.round);
+                            }
                         } else if (hasLoadedState && this.params.season) {
                             // If we have state, still fetch schedule to populate dropdowns
                             // but our guard logic in fetchSchedule will handle idempotency
@@ -845,7 +848,7 @@
 
                     if (payload.type === 'prediction_round' && payload.data) {
                         const data = payload.data;
-                        this.allRoundsData[data.round] = data;
+                        this.allRoundsData[String(data.round)] = data;
 
                         const viewingSameEvent = (
                             String(this.params.season) === String(data.season) &&
@@ -929,10 +932,10 @@
 
                 getAvailableSessions() {
                     if (!this.results || !this.results.sessions) return [];
-                    const order = ['sprint', 'race'];
-                    return Object.keys(this.results.sessions)
-                        .filter(s => order.includes(s))
-                        .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+                    const order = ['sprint_qualifying', 'sprint', 'qualifying', 'race'];
+                    return Object.keys(this.results.sessions).sort((a, b) => {
+                        return order.indexOf(a) - order.indexOf(b);
+                    });
                 },
 
                 async fetchSchedule() {
@@ -1035,20 +1038,25 @@
                     this.saveState();
                 },
 
-                selectRound(rnd) {
+                async selectRound(rnd) {
                     this.params.round = String(rnd);
                     if (this.allRoundsData[this.params.round]) {
                         this.results = this.allRoundsData[this.params.round];
-                        if (!this.activeSession || !this.results.sessions?.[this.activeSession]) {
-                            const available = Object.keys(this.results.sessions || {});
-                            this.activeSession = available.length ? available[0] : null;
+                        if (this.results && this.results.sessions) {
+                            // Pre-select first available session if none selected
+                            if (!this.activeSession || !this.results.sessions[this.activeSession]) {
+                                this.activeSession = Object.keys(this.results.sessions)[0];
+                            }
                         }
-                        this.saveState();
-                        return;
                     } else {
                         this.results = null;
                     }
-                    this.fetchEventStatus();
+                    await this.fetchEventStatus();
+
+                    // Automatically trigger prediction if results are missing for selected round
+                    if (!this.results && !this.loading) {
+                        await this.runPrediction();
+                    }
                     this.saveState();
                 },
 
@@ -1098,6 +1106,9 @@
                                             });
                                         } else if (payload.type === 'results') {
                                             this.results = payload.data;
+                                            if (this.results && this.results.round) {
+                                                this.allRoundsData[String(this.results.round)] = this.results;
+                                            }
                                         } else if (payload.type === 'error') {
                                             throw new Error(payload.message);
                                         }
