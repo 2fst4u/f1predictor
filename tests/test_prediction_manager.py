@@ -175,6 +175,14 @@ class TestFingerprintPredictions:
         ]
         assert _fingerprint_predictions(p1) == _fingerprint_predictions(p2)
 
+    def test_handles_none_values(self):
+        """Should not crash when expected fields are None."""
+        p = [{"driverId": "d1", "predicted_position": 1, "p_win": None, "p_top3": None, "mean_pos": None}]
+        try:
+            _fingerprint_predictions(p)
+        except TypeError as e:
+            pytest.fail(f"_fingerprint_predictions crashed on None values: {e}")
+
 
 class TestPredictionManagerLifecycle:
     def test_start_stop(self):

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field, asdict
@@ -269,13 +270,13 @@ def _fingerprint_predictions(predictions: List[Dict[str, Any]]) -> str:
     Monte Carlo probability jitter at rounding boundaries.
     """
     key_data = []
-    for p in sorted(predictions, key=lambda x: x.get("driverId", "")):
+    for p in sorted(predictions, key=lambda x: x.get("driverId", "") or ""):
         key_data.append({
             "driverId": p.get("driverId"),
             "predicted_position": p.get("predicted_position"),
-            "p_win": round(p.get("p_win", 0), 2),
-            "p_top3": round(p.get("p_top3", 0), 2),
-            "mean_pos": round(p.get("mean_pos", 0), 1),
+            "p_win": round(p.get("p_win") or 0, 2),
+            "p_top3": round(p.get("p_top3") or 0, 2),
+            "mean_pos": round(p.get("mean_pos") or 0, 1),
         })
     return hashlib.sha256(json.dumps(key_data, sort_keys=True).encode()).hexdigest()
 
@@ -296,6 +297,18 @@ class PredictionManager:
 
         # Latest state
         self._latest_results: Optional[Dict[str, Any]] = None
+        self._cache_file = os.path.join(cfg.paths.cache_dir, "latest_predictions.json")
+
+        # Load from disk cache if exists
+        if os.path.exists(self._cache_file):
+            try:
+                with open(self._cache_file, "r") as f:
+                    self._latest_results = json.load(f)
+                logger.info("[PredictionManager] Loaded %d rounds from disk cache",
+                            len(self._latest_results.get("rounds", {})))
+            except Exception as e:
+                logger.warning("[PredictionManager] Failed to load disk cache: %s", e)
+
         self._latest_diffs: List[PredictionDiff] = []
         self._previous_fingerprints: Dict[str, str] = {}  # session -> hash
         self._previous_predictions: Dict[str, List[Dict[str, Any]]] = {}  # session -> predictions
@@ -375,7 +388,7 @@ class PredictionManager:
     def _run_loop(self) -> None:
         """Main background loop: resolve next event, run predictions, detect changes."""
         # Brief startup delay to let the server finish initializing
-        time.sleep(5)
+        time.sleep(1)
         cycle_count = 0
 
         while self._running:
@@ -418,7 +431,11 @@ class PredictionManager:
         try:
             s_str = str(curr_s) if curr_s else "current"
             schedule = jc.get_season_schedule(s_str)
-            schedule = [r for r in schedule if r.get("round")]
+            # Prioritize next round: sort schedule so next_r comes first
+            schedule = sorted(
+                [r for r in schedule if r.get("round")],
+                key=lambda r: 0 if int(r["round"]) == next_r else int(r["round"])
+            )
         except Exception as e:
             logger.warning("[PredictionManager] Failed to fetch schedule: %s", e)
             with self._lock:
@@ -454,8 +471,21 @@ class PredictionManager:
         with self._lock:
             self._status = "idle"
             self._last_update = now
+            self._save_to_disk()
             
         self._broadcast({"type": "status", "status": "idle", "timestamp": now})
+
+    def _save_to_disk(self) -> None:
+        """Persist current predictions to disk."""
+        if not self._latest_results:
+            return
+        try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self._cache_file), exist_ok=True)
+            with open(self._cache_file, "w") as f:
+                json.dump(self._latest_results, f)
+        except Exception as e:
+            logger.warning("[PredictionManager] Failed to save disk cache: %s", e)
 
     def _predict_round(self, jc, season_i, round_i, race_info) -> None:
         import math
@@ -595,6 +625,7 @@ class PredictionManager:
             if len(self._latest_diffs) > 50:
                 self._latest_diffs = self._latest_diffs[-50:]
             self._last_update = now
+            self._save_to_disk()
 
         for diff in all_diffs:
             self._broadcast({

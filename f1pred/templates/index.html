@@ -177,8 +177,8 @@
                 <div class="flex flex-col gap-4">
                     <div class="flex justify-between items-end gap-4">
                         <div class="flex items-center gap-2">
-                             <div class="text-xs text-gray-500 hidden md:block mr-2" x-show="lastPredictionTime">
-                                 Last prediction: <span x-text="lastPredictionTime"></span>
+                             <div class="text-xs text-gray-500 hidden md:block mr-2" x-show="liveLastUpdate">
+                                 Last prediction: <span x-text="liveLastUpdate"></span>
                              </div>
                         </div>
                     </div>
@@ -220,24 +220,27 @@
 
             <!-- Progress Logs -->
             <div x-show="loading" x-transition x-cloak class="card p-4 mb-8 border-l-4 border-blue-500">
-                <div class="flex items-center mb-2">
-                    <i class="fas fa-terminal mr-2 text-blue-400" aria-hidden="true"></i>
-                    <h3 class="text-xs font-bold uppercase tracking-widest text-gray-400">Prediction Progress</h3>
-                </div>
-                <div class="bg-black bg-opacity-30 rounded p-3 font-mono text-xs h-32 overflow-y-auto space-y-1"
-                    id="log-container" aria-live="polite">
-                    <template x-for="log in logs">
-                        <div class="flex">
-                            <span class="text-blue-500 mr-2" aria-hidden="true">></span>
-                            <span class="text-gray-300" x-text="log"></span>
+                <details>
+                    <summary class="flex items-center cursor-pointer mb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+                        <i class="fas fa-terminal mr-2 text-blue-400" aria-hidden="true"></i>
+                        <h3 class="text-xs font-bold uppercase tracking-widest text-gray-400">Prediction Progress</h3>
+                        <span class="ml-2 text-[10px] text-gray-500 italic" x-text="'(Processing Round ' + params.round + ')'"></span>
+                    </summary>
+                    <div class="bg-black bg-opacity-30 rounded p-3 font-mono text-xs h-32 overflow-y-auto space-y-1"
+                        id="log-container" aria-live="polite">
+                        <template x-for="log in logs">
+                            <div class="flex">
+                                <span class="text-blue-500 mr-2" aria-hidden="true">></span>
+                                <span class="text-gray-300" x-text="log"></span>
+                            </div>
+                        </template>
+                        <div class="flex items-center text-blue-400 animate-pulse">
+                            <span class="mr-2" aria-hidden="true">></span>
+                            <span x-text="currentLog"></span>
+                            <span class="ml-1" aria-hidden="true">...</span>
                         </div>
-                    </template>
-                    <div class="flex items-center text-blue-400 animate-pulse">
-                        <span class="mr-2" aria-hidden="true">></span>
-                        <span x-text="currentLog"></span>
-                        <span class="ml-1" aria-hidden="true">...</span>
                     </div>
-                </div>
+                </details>
             </div>
 
             <!-- Recent Changes Panel -->
@@ -289,7 +292,7 @@
             </template>
 
             <!-- Results Section -->
-            <div x-show="results && !loading" x-transition x-cloak>
+            <div x-show="results" x-transition x-cloak>
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-xl font-bold italic uppercase">
                         Results for <span class="f1-red-text" x-text="results?.season">Season</span> Round <span
@@ -313,7 +316,7 @@
                 </div>
 
                 <!-- Session Content -->
-                <template x-for="[sess, data] in Object.entries(results?.sessions || {}).filter(([s]) => ['race', 'sprint'].includes(s))" :key="sess">
+                <template x-for="[sess, data] in Object.entries(results?.sessions || {})" :key="sess">
                     <div x-show="activeSession === sess || getAvailableSessions().length === 1" x-transition role="tabpanel" :id="'panel-' + sess"
                         :aria-labelledby="'tab-' + sess" tabindex="0"
                         class="focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-opacity-50 rounded-lg">
@@ -651,7 +654,7 @@
             <!-- Empty State -->
             <div x-show="!results && !loading" class="flex flex-col items-center justify-center py-20 text-gray-500">
                 <i class="fas fa-flag-checkered text-6xl mb-4 opacity-20" aria-hidden="true"></i>
-                <p class="text-xl font-light">Select a race and run prediction to start</p>
+                <p class="text-xl font-light">Select a race to view predictions</p>
             </div>
         </main>
 
@@ -677,6 +680,7 @@
                 },
                 allRoundsData: {},
                 results: null,
+                predictingRound: null,
                 activeSession: null,
                 error: null,
                 logs: [],
@@ -701,6 +705,7 @@
                         const state = {
                             params: this.params,
                             results: this.results,
+                            allRoundsData: this.allRoundsData,
                             activeSession: this.activeSession,
                             _lastStatusSeason: this._lastStatusSeason,
                             _lastStatusRound: this._lastStatusRound,
@@ -719,6 +724,7 @@
                             const state = JSON.parse(saved);
                             this.params = state.params || this.params;
                             this.results = state.results || null;
+                            this.allRoundsData = state.allRoundsData || {};
                             this.activeSession = state.activeSession || null;
                             this._lastStatusSeason = state._lastStatusSeason || null;
                             this._lastStatusRound = state._lastStatusRound || null;
@@ -751,26 +757,43 @@
                     const hasLoadedState = this.loadState();
 
                     try {
-                        // Load Config
-                        const configResp = await fetch('/api/config');
+                        // Parallelize critical path fetches
+                        const [configResp, latestResp] = await Promise.all([
+                            fetch('/api/config'),
+                            fetch('/api/predictions/latest').catch(() => null)
+                        ]);
+
                         if (!configResp.ok) throw new Error(`HTTP ${configResp.status}`);
                         this.config = await configResp.json();
+
+                        // Handle latest predictions cache
+                        if (latestResp && latestResp.ok) {
+                            const latest = await latestResp.json();
+                            if (latest && latest.results && latest.results.rounds) {
+                                this.allRoundsData = latest.results.rounds;
+                                if (latest.last_update) {
+                                    this.liveLastUpdate = new Date(latest.last_update).toLocaleTimeString();
+                                }
+                            }
+                        }
 
                         if (!hasLoadedState) {
                             this.params.sessions = this.config.default_sessions || ['qualifying', 'race'];
                         }
 
-                        // Load Seasons
-                        const seasonsResp = await fetch('/api/seasons');
-                        if (!seasonsResp.ok) throw new Error(`HTTP ${seasonsResp.status}`);
-                        this.seasons = await seasonsResp.json();
+                        // Load non-critical data in background
+                        fetch('/api/seasons').then(r => r.json()).then(data => { this.seasons = data; }).catch(() => {});
 
                         // Pre-select if available AND we didn't load from state
                         if (!hasLoadedState && this.config.next_event) {
-                            this.params.season = this.config.next_event.season || '';
-                            await this.fetchSchedule();
-                            this.params.round = this.config.next_event.round || '';
-                            await this.fetchEventStatus();
+                            this.params.season = String(this.config.next_event.season || '');
+                            const round = this.config.next_event.round;
+
+                            // Trigger schedule and round selection concurrently
+                            await Promise.all([
+                                this.fetchSchedule(),
+                                round ? this.selectRound(round, true) : Promise.resolve()
+                            ]);
                         } else if (hasLoadedState && this.params.season) {
                             // If we have state, still fetch schedule to populate dropdowns
                             // but our guard logic in fetchSchedule will handle idempotency
@@ -845,14 +868,15 @@
 
                     if (payload.type === 'prediction_round' && payload.data) {
                         const data = payload.data;
-                        this.allRoundsData[data.round] = data;
+                        const roundStr = String(data.round);
+                        this.allRoundsData[roundStr] = data;
 
                         const viewingSameEvent = (
                             String(this.params.season) === String(data.season) &&
-                            String(this.params.round) === String(data.round)
+                            String(this.params.round) === roundStr
                         );
 
-                        if (viewingSameEvent || !this.results) {
+                        if (viewingSameEvent) {
                             this.results = data;
                             if (!this.activeSession && data.sessions) {
                                 this.activeSession = Object.keys(data.sessions)[0];
@@ -925,6 +949,14 @@
                 filteredRecentChanges() {
                     if (!this.activeSession) return this.recentChanges;
                     return this.recentChanges.filter(c => c.session === this.activeSession);
+                },
+
+                getAvailableSessions() {
+                    if (!this.results || !this.results.sessions) return [];
+                    const order = ['sprint_qualifying', 'sprint', 'qualifying', 'race'];
+                    return Object.keys(this.results.sessions).sort((a, b) => {
+                        return order.indexOf(a) - order.indexOf(b);
+                    });
                 },
 
                 async fetchSchedule() {
@@ -1027,20 +1059,37 @@
                     this.saveState();
                 },
 
-                selectRound(rnd) {
-                    this.params.round = String(rnd);
-                    if (this.allRoundsData[this.params.round]) {
-                        this.results = this.allRoundsData[this.params.round];
+                async selectRound(rnd, silent = false) {
+                    const roundStr = String(rnd);
+                    this.params.round = roundStr;
+
+                    // Immediately show cached results if available
+                    if (this.allRoundsData[roundStr]) {
+                        this.results = this.allRoundsData[roundStr];
+                        if (this.results && this.results.sessions) {
+                            if (!this.activeSession || !this.results.sessions[this.activeSession]) {
+                                this.activeSession = Object.keys(this.results.sessions)[0];
+                            }
+                        }
                     } else {
-                        this.results = null; 
+                        this.results = null;
                     }
-                    this.fetchEventStatus();
+
+                    await this.fetchEventStatus();
+
+                    // Trigger prediction if missing and not already being predicted
+                    // In silent mode (e.g. startup), we DON'T trigger a new prediction pipeline
+                    if (!this.results && !this.loading && !silent && this.predictingRound !== roundStr) {
+                        await this.runPrediction();
+                    }
                     this.saveState();
                 },
 
                 // Deprecated: UI button removed, kept for local test compatibility
                 async runPrediction() {
+                    const targetRound = this.params.round;
                     this.loading = true;
+                    this.predictingRound = targetRound;
                     this.error = null;
                     this.logs = [];
                     this.currentLog = 'Starting prediction engine';
@@ -1083,7 +1132,17 @@
                                                 if (container) container.scrollTop = container.scrollHeight;
                                             });
                                         } else if (payload.type === 'results') {
-                                            this.results = payload.data;
+                                            const data = payload.data;
+                                            if (data && data.round) {
+                                                this.allRoundsData[String(data.round)] = data;
+                                                // Only update active view if we're still looking at the same round
+                                                if (String(data.round) === String(this.params.round)) {
+                                                    this.results = data;
+                                                    if (!this.activeSession && data.sessions) {
+                                                        this.activeSession = Object.keys(data.sessions)[0];
+                                                    }
+                                                }
+                                            }
                                         } else if (payload.type === 'error') {
                                             throw new Error(payload.message);
                                         }
@@ -1104,6 +1163,7 @@
                         this.error = e.message;
                     } finally {
                         this.loading = false;
+                        this.predictingRound = null;
                     }
                 },
 
