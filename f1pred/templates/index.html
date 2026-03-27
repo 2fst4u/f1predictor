@@ -754,9 +754,17 @@
                     const hasLoadedState = this.loadState();
 
                     try {
-                        // Load latest predictions to populate cache immediately
-                        const latestResp = await fetch('/api/predictions/latest');
-                        if (latestResp.ok) {
+                        // Parallelize critical path fetches
+                        const [configResp, latestResp] = await Promise.all([
+                            fetch('/api/config'),
+                            fetch('/api/predictions/latest').catch(() => null)
+                        ]);
+
+                        if (!configResp.ok) throw new Error(`HTTP ${configResp.status}`);
+                        this.config = await configResp.json();
+
+                        // Handle latest predictions cache
+                        if (latestResp && latestResp.ok) {
                             const latest = await latestResp.json();
                             if (latest && latest.results && latest.results.rounds) {
                                 this.allRoundsData = latest.results.rounds;
@@ -766,27 +774,23 @@
                             }
                         }
 
-                        // Load Config
-                        const configResp = await fetch('/api/config');
-                        if (!configResp.ok) throw new Error(`HTTP ${configResp.status}`);
-                        this.config = await configResp.json();
-
                         if (!hasLoadedState) {
                             this.params.sessions = this.config.default_sessions || ['qualifying', 'race'];
                         }
 
-                        // Load Seasons
-                        const seasonsResp = await fetch('/api/seasons');
-                        if (!seasonsResp.ok) throw new Error(`HTTP ${seasonsResp.status}`);
-                        this.seasons = await seasonsResp.json();
+                        // Load non-critical data in background
+                        fetch('/api/seasons').then(r => r.json()).then(data => { this.seasons = data; }).catch(() => {});
 
                         // Pre-select if available AND we didn't load from state
                         if (!hasLoadedState && this.config.next_event) {
-                            this.params.season = this.config.next_event.season || '';
-                            await this.fetchSchedule();
-                            if (this.config.next_event.round) {
-                                await this.selectRound(this.config.next_event.round);
-                            }
+                            this.params.season = String(this.config.next_event.season || '');
+                            const round = this.config.next_event.round;
+
+                            // Trigger schedule and round selection concurrently
+                            await Promise.all([
+                                this.fetchSchedule(),
+                                round ? this.selectRound(round) : Promise.resolve()
+                            ]);
                         } else if (hasLoadedState && this.params.season) {
                             // If we have state, still fetch schedule to populate dropdowns
                             // but our guard logic in fetchSchedule will handle idempotency
