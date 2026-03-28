@@ -184,14 +184,17 @@
                     </div>
 
                     <div>
-                        <label class="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Round (Auto-Predicted)</label>
-                        <div class="flex space-x-2 overflow-x-auto no-scrollbar pb-2" :class="{'opacity-50 pointer-events-none': scheduleLoading}">
+                        <div id="round-label" class="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Round (Auto-Predicted)</div>
+                        <div role="group" aria-labelledby="round-label" class="flex space-x-2 overflow-x-auto no-scrollbar pb-2" :class="{'opacity-50 pointer-events-none': scheduleLoading}">
                             <template x-if="scheduleLoading">
-                                <span class="text-xs text-gray-500 italic mt-1.5 pt-1">Loading schedule...</span>
+                                <span class="flex items-center text-xs text-gray-500 italic mt-1.5 pt-1">
+                                    <i class="fas fa-circle-notch fa-spin mr-1.5" aria-hidden="true"></i>Loading schedule...
+                                </span>
                             </template>
                             <template x-for="(r, index) in schedule" :key="r.round || index">
                                 <button @click="selectRound(r.round)"
                                     :disabled="scheduleLoading || loading"
+                                    :aria-current="params.round === r.round ? 'true' : 'false'"
                                     :class="params.round === r.round ? 'bg-red-600 text-white border-red-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'"
                                     class="flex-shrink-0 text-xs px-3 py-1.5 rounded border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 flex flex-col items-center justify-center min-w-[70px] disabled:cursor-not-allowed">
                                     <span class="font-bold mb-0.5 whitespace-nowrap" x-text="'Round ' + (r.round || index + 1)"></span>
