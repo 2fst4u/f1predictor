@@ -316,7 +316,7 @@
                 </div>
 
                 <!-- Session Content -->
-                <template x-for="[sess, data] in Object.entries(results?.sessions || {})" :key="sess">
+                <template x-for="[sess, data] in Object.entries(results?.sessions || {}).filter(([s]) => getAvailableSessions().includes(s))" :key="sess">
                     <div x-show="activeSession === sess || getAvailableSessions().length === 1" x-transition role="tabpanel" :id="'panel-' + sess"
                         :aria-labelledby="'tab-' + sess" tabindex="0"
                         class="focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-opacity-50 rounded-lg">
@@ -1028,9 +1028,8 @@
                         // AND include the most recent session that HAS results
                         const lastWithResults = [...this.eventSessions].reverse().find(s => s.has_results);
 
-                        const order = ['sprint', 'race'];
                         const toSelect = this.eventSessions
-                            .filter(s => !s.has_results && order.includes(s.id))
+                            .filter(s => !s.has_results)
                             .map(s => s.id);
 
                         if (lastWithResults) {
