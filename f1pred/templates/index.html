@@ -365,21 +365,21 @@
                                     <thead>
                                         <tr
                                             class="bg-gray-800 text-xs font-bold text-gray-400 uppercase tracking-wider">
-                                            <th scope="col" class="px-0.5 py-2 sm:p-4 w-7 sm:w-12 text-center"><abbr
+                                            <th scope="col" class="py-2 sm:p-4 w-7 sm:w-12 text-center"><abbr
                                                     title="Predicted Position"
                                                     class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">Pos</abbr>
                                             </th>
-                                            <th scope="col" class="px-0.5 py-2 sm:p-4">Driver</th>
-                                            <th scope="col" class="px-0.5 py-2 sm:p-4 hidden md:table-cell">Team</th>
-                                            <th scope="col" class="px-0.5 py-2 sm:p-4 text-center"
+                                            <th scope="col" class="py-2 sm:p-4">Driver</th>
+                                            <th scope="col" class="py-2 sm:p-4 hidden md:table-cell">Team</th>
+                                            <th scope="col" class="py-2 sm:p-4 text-center"
                                                 x-show="hasGrid(sess) && !data.frozen"><abbr title="Predicted finish compared to starting grid"
                                                     class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">Grid & Exp Delta</abbr>
                                             </th>
-                                            <th scope="col" class="px-0.5 py-2 sm:p-4 text-center text-blue-300"
+                                            <th scope="col" class="py-2 sm:p-4 text-center text-blue-300"
                                                 x-show="data.frozen"><abbr title="Actual finish compared to predicted finish"
                                                     class="cursor-help underline decoration-dotted decoration-blue-500 underline-offset-4 hover:text-blue-200 transition-colors">Real Pos & Acc.</abbr>
                                             </th>
-                                            <th scope="col" class="px-0.5 py-2 sm:p-4">
+                                            <th scope="col" class="py-2 sm:p-4">
                                                 <span class="hidden sm:inline"
                                                     x-text="['qualifying', 'sprint_qualifying'].includes(sess) ? 'Pole Prob' : 'Win Prob'">Win
                                                     Prob</span>
@@ -387,11 +387,11 @@
                                                     x-text="['qualifying', 'sprint_qualifying'].includes(sess) ? 'Pole %' : 'Win %'">Win
                                                     %</span>
                                             </th>
-                                            <th scope="col" class="px-0.5 py-2 sm:p-4">
+                                            <th scope="col" class="py-2 sm:p-4">
                                                 <span class="hidden sm:inline">Podium</span>
                                                 <span class="sm:hidden">Top 3</span>
                                             </th>
-                                            <th scope="col" class="px-0.5 py-2 sm:p-4 text-right"
+                                            <th scope="col" class="py-2 sm:p-4 text-right"
                                                 x-show="['race', 'sprint'].includes(sess)"><abbr
                                                     title="Did Not Finish Probability"
                                                     class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">DNF</abbr>
@@ -403,11 +403,11 @@
                                             <tr :class="[getTeamClass(p.constructorName), getMovementClass(p.driverId, sess)]"
                                                 class="text-sm sm:text-base transition-colors">
                                                 <!-- Position -->
-                                                <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 text-center font-black italic text-base sm:text-lg align-top"
+                                                <td class="pt-2 sm:p-4 text-center font-black italic text-base sm:text-lg align-top"
                                                     :class="index === 0 ? 'text-yellow-400' : index === 1 ? 'text-gray-300' : index === 2 ? 'text-amber-600' : 'text-gray-500'"
                                                     x-text="p.predicted_position"></td>
                                                 <!-- Driver -->
-                                                <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 align-top">
+                                                <td class="pt-2 sm:p-4 align-top">
                                                     <div class="flex items-center space-x-1 sm:space-x-3 mb-0.5">
                                                         <!-- Movement arrow -->
                                                         <template x-if="getDriverMovement(p.driverId, sess)">
@@ -424,18 +424,18 @@
                                                         </template>
                                                         <div class="font-bold uppercase tracking-tighter"
                                                             x-text="p.code || '???'"></div>
-                                                        <div class="font-semibold text-gray-200 truncate max-w-[120px] sm:max-w-none"
+                                                        <div class="font-semibold text-gray-200 truncate max-w-[100px] sm:max-w-none"
                                                             x-text="p.name"></div>
                                                     </div>
                                                 </td>
                                                 <!-- Team -->
                                                 <td
-                                                    class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 hidden md:table-cell align-top">
+                                                    class="pt-2 sm:p-4 hidden md:table-cell align-top">
                                                     <span class="text-sm text-gray-400"
                                                         x-text="p.constructorName">Team</span>
                                                 </td>
                                                 <!-- Grid & Pred Delta (Unfrozen) -->
-                                                <td class="px-0.5 pt-2 sm:pt-4 sm:px-4 text-center align-top"
+                                                <td class="pt-2 sm:p-4 text-center align-top"
                                                     x-show="hasGrid(sess) && !data.frozen">
                                                     <div class="flex flex-col items-center mt-1">
                                                         <span class="text-[10px] text-gray-500 mb-0.5">Start P<span x-text="p.grid || '--'"></span></span>
@@ -452,7 +452,7 @@
                                                 </td>
 
                                                 <!-- Actual & Accuracy (Frozen) -->
-                                                <td class="px-0.5 pt-2 sm:pt-4 sm:px-4 text-center align-top"
+                                                <td class="pt-2 sm:p-4 text-center align-top"
                                                     x-show="data.frozen">
                                                     <div class="flex flex-col items-center">
                                                         <span class="font-black text-xl text-blue-400">P<span x-text="p.actual_position || '?'"></span></span>
@@ -467,7 +467,7 @@
                                                     </div>
                                                 </td>
                                                 <!-- Win % -->
-                                                <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 align-top">
+                                                <td class="pt-2 sm:p-4 align-top">
                                                     <div class="w-10 sm:w-24">
                                                         <div class="text-xs mb-0.5 sm:mb-1"
                                                             x-text="(p.p_win * 100).toFixed(1) + '%'"></div>
@@ -479,7 +479,7 @@
                                                     </div>
                                                 </td>
                                                 <!-- Top 3 % -->
-                                                <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 align-top">
+                                                <td class="pt-2 sm:p-4 align-top">
                                                     <div class="w-10 sm:w-24">
                                                         <div class="text-xs mb-0.5 sm:mb-1"
                                                             x-text="(p.p_top3 * 100).toFixed(1) + '%'"></div>
@@ -491,7 +491,7 @@
                                                     </div>
                                                 </td>
                                                 <!-- DNF % -->
-                                                <td class="px-0.5 pt-2 sm:pt-4 px-0.5 sm:px-4 text-right align-top"
+                                                <td class="pt-2 sm:p-4 text-right align-top"
                                                     x-show="['race', 'sprint'].includes(sess)">
                                                     <div class="w-10 sm:w-24 ml-auto">
                                                         <div class="text-xs mb-0.5 sm:mb-1"
@@ -507,7 +507,7 @@
                                             <!-- Influence panel — now in its own row, spanning all columns -->
                                             <tr :class="getTeamClass(p.constructorName)"
                                                 x-show="p.ensemble_components || hasShapFactors(p.shap_values)">
-                                                <td :colspan="['race', 'sprint'].includes(sess) ? 7 : 6"
+                                                <td :colspan="getColspan(sess)"
                                                     class="px-2 md:px-8 lg:px-12 pb-3 border-t border-gray-800/50">
                                                     <div
                                                         class="flex flex-wrap md:flex-nowrap gap-x-4 gap-y-4 items-start">
@@ -564,58 +564,7 @@
                                 <div class="mt-3 rounded border border-gray-700 bg-gray-900/40 p-3">
                                     <div class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">
                                         Influence Legend</div>
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-300">
-                                        <div>
-                                            <div class="font-semibold text-gray-200 mb-1">Model Mix (ensemble blend)
-                                            </div>
-                                            <div class="space-y-2">
-                                                <div>
-                                                    <span class="text-cyan-400 font-semibold">GBM (AI Speed
-                                                        Prediction)</span>:
-                                                    <p class="mt-0.5 text-gray-400 leading-relaxed">The primary
-                                                        intelligence engine. It functions like a sophisticated
-                                                        pattern-finder, analyzing hundreds of granular data points—such
-                                                        as track temperature, air pressure, and specific driver
-                                                        momentum—to predict raw lap speed for this specific weekend.
-                                                        Unlike the other models which look at historical rankings, the
-                                                        GBM focuses on how current conditions will affect performance
-                                                        right now.</p>
-                                                </div>
-                                                <div>
-                                                    <span class="text-yellow-400 font-semibold">Elo (Overall Skill
-                                                        Score)</span>:
-                                                    <p class="mt-0.5 text-gray-400 leading-relaxed">A long-term talent
-                                                        tracker similar to ratings used in Chess or competitive video
-                                                        games. This score is pure "skill signal"—it increases when a
-                                                        driver beats strong rivals and decreases when they lose to
-                                                        weaker ones. It helps the predictor understand a driver's
-                                                        baseline quality regardless of their current car or the specific
-                                                        track.</p>
-                                                </div>
-                                                <div>
-                                                    <span class="text-purple-400 font-semibold">BT (Matchup
-                                                        Ranking)</span>:
-                                                    <p class="mt-0.5 text-gray-400 leading-relaxed">The Bradley-Terry
-                                                        model is a "Head-to-Head Ranker." It calculates strength by
-                                                        looking at thousands of individual matchups across F1 history.
-                                                        If Driver A consistently finishes ahead of Driver B, the model
-                                                        builds a mathematical hierarchy of who is most likely to win in
-                                                        a direct fight. It differs from Elo by focusing on the
-                                                        probability of one driver beating another in a pair.</p>
-                                                </div>
-                                                <div>
-                                                    <span class="text-green-400 font-semibold">Mix (Driver vs.
-                                                        Car)</span>:
-                                                    <p class="mt-0.5 text-gray-400 leading-relaxed">The Talent
-                                                        Separator. This model attempts to answer the age-old F1
-                                                        question: "Is it the driver or the car?" by mathematically
-                                                        isolating a driver's personal performance from the performance
-                                                        of the team they are driving for. It ensures that a world-class
-                                                        driver in a mid-field car is still recognized for their
-                                                        individual contribution to the final predicted result.</p>
-                                                </div>
-                                            </div>
-                                        </div>
+                                    <div class="grid grid-cols-1 gap-3 text-xs text-gray-300">
                                         <div>
                                             <div class="font-semibold text-gray-200 mb-1">Factor Impact Direction</div>
                                             <div aria-hidden="true"><span class="text-green-400 font-semibold">▲
@@ -1274,11 +1223,23 @@
                         .sort((a, b) => a.label.localeCompare(b.label));
                 },
 
+                getColspan(sess) {
+                    const isSpecial = ['race', 'sprint'].includes(sess);
+                    const isMobile = (this.windowWidth || window.innerWidth) < 768;
+                    // Desktop: 7 columns for race/sprint (Pos, Driver, Team, Grid, Win, Podium, DNF)
+                    //          6 columns for others (no DNF)
+                    // Mobile:  Subtract 1 because Team is hidden (hidden md:table-cell)
+                    if (isMobile) {
+                        return isSpecial ? 6 : 5;
+                    }
+                    return isSpecial ? 7 : 6;
+                },
+
                 getFactorLimit() {
                     const w = this.windowWidth || window.innerWidth;
                     const containerW = Math.min(w, 1400);
                     // Mobile should only show as many as can fit
-                    if (w < 768) return Math.floor((w - 32) / 94);
+                    if (w < 768) return Math.floor((w - 32) / 104);
 
                     // Sidebar (w-64 = 256px) is side-by-side at >= 768px (md breakpoint).
                     // sidebar(256) + gap(16) = 272 (was gap-x-8 = 32px)
