@@ -316,7 +316,7 @@
                 </div>
 
                 <!-- Session Content -->
-                <template x-for="[sess, data] in Object.entries(results?.sessions || {})" :key="sess">
+                <template x-for="[sess, data] in Object.entries(results?.sessions || {}).filter(([s]) => getAvailableSessions().includes(s))" :key="sess">
                     <div x-show="activeSession === sess || getAvailableSessions().length === 1" x-transition role="tabpanel" :id="'panel-' + sess"
                         :aria-labelledby="'tab-' + sess" tabindex="0"
                         class="focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-opacity-50 rounded-lg">
@@ -879,7 +879,7 @@
                         if (viewingSameEvent) {
                             this.results = data;
                             if (!this.activeSession && data.sessions) {
-                                this.activeSession = Object.keys(data.sessions)[0];
+                                this.activeSession = this.getAvailableSessions()[0];
                             }
                             this.saveState();
                         }
@@ -953,10 +953,12 @@
 
                 getAvailableSessions() {
                     if (!this.results || !this.results.sessions) return [];
-                    const order = ['sprint_qualifying', 'sprint', 'qualifying', 'race'];
-                    return Object.keys(this.results.sessions).sort((a, b) => {
-                        return order.indexOf(a) - order.indexOf(b);
-                    });
+                    const order = ['sprint', 'race'];
+                    return Object.keys(this.results.sessions)
+                        .filter(s => order.includes(s))
+                        .sort((a, b) => {
+                            return order.indexOf(a) - order.indexOf(b);
+                        });
                 },
 
                 async fetchSchedule() {
@@ -1068,7 +1070,7 @@
                         this.results = this.allRoundsData[roundStr];
                         if (this.results && this.results.sessions) {
                             if (!this.activeSession || !this.results.sessions[this.activeSession]) {
-                                this.activeSession = Object.keys(this.results.sessions)[0];
+                                this.activeSession = this.getAvailableSessions()[0];
                             }
                         }
                     } else {
@@ -1139,7 +1141,7 @@
                                                 if (String(data.round) === String(this.params.round)) {
                                                     this.results = data;
                                                     if (!this.activeSession && data.sessions) {
-                                                        this.activeSession = Object.keys(data.sessions)[0];
+                                                        this.activeSession = this.getAvailableSessions()[0];
                                                     }
                                                 }
                                             }
@@ -1154,7 +1156,7 @@
                         }
 
                         if (this.results && this.results.sessions) {
-                            this.activeSession = Object.keys(this.results.sessions)[0];
+                            this.activeSession = this.getAvailableSessions()[0];
                             this.saveState();
                         } else if (!this.error) {
                             throw new Error("No results received from server");
