@@ -333,6 +333,7 @@ class TestPredictionManagerCycle:
 
         cfg = MagicMock()
         cfg.modelling.targets.session_types = ["qualifying", "race"]
+        cfg.paths.cache_dir = "cache"
 
         manager = PredictionManager(cfg, poll_interval=60)
         manager._latest_results = {"season": 2024, "rounds": {}}
