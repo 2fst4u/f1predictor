@@ -195,7 +195,7 @@
                                 <button @click="selectRound(r.round)"
                                     :disabled="scheduleLoading || loading"
                                     :aria-current="params.round === r.round ? 'true' : 'false'"
-                                    :class="params.round === r.round ? 'bg-red-600 text-white border-red-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500'"
+                                    :class="params.round === r.round ? 'bg-red-600 text-white border-red-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500 hover:bg-gray-700 hover:text-gray-300'"
                                     class="flex-shrink-0 text-xs px-3 py-1.5 rounded border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 flex flex-col items-center justify-center min-w-[70px] disabled:cursor-not-allowed">
                                     <span class="font-bold mb-0.5 whitespace-nowrap" x-text="'Round ' + (r.round || index + 1)"></span>
                                     <span class="text-[10px] uppercase tracking-tighter w-full max-w-[90px] truncate text-center" :class="params.round === r.round ? 'opacity-100' : 'opacity-75'" x-text="r.raceName.replace(' Grand Prix', '')"></span>
@@ -363,7 +363,7 @@
 
                         <!-- Predictions Table -->
                         <div class="card shadow-2xl overflow-hidden">
-                            <div class="overflow-x-auto">
+                            <div class="overflow-x-auto" tabindex="0" role="region" aria-label="Prediction Results Table">
                                 <table class="w-full text-left">
                                     <thead>
                                         <tr
@@ -475,7 +475,7 @@
                                                         <div class="text-xs mb-0.5 sm:mb-1"
                                                             x-text="(p.p_win * 100).toFixed(1) + '%'"></div>
                                                         <div class="progress-bar hidden sm:block" aria-hidden="true">
-                                                            <div class="progress-fill"
+                                                            <div class="progress-fill transition-all duration-500 ease-out"
                                                                 :style="'width: ' + (p.p_win * 100) + '%; background-color: ' + getProbColor(p.p_win * 100)">
                                                             </div>
                                                         </div>
@@ -487,7 +487,7 @@
                                                         <div class="text-xs mb-0.5 sm:mb-1"
                                                             x-text="(p.p_top3 * 100).toFixed(1) + '%'"></div>
                                                         <div class="progress-bar hidden sm:block" aria-hidden="true">
-                                                            <div class="progress-fill"
+                                                            <div class="progress-fill transition-all duration-500 ease-out"
                                                                 :style="'width: ' + (p.p_top3 * 100) + '%; background-color: ' + getProbColor(p.p_top3 * 100)">
                                                             </div>
                                                         </div>
@@ -500,7 +500,7 @@
                                                         <div class="text-xs mb-0.5 sm:mb-1"
                                                             x-text="(p.p_dnf * 100).toFixed(1) + '%'"></div>
                                                         <div class="progress-bar hidden sm:block" aria-hidden="true">
-                                                            <div class="progress-fill"
+                                                            <div class="progress-fill transition-all duration-500 ease-out"
                                                                 :style="'width: ' + (p.p_dnf * 100) + '%; background-color: ' + getProbColor(p.p_dnf * 100, true)">
                                                             </div>
                                                         </div>
@@ -540,7 +540,7 @@
                                                                                     x-text="feat.val < 0 ? '▲' : '▼'"></span>
                                                                                 <div class="w-8 md:w-12 h-2 bg-gray-700 rounded overflow-hidden flex-shrink-0"
                                                                                     aria-hidden="true">
-                                                                                    <div class="h-full rounded"
+                                                                                    <div class="h-full rounded transition-all duration-500 ease-out"
                                                                                         :class="feat.val < 0 ? 'bg-green-500' : 'bg-red-500'"
                                                                                         :style="'width:' + Math.min(100, feat.absPct).toFixed(0) + '%'">
                                                                                     </div>
