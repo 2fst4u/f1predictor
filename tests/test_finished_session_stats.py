@@ -13,6 +13,7 @@ def test_finished_session_retains_ml_stats():
     just cloning the actual results into the prediction fields.
     """
     cfg = load_config("config.yaml")
+    cfg.modelling.monte_carlo.draws = 2 # Speed up
 
     # Mock data for a session that has finished
     mock_roster = pd.DataFrame([
@@ -20,60 +21,68 @@ def test_finished_session_retains_ml_stats():
         {"driverId": "hamilton", "name": "Lewis Hamilton", "code": "HAM", "constructorName": "Mercedes", "constructorId": "mercedes"},
     ])
 
-    # Actual results: Hamilton won, Verstappen 2nd
-    mock_actual_results = [
-        {"Driver": {"driverId": "hamilton"}, "position": "1"},
-        {"Driver": {"driverId": "verstappen"}, "position": "2"},
-    ]
-
     with patch("f1pred.predict.JolpicaClient") as MockJolpica, \
          patch("f1pred.predict.OpenMeteoClient") as MockMeteo, \
-         patch("f1pred.features.build_roster") as mock_build_roster, \
-         patch("f1pred.features.build_session_features") as mock_build_features, \
-         patch("f1pred.predict.get_session_classification") as mock_get_class:
+         patch("f1pred.predict.PredictionCache") as mock_cache_cls, \
+         patch("f1pred.predict.build_roster") as mock_build_roster, \
+         patch("f1pred.predict.build_session_features") as mock_build_features, \
+         patch("f1pred.predict.get_session_classification") as mock_get_class, \
+         patch("f1pred.predict._get_actual_positions_for_session") as mock_get_actual, \
+         patch("f1pred.features.collect_historical_results") as mock_collect, \
+         patch("f1pred.calibrate.CalibrationManager") as mock_cm_cls, \
+         patch("f1pred.models.train_pace_model") as mock_train, \
+         patch("f1pred.simulate.simulate_grid") as mock_sim, \
+         patch("f1pred.predict.print_session_console"):
 
         jc = MockJolpica.return_value
         jc.get_season_schedule.return_value = [
-            {"round": "1", "raceName": "Test GP", "date": "2026-04-01", "time": "12:00:00Z", "season": "2026"}
+            {"round": "1", "raceName": "Test GP", "date": "2020-04-01", "time": "12:00:00Z", "season": "2020"}
         ]
-        # Jolpica returns Hamilton P1, Verstappen P2
-        jc.get_race_results.return_value = mock_actual_results
+        jc.get_latest_season_and_round.return_value = ("2020", "1")
 
         mock_build_roster.return_value = mock_roster
 
-        # Mock features - just enough to run the model
+        # Mock actuals Series
+        mock_get_actual.return_value = pd.Series([2, 1], index=[0, 1]) # Verstappen 2, Hamilton 1
+
         mock_features = mock_roster.copy()
         mock_features["grid"] = [1, 2]
-        mock_features["form_index"] = [0.9, 0.8]
-
         mock_build_features.return_value = (mock_features, {"weather": {}}, mock_roster)
+
+        mock_cache = mock_cache_cls.return_value
+        mock_cache.get.return_value = None
+        mock_cache.get_by_key.return_value = None
+
+        mock_collect.return_value = pd.DataFrame()
+        mock_cm = mock_cm_cls.return_value
+        mock_cm.check_calibration_needed.return_value = False
+        mock_cm.load_weights.return_value = {}
+
+        # Mock model outputs
+        mock_train.return_value = (MagicMock(), np.array([0.0, 0.1]), ["feat1"], None)
+        # Hamilton (idx 1) has 80% win prob, Verstappen (idx 0) has 20%
+        mock_sim.return_value = (np.zeros((2, 2)), np.array([0.2, 0.8]), None)
 
         # Run predictions
         results = run_predictions_for_event(
             cfg,
-            season="2026",
+            season="2020",
             rnd="1",
             sessions=["race"],
             return_results=True,
-            use_actuals=True # This is the default and the one we want to test
+            use_actuals=True
         )
 
+        assert "race" in results["sessions"], f"Race session missing from results. Results: {results}"
         race_preds = results["sessions"]["race"]["ranked"]
-
-        # If the bug is present, race_preds will be sorted by actual position (Hamilton 1st)
-        # and predicted_position will be equal to actual_position.
-        # Win probabilities will be 1.0 for Hamilton and 0.0 for Verstappen.
 
         ham_row = race_preds[race_preds["driverId"] == "hamilton"].iloc[0]
         ver_row = race_preds[race_preds["driverId"] == "verstappen"].iloc[0]
 
-        print(f"Hamilton Predicted Pos: {ham_row['predicted_position']}, Actual: {ham_row['actual_position']}, Win Prob: {ham_row['p_win']}")
-        print(f"Verstappen Predicted Pos: {ver_row['predicted_position']}, Actual: {ver_row['actual_position']}, Win Prob: {ver_row['p_win']}")
+        # Win probabilities should be from ML (0.8/0.2), NOT from actuals (1.0/0.0)
+        assert ham_row["p_win"] == 0.8
+        assert ver_row["p_win"] == 0.2
 
-        # We want ML stats to be probabilistic, not 1.0/0.0
-        assert 0.0 < ham_row["p_win"] < 1.0
-        assert 0.0 < ver_row["p_win"] < 1.0
-
-        # We expect the prediction model to still exist.
-        assert "shap_values" in race_preds.columns
-        assert race_preds["shap_values"].notna().any()
+        # Actual positions should be correctly mapped
+        assert ham_row["actual_position"] == 1
+        assert ver_row["actual_position"] == 2

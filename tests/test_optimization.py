@@ -38,9 +38,9 @@ def test_run_predictions_no_longer_bypasses_ml_when_actuals_present(sample_roste
          patch("f1pred.predict.OpenMeteoClient"), \
          patch("f1pred.predict.PredictionCache") as mock_cache_cls, \
          patch("f1pred.calibrate.CalibrationManager") as mock_cm, \
-         patch("f1pred.features.build_roster", return_value=sample_roster) as mock_build_roster, \
+         patch("f1pred.predict.build_roster", return_value=sample_roster) as mock_build_roster, \
          patch("f1pred.predict._get_actual_positions_for_session", wraps=None) as mock_get_actual, \
-         patch("f1pred.features.build_session_features") as mock_build_features, \
+         patch("f1pred.predict.build_session_features") as mock_build_features, \
          patch("f1pred.models.train_pace_model") as mock_train, \
          patch("f1pred.features.collect_historical_results"), \
          patch("f1pred.simulate.simulate_grid") as mock_sim, \
@@ -52,6 +52,7 @@ def test_run_predictions_no_longer_bypasses_ml_when_actuals_present(sample_roste
 
         mock_cache = mock_cache_cls.return_value
         mock_cache.get.return_value = None
+        mock_cache.get_by_key.return_value = None
 
         mock_build_features.return_value = (pd.DataFrame({'driverId': ['d1'], 'grid': [1]}), {"weather": {}}, sample_roster)
         mock_train.return_value = (MagicMock(), np.array([0.0]), ["feat1"], None)
@@ -94,9 +95,9 @@ def test_run_predictions_no_bypass_when_no_results(sample_roster):
          patch("f1pred.predict.OpenMeteoClient"), \
          patch("f1pred.predict.PredictionCache") as mock_cache_cls, \
          patch("f1pred.calibrate.CalibrationManager") as mock_cm, \
-         patch("f1pred.features.build_roster", return_value=sample_roster) as mock_build_roster, \
+         patch("f1pred.predict.build_roster", return_value=sample_roster) as mock_build_roster, \
          patch("f1pred.predict._get_actual_positions_for_session", return_value=None), \
-         patch("f1pred.features.build_session_features") as mock_build_features, \
+         patch("f1pred.predict.build_session_features") as mock_build_features, \
          patch("f1pred.models.train_pace_model") as mock_train, \
          patch("f1pred.features.collect_historical_results"), \
          patch("f1pred.simulate.simulate_grid") as mock_sim, \
@@ -108,6 +109,7 @@ def test_run_predictions_no_bypass_when_no_results(sample_roster):
 
         mock_cache = mock_cache_cls.return_value
         mock_cache.get.return_value = None
+        mock_cache.get_by_key.return_value = None
 
         mock_build_features.return_value = (pd.DataFrame({'driverId': ['d1'], 'grid': [1]}), {"weather": {}}, sample_roster)
         mock_train.return_value = (MagicMock(), np.array([0.0]), ["feat1"])
