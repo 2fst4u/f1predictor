@@ -44,14 +44,8 @@ def _entries_from_results(results: List[Dict]) -> List[Dict]:
 def _same_round_known_roster(jc: JolpicaClient, season: str, rnd: str) -> List[Dict]:
     """
     Try to get the event roster from the same round, in order:
-      qualifying -> race -> sprint.
+      race -> sprint -> qualifying.
     """
-    try:
-        q = jc.get_qualifying_results(season, rnd)
-        if q:
-            return _entries_from_results(q)
-    except Exception:
-        pass
     try:
         r = jc.get_race_results(season, rnd)
         if r:
@@ -62,6 +56,12 @@ def _same_round_known_roster(jc: JolpicaClient, season: str, rnd: str) -> List[D
         s = jc.get_sprint_results(season, rnd)
         if s:
             return _entries_from_results(s)
+    except Exception:
+        pass
+    try:
+        q = jc.get_qualifying_results(season, rnd)
+        if q:
+            return _entries_from_results(q)
     except Exception:
         pass
     return []
@@ -231,8 +231,8 @@ def _roster_from_fastf1(season: int, rnd: int, mapping: Optional[Dict] = None) -
 
         # Try to load a session to get the roster.
         # We try multiple sessions in case some data is missing or hasn't occurred yet.
-        # Order: FP1 (standard), then sessions that might have occurred.
-        session_names = ["FP1", "Sprint Qualifying", "Sprint Shootout", "Qualifying", "Sprint", "Race"]
+        # Order: Prefer Race, then Sprint, then Qualifying, then Practice.
+        session_names = ["Race", "Sprint", "Qualifying", "Sprint Qualifying", "Sprint Shootout", "FP3", "FP2", "FP1"]
         results = None
 
         for sname in session_names:
