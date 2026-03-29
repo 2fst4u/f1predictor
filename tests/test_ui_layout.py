@@ -79,5 +79,5 @@ def test_factor_limit_offsets(page: "Page"):
     page.set_viewport_size({"width": 400, "height": 800})
     page.evaluate("Alpine.$data(document.querySelector('[x-data]')).windowWidth = 400")
     limit_mobile = page.evaluate("Alpine.$data(document.querySelector('[x-data]')).getFactorLimit()")
-    # Expected for 400px: w < 768 -> floor((400 - 32) / 104) = floor(368 / 104) = 3.
-    assert limit_mobile == 3
+    # New Expected for 400px: w < 768 -> floor((400 - 14) / 81) = floor(386 / 81) = 4.
+    assert limit_mobile == 4
