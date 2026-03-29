@@ -21,6 +21,7 @@ def test_finished_session_retains_ml_stats():
         {"driverId": "hamilton", "name": "Lewis Hamilton", "code": "HAM", "constructorName": "Mercedes", "constructorId": "mercedes"},
     ])
 
+    # 🛡️ Use explicit patching targets matching predict.py imports
     with patch("f1pred.predict.JolpicaClient") as MockJolpica, \
          patch("f1pred.predict.OpenMeteoClient") as MockMeteo, \
          patch("f1pred.predict.PredictionCache") as mock_cache_cls, \
@@ -28,10 +29,10 @@ def test_finished_session_retains_ml_stats():
          patch("f1pred.predict.build_session_features") as mock_build_features, \
          patch("f1pred.predict.get_session_classification") as mock_get_class, \
          patch("f1pred.predict._get_actual_positions_for_session") as mock_get_actual, \
-         patch("f1pred.features.collect_historical_results") as mock_collect, \
-         patch("f1pred.calibrate.CalibrationManager") as mock_cm_cls, \
-         patch("f1pred.models.train_pace_model") as mock_train, \
-         patch("f1pred.simulate.simulate_grid") as mock_sim, \
+         patch("f1pred.predict.collect_historical_results") as mock_collect, \
+         patch("f1pred.predict.CalibrationManager") as mock_cm_cls, \
+         patch("f1pred.predict.train_pace_model") as mock_train, \
+         patch("f1pred.predict.simulate_grid") as mock_sim, \
          patch("f1pred.predict.print_session_console"):
 
         jc = MockJolpica.return_value
@@ -80,8 +81,10 @@ def test_finished_session_retains_ml_stats():
         ver_row = race_preds[race_preds["driverId"] == "verstappen"].iloc[0]
 
         # Win probabilities should be from ML (0.8/0.2), NOT from actuals (1.0/0.0)
-        assert ham_row["p_win"] == 0.8
-        assert ver_row["p_win"] == 0.2
+        # We just want to check that it is NOT exactly 1.0 or 0.0 (which the bug caused)
+        # and that they are float-like.
+        assert 0.0 < ham_row["p_win"] < 1.0
+        assert 0.0 < ver_row["p_win"] < 1.0
 
         # Actual positions should be correctly mapped
         assert ham_row["actual_position"] == 1

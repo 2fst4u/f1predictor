@@ -41,8 +41,8 @@ def test_run_predictions_no_longer_bypasses_ml_when_actuals_present(sample_roste
          patch("f1pred.predict.build_roster", return_value=sample_roster) as mock_build_roster, \
          patch("f1pred.predict._get_actual_positions_for_session", wraps=None) as mock_get_actual, \
          patch("f1pred.predict.build_session_features") as mock_build_features, \
-         patch("f1pred.models.train_pace_model") as mock_train, \
-         patch("f1pred.features.collect_historical_results"), \
+         patch("f1pred.predict.train_pace_model") as mock_train, \
+         patch("f1pred.predict.collect_historical_results"), \
          patch("f1pred.simulate.simulate_grid") as mock_sim, \
          patch("f1pred.predict.print_session_console"):
 
@@ -98,8 +98,8 @@ def test_run_predictions_no_bypass_when_no_results(sample_roster):
          patch("f1pred.predict.build_roster", return_value=sample_roster) as mock_build_roster, \
          patch("f1pred.predict._get_actual_positions_for_session", return_value=None), \
          patch("f1pred.predict.build_session_features") as mock_build_features, \
-         patch("f1pred.models.train_pace_model") as mock_train, \
-         patch("f1pred.features.collect_historical_results"), \
+         patch("f1pred.predict.train_pace_model") as mock_train, \
+         patch("f1pred.predict.collect_historical_results"), \
          patch("f1pred.simulate.simulate_grid") as mock_sim, \
          patch("f1pred.predict.print_session_console"):
 
