@@ -9,8 +9,12 @@ from unittest.mock import patch
 def client():
     # Use real config for simple init
     cfg = load_config("config.yaml")
+    # 🛡️ Sentinel: Use extremely long poll interval for tests to prevent
+    # background cycles from triggering during interpreter shutdown.
+    cfg.app.auto_refresh_seconds = 86400
     init_web(cfg)
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 def test_read_main(client):
     response = client.get("/")
