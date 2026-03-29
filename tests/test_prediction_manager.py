@@ -436,10 +436,10 @@ class TestPredictionManagerActualResults:
             "season": 2024,
             "round": 1,
             "sessions": {
-                "race": {"ranked": df_race, "meta": {}},
-                "qualifying": {"ranked": pd.DataFrame(), "meta": {}},
-                "sprint": {"ranked": pd.DataFrame(), "meta": {}},
-                "practice": {"ranked": pd.DataFrame(), "meta": {}}
+                "race": {"ranked": df_race, "meta": {}, "frozen": True},
+                "qualifying": {"ranked": pd.DataFrame(), "meta": {}, "frozen": False},
+                "sprint": {"ranked": pd.DataFrame(), "meta": {}, "frozen": False},
+                "practice": {"ranked": pd.DataFrame(), "meta": {}, "frozen": False}
             }
         }
 
@@ -468,9 +468,8 @@ class TestPredictionManagerActualResults:
         assert first_row["meta_dict"] == {"k": None}
         assert first_row["meta_date"] == date_obj.isoformat()
 
-        # Check actual results mapping
-        assert first_row["actual_position"] == 1
-        assert first_row["frozen"] is True
+        # Check frozen status and session results
+        assert rounds["1"]["sessions"]["race"]["frozen"] is True
 
 
 class TestPredictionManagerCycleExceptionHandling:

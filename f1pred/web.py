@@ -284,7 +284,8 @@ async def get_predictions(
 
             output["sessions"][sess] = {
                 "predictions": ranked_list,
-                "weather": data.get("meta", {}).get("weather", {})
+                "weather": data.get("meta", {}).get("weather", {}),
+                "frozen": data.get("frozen", False)
             }
 
         return output
@@ -342,7 +343,8 @@ async def get_predictions_stream(
 
                 output["sessions"][sess] = {
                     "predictions": ranked_list,
-                    "weather": data.get("meta", {}).get("weather", {})
+                    "weather": data.get("meta", {}).get("weather", {}),
+                    "frozen": data.get("frozen", False)
                 }
 
             q.put({"type": "results", "data": output})
