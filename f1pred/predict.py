@@ -223,6 +223,7 @@ def _get_actual_positions_for_session(
     round_i: int,
     sess: str,
     roster_view: 'pd.DataFrame',  # expects columns: driverId, number, code
+    force_refresh: bool = False,
 ) -> Optional['pd.Series']:
     """Return a Series aligned to roster_view with actual finishing/qualifying position where available.
 
@@ -234,13 +235,13 @@ def _get_actual_positions_for_session(
         # 1. Try Jolpica first for race/qualifying/sprint
         amap = None
         if sess == "race":
-            act = jc.get_race_results(str(season_i), str(round_i))
+            act = jc.get_race_results(str(season_i), str(round_i), force_refresh=force_refresh)
             amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position") and str(r.get("position")).isdigit()}
         elif sess == "qualifying":
-            act = jc.get_qualifying_results(str(season_i), str(round_i))
+            act = jc.get_qualifying_results(str(season_i), str(round_i), force_refresh=force_refresh)
             amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position") and str(r.get("position")).isdigit()}
         elif sess == "sprint":
-            act = jc.get_sprint_results(str(season_i), str(round_i))
+            act = jc.get_sprint_results(str(season_i), str(round_i), force_refresh=force_refresh)
             amap = {r["Driver"]["driverId"]: int(r["position"]) for r in act if r.get("position") and str(r.get("position")).isdigit()}
         elif sess == "sprint_qualifying":
             # NOTE: Ergast/Jolpica traditionally does not have a standard 'sprint_qualifying' endpoint
@@ -715,9 +716,12 @@ def run_predictions_for_event(
                 # We do this before heavy feature building to ensure near-instant results for finished sessions
                 # Skip when use_actuals=False (backtesting/calibration) to exercise the full prediction pipeline
                 if use_actuals and roster is not None and not roster.empty:
+                    now_utc = datetime.now(timezone.utc)
+                    should_force = ref_date < now_utc
                     actual_positions = _get_actual_positions_for_session(
                         jc, season_i, round_i, sess,
-                        roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
+                        roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]],
+                        force_refresh=should_force
                     )
 
                 # 2. Build features (Expensive operation)
@@ -1043,13 +1047,15 @@ def run_predictions_for_event(
                 ranked["code"] = ""
 
             # actual_positions might have been resolved early in the loop for optimization
-            if actual_positions is None and sess_dt and sess_dt < datetime.now(timezone.utc):
+            now_utc = datetime.now(timezone.utc)
+            if actual_positions is None and sess_dt and sess_dt < now_utc:
                 actual_positions = _get_actual_positions_for_session(
                     jc,
                     season_i,
                     round_i,
                     sess,
                     ranked[["driverId", "number", "code"]],
+                    force_refresh=True
                 )
             if actual_positions is not None:
                 # If actual_positions was fetched early (for optimization), it is aligned to the
@@ -1073,6 +1079,7 @@ def run_predictions_for_event(
                 "prob_matrix": prob_matrix,
                 "pairwise": pairwise,
                 "meta": meta,
+                "frozen": actual_positions is not None and not actual_positions.isna().all(),
             }
 
             for _, row in ranked.iterrows():
