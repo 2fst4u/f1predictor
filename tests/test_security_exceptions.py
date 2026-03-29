@@ -37,7 +37,7 @@ def test_predict_logs_sanitized_exception(mock_logger):
     with patch("f1pred.predict.resolve_event") as mock_resolve:
         mock_resolve.return_value = (2025, 1, {"raceName": "Test GP", "date": "2025-01-01", "time": "12:00:00Z"})
 
-        with patch("f1pred.features.build_roster") as mock_roster:
+        with patch("f1pred.predict.build_roster") as mock_roster:
             # Raise a malicious exception early in the loop
             malicious_msg = "Crash\n\033[31mForged\033[0m"
             mock_roster.side_effect = Exception(malicious_msg)
