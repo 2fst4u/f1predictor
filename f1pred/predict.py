@@ -716,6 +716,16 @@ def run_predictions_for_event(
                     if roster is not None and not roster.empty:
                         cached_roster = roster
 
+                # 1.5 Optimization check: Check for actual results if session is in the past
+                # Note: We NO LONGER bypass the ML pipeline here (even if use_actuals is True)
+                # to ensure prediction stats (probabilities, SHAP) are retained for finished sessions.
+                # Actual results are still fetched for later comparison.
+                if use_actuals and roster is not None and not roster.empty:
+                    actual_positions = _get_actual_positions_for_session(
+                        jc, season_i, round_i, sess,
+                        roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
+                    )
+
                 # 2. Build features (Expensive operation)
                 extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
                 spinner.update(f"Predicting {event_title} - {sess}: Building features...")
@@ -741,7 +751,7 @@ def run_predictions_for_event(
                     continue
 
                 # Ensure history and calibration are ready if we actually need to predict
-                # This must happen BEFORE the cache check because the cache key depends on calibrated weights.
+                    # This must happen BEFORE the cache check because the cache key depends on calibrated weights.
                 if all_history is None:
                     spinner.update(f"Predicting {event_title} - {sess}: Pre-fetching history...")
                     now = datetime.now(timezone.utc)
