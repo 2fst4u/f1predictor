@@ -12,6 +12,7 @@ import json
 import os
 import threading
 import time
+import httpx
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
@@ -633,6 +634,8 @@ class PredictionManager:
                 "data": diff.to_dict(),
                 "timestamp": now,
             })
+            if hasattr(self, '_send_discord_webhook'):
+                self._send_discord_webhook(diff, event_title)
             
         self._broadcast({
             "type": "prediction_round",
