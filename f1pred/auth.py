@@ -15,7 +15,10 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
 
 # Configure CryptContext for password hashing using bcrypt.
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Disable truncate_error (which raises ValueError for passwords > 72 bytes)
+# to maintain compatibility with legacy tests or overly long test passwords,
+# as bcrypt automatically truncates at 72 bytes.
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__truncate_error=False)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
 def verify_password(plain_password, hashed_password):
@@ -24,9 +27,6 @@ def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password):
-    # Truncate password to 72 bytes to avoid passlib ValueError
-    if isinstance(password, str):
-        password = password.encode('utf-8')[:72].decode('utf-8', 'ignore')
     return pwd_context.hash(password)
 
 def get_user(db: Session, username: str):
