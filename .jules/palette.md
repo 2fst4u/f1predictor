@@ -8,3 +8,7 @@
 ## 2024-05-19 - Empty State Directional Animation Cues
 **Learning:** Empty states that simply instruct a user to take an action (e.g., "Select a round") can leave users scanning the interface to locate the necessary control. Using a subtle, continuous directional animation (like an `animate-bounce` on an upward-pointing arrow) paired with explicit directional language ("Select a round above") provides immediate, intuitive micro-UX that guides the user's eye directly to the required input area, eliminating cognitive load.
 **Action:** When designing an empty state that relies on an input located elsewhere on the page, use animated directional icons and explicit positional phrasing in the helper text to explicitly guide the user's visual flow toward the required action.
+
+## 2024-05-19 - Keyboard Accessibility for Scrollable Containers
+**Learning:** Scrollable areas utilizing `overflow-x-auto` or `overflow-y-auto` cannot be scrolled via the keyboard (arrow keys) unless the container itself is able to receive focus. Adding `tabindex="0"`, `role="region"`, a descriptive `aria-label`, and visual focus indicators (`focus:outline-none focus-visible:ring-2`) directly to the overflowing container ensures complete accessibility for keyboard and screen reader users.
+**Action:** When designing scrollable regions (such as long tables or lists within tight viewports), always add `tabindex="0"`, `role="region"`, an appropriate `aria-label`, and `focus-visible:` styles to the wrapper element controlling the overflow.
