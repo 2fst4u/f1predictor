@@ -86,7 +86,7 @@ def test_build_hist_training_X_basic():
     X_current = pd.DataFrame({
         "driverId": [f"driver_{i}" for i in range(1, 11)],
         "constructorId": [f"team_{(i - 1) // 2}" for i in range(1, 11)],
-        "form_index": np.random.randn(10),
+        "form_index": np.linspace(-5, 5, 10),
         "grid": list(range(1, 11)),
     })
 
@@ -129,4 +129,64 @@ def test_train_pace_model_with_hist_X(sample_features):
     )
     assert model is not None
     assert len(pace_hat) == len(sample_features)
+    assert np.all(np.isfinite(pace_hat))
+
+
+def test_split_feature_columns():
+    """Test that _split_feature_columns correctly identifies features, num_cols, and cat_cols."""
+    from f1pred.models import _split_feature_columns
+    df = pd.DataFrame({
+        "a": [1, 2],
+        "b": ["x", "y"],
+        "c": [3.0, 4.0],
+        "exclude1": [1, 2],
+        "exclude2": ["a", "b"]
+    })
+
+    features, num_cols, cat_cols = _split_feature_columns(df, ["exclude1", "exclude2"])
+
+    assert set(features) == {"a", "b", "c"}
+    assert set(num_cols) == {"a", "c"}
+    assert set(cat_cols) == {"b"}
+
+def test_train_pace_model_blend_baseline():
+    """Test the pace model blending logic when model fails."""
+    from f1pred.models import train_pace_model
+
+    # Create dummy data where GBM will have zero std deviation, causing fallback to baseline
+    df = pd.DataFrame({
+        "driverId": [f"d{i}" for i in range(10)],
+        "constructorId": [f"c{i}" for i in range(10)],
+        "form_index": np.linspace(1, 10, 10),
+        "team_form_index": np.linspace(1, 10, 10),
+        "grid": [1] * 10,
+        # Constant feature values so the model has nothing to learn from
+        "dummy_feature": [0.0] * 10
+    })
+
+    model, pace_hat, features, shap_vals = train_pace_model(df, session_type="race")
+
+    assert model is not None
+    assert len(pace_hat) == 10
+    assert np.all(np.isfinite(pace_hat))
+    # Standard deviation should not be exactly 0 because of jitter addition in fallback
+    assert np.std(pace_hat) > 0.0
+
+def test_train_pace_model_blend_quali():
+    """Test the pace model blending logic with quali positions."""
+    from f1pred.models import train_pace_model
+
+    # Create dummy data with valid quali positions to trigger stage 1.5 blend
+    df = pd.DataFrame({
+        "driverId": [f"d{i}" for i in range(10)],
+        "constructorId": [f"c{i}" for i in range(10)],
+        "form_index": np.linspace(-5, 5, 10),
+        "team_form_index": np.linspace(-5, 5, 10),
+        "current_quali_pos": np.arange(1, 11),
+    })
+
+    model, pace_hat, features, shap_vals = train_pace_model(df, session_type="race")
+
+    assert model is not None
+    assert len(pace_hat) == 10
     assert np.all(np.isfinite(pace_hat))
