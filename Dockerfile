@@ -1,17 +1,17 @@
 # --- Stage 1: Build Stage ---
-FROM python:3.12-alpine AS builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
 # Install build dependencies
-RUN apk add --no-cache \
-    build-base \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     cmake \
     git \
-    libstdc++ \
-    linux-headers \
-    gcompat \
-    openblas-dev
+    libstdc++6 \
+    linux-libc-dev \
+    libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install build tools
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -19,7 +19,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # Pre-build heavy C-extension dependencies as wheels.
 # shap is built separately with --no-deps to avoid pulling in numba/llvmlite,
-# which fail to build from source on Alpine + Python 3.12.  shap's TreeExplainer
+# which fail to build from source on Alpine + Python 3.12 (less relevant for slim but kept for safety).  shap's TreeExplainer
 # only needs numpy/scipy/sklearn/pandas, all of which are already present.
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -38,7 +38,7 @@ COPY f1pred/ f1pred/
 RUN python -m pip wheel . --no-deps -w dist
 
 # --- Stage 2: Final Runtime Stage ---
-FROM python:3.12-alpine
+FROM python:3.12-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -48,17 +48,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install runtime system dependencies
-RUN apk add --no-cache \
-    libgomp \
-    libstdc++ \
-    gcompat \
-    openblas
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    libstdc++6 \
+    libopenblas0-pthread \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies first (for better caching)
 # Copy the built dependency wheels from the builder stage and install them.
 # shap must be installed with --no-deps so pip does not attempt to resolve or
 # build its optional numba/llvmlite transitive dependencies, which have no
-# pre-built wheels for Alpine + Python 3.12.  shap's TreeExplainer only needs
+# pre-built wheels for Alpine + Python 3.12 (less relevant for slim but kept for safety).  shap's TreeExplainer only needs
 # numpy/scipy/sklearn/pandas, which are already present in the other wheels.
 COPY --from=builder /wheels/*.whl /tmp/wheels/
 RUN pip install --no-cache-dir $(ls /tmp/wheels/*.whl | grep -v 'shap') && \
