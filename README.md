@@ -163,7 +163,8 @@ Run the local test suite (requires installing test dependencies first):
 
 ```bash
 make install
-pip install pytest pytest-cov httpx playwright fastparquet pyarrow colorama
+pip install pytest pytest-cov httpx pytest-playwright playwright fastparquet pyarrow colorama
+playwright install --with-deps chromium
 make test
 ```
 
@@ -201,7 +202,7 @@ f1pred/
 Clear the cache and re-run:
 
 ```bash
-rm -rf cache/ .cache/
+rm -rf cache/
 python main.py --round next
 ```
 
@@ -209,7 +210,7 @@ python main.py --round next
 Enable FastF1 in `config.yaml`.
 
 **Rate limiting errors?**
-The built-in cache and retry logic should handle most cases. Try increasing `live_refresh_seconds` or clearing the `.cache/` directory.
+The built-in cache and retry logic should handle most cases. Try increasing `live_refresh_seconds` or clearing the `cache/` directory.
 
 **Import errors for LightGBM on macOS?**
 
