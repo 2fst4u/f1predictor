@@ -5,3 +5,7 @@
 ## 2025-03-12 - Remove leftover test_cache artifact
 **Learning:** Local test execution generates cache directories (e.g., `test_cache/predictions`, `test_cache/fastf1/fastf1_http_cache.sqlite`) which must be explicitly removed or ignored before committing to avoid introducing repository bloat.
 **Action:** Always add `test_cache/` to `.gitignore` when cleaning up leftover test cache files to prevent re-committing them in the future.
+
+## 2025-04-03 - Remove leftover Playwright/visual test verification images
+**Learning:** Frontend UI work that involves Playwright UI verification often leaves behind screenshots or visual renders (like `mobile_*_verified.png`) directly in the repository root. These files are not explicitly tracked or part of the `public/` or `assets/` pipeline but are instead test output artifacts.
+**Action:** Specifically target `*_verified.png` or similar screenshot files in the root directory when hunting for leftover test artifacts to clean up.
