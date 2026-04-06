@@ -1329,9 +1329,17 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         team_form["w"] = w
         team_form["weighted_points"] = team_form["points"] * team_form["w"]
 
-        sums = team_form.groupby("constructorId")[["weighted_points", "w"]].sum().reset_index()
-        sums["team_form_index"] = sums["weighted_points"] / sums["w"].clip(lower=1e-6)
-        team_idx = sums[["constructorId", "team_form_index"]]
+        # Drop NA on grouping column specifically for pd.factorize safety as noted in bolt.md
+        team_form = team_form.dropna(subset=["constructorId"])
+
+        team_codes, uniques = pd.factorize(team_form["constructorId"])
+        w_sum = np.bincount(team_codes, weights=team_form["w"])
+        val_sum = np.bincount(team_codes, weights=team_form["weighted_points"])
+
+        team_idx = pd.DataFrame({
+            "constructorId": uniques,
+            "team_form_index": val_sum / np.clip(w_sum, 1e-6, None)
+        })
     else:
         team_idx = pd.DataFrame(columns=["constructorId", "team_form_index"])
 
