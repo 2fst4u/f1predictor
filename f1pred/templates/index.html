@@ -640,12 +640,12 @@
 
                         <form @submit.prevent="login" class="space-y-4">
                             <div>
-                                <label class="block text-sm font-medium text-gray-300">Username</label>
+                                <label class="block text-sm font-medium text-gray-300">Username <span class="text-xs text-gray-500 font-normal ml-1">(default: admin)</span></label>
                                 <input type="text" x-model="authUsername" required
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-300">Password</label>
+                                <label class="block text-sm font-medium text-gray-300">Password <span class="text-xs text-gray-500 font-normal ml-1">(default: admin)</span></label>
                                 <input type="password" x-model="authPassword" required
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>

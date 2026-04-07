@@ -117,8 +117,9 @@ def init_web(cfg: AppConfig):
     _db_session_factory = get_session_local(engine)
 
     # Create default admin user if none exists
+    # The default password can be changed by the user later via DB, but is initialized to "admin" here.
     with _db_session_factory() as db:
-        if db.query(User).count() == 0:
+        if db.query(User).filter(User.username == "admin").count() == 0:
             hashed_pw = get_password_hash("admin")
             admin_user = User(username="admin", hashed_password=hashed_pw)
             db.add(admin_user)
