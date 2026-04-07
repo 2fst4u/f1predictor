@@ -8,7 +8,10 @@ from fastapi.testclient import TestClient
 def client():
     cfg = load_config("config.yaml")
     init_web(cfg)
-    return TestClient(app)
+    yield TestClient(app)
+    import f1pred.web as web_module
+    if web_module._prediction_manager:
+        web_module._prediction_manager.stop()
 
 def test_api_schedule_filtering(client):
     """Test that /api/schedule filters out races without a round number."""

@@ -10,7 +10,9 @@ def client():
     # Use real config for simple init
     cfg = load_config("config.yaml")
     init_web(cfg)
-    return TestClient(app)
+    yield TestClient(app)
+    if web_module._prediction_manager:
+        web_module._prediction_manager.stop()
 
 def test_read_main(client):
     response = client.get("/")

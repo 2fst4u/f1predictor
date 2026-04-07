@@ -9,7 +9,10 @@ def client():
     # Use real config for simple init
     cfg = load_config("config.yaml")
     init_web(cfg)
-    return TestClient(app)
+    yield TestClient(app)
+    import f1pred.web as web_module
+    if web_module._prediction_manager:
+        web_module._prediction_manager.stop()
 
 def test_get_predict_too_many_sessions(client):
     # Pass 11 session parameters
