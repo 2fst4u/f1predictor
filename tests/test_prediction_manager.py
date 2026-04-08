@@ -371,7 +371,7 @@ class TestPredictionManagerCycle:
 
         with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
             mock_predict.return_value = fake_results2
-            with patch.object(manager, '_send_discord_webhook', create=True) as mock_discord:
+            with patch.object(manager, '_send_discord_webhook') as mock_discord:
                 manager._predict_round(jc, 2024, 1, {"raceName": "Bahrain Grand Prix", "round": 1})
                 assert mock_discord.call_count > 0
 
@@ -438,10 +438,10 @@ class TestPredictionManagerActualResults:
             "season": 2024,
             "round": 1,
             "sessions": {
-                "race": {"ranked": df_race, "meta": {}, "frozen": True},
-                "qualifying": {"ranked": pd.DataFrame(), "meta": {}, "frozen": False},
-                "sprint": {"ranked": pd.DataFrame(), "meta": {}, "frozen": False},
-                "practice": {"ranked": pd.DataFrame(), "meta": {}, "frozen": False}
+                "race": {"ranked": df_race, "meta": {}},
+                "qualifying": {"ranked": pd.DataFrame(), "meta": {}},
+                "sprint": {"ranked": pd.DataFrame(), "meta": {}},
+                "practice": {"ranked": pd.DataFrame(), "meta": {}}
             }
         }
 
@@ -470,8 +470,9 @@ class TestPredictionManagerActualResults:
         assert first_row["meta_dict"] == {"k": None}
         assert first_row["meta_date"] == date_obj.isoformat()
 
-        # Check frozen status and session results
-        assert rounds["1"]["sessions"]["race"]["frozen"] is True
+        # Check actual results mapping
+        assert first_row["actual_position"] == 1
+        assert first_row["frozen"] is True
 
 
 class TestPredictionManagerCycleExceptionHandling:

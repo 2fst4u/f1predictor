@@ -206,15 +206,10 @@ class JolpicaClient:
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all tasks
-                futures = []
-                for o in offsets:
-                    try:
-                        futures.append((o, executor.submit(self._get, path, params={"limit": limit, "offset": o})))
-                    except RuntimeError as e:
-                        if "interpreter shutdown" in str(e):
-                            logger.debug("Skipping parallel page fetch due to interpreter shutdown.")
-                            break
-                        raise
+                futures = [
+                    (o, executor.submit(self._get, path, params={"limit": limit, "offset": o}))
+                    for o in offsets
+                ]
 
                 # Collect results in order
                 for offset, future in futures:
@@ -341,16 +336,7 @@ class JolpicaClient:
             logger.info(f"Fetching teams for {len(drivers)} drivers in season {season}")
             
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {}
-                for d in drivers:
-                    try:
-                        futures[executor.submit(_fetch_team, d)] = d
-                    except RuntimeError as e:
-                        if "interpreter shutdown" in str(e):
-                            logger.debug("Skipping team fetch due to interpreter shutdown.")
-                            break
-                        raise
-
+                futures = {executor.submit(_fetch_team, d): d for d in drivers}
                 for future in as_completed(futures):
                     try:
                         result = future.result()
@@ -362,11 +348,7 @@ class JolpicaClient:
             return entries
 
         except Exception as e:
-            try:
-                logger.error(f"Failed to build season entry list for {season}: {e}")
-            except (ValueError, RuntimeError):
-                # Catch "I/O operation on closed file" or other logging issues during shutdown
-                pass
+            logger.error(f"Failed to build season entry list for {season}: {e}")
             return []
 
     # Bulk season endpoints (reduce calls and 429s)

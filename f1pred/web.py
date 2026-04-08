@@ -23,14 +23,7 @@ from .prediction_manager import PredictionManager
 
 from .database import get_engine, get_session_local, init_db, get_db
 from .models_db import User, Setting
-from .auth import (
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-    verify_password,
-    create_access_token,
-    get_current_user_dependency,
-    get_password_hash,
-)
-from datetime import timedelta
+from .auth import verify_password, create_access_token, get_current_user_dependency, get_password_hash
 
 logger = get_logger(__name__)
 
@@ -135,16 +128,7 @@ def init_web(cfg: AppConfig):
 
     # Start background prediction manager
     poll_interval = getattr(cfg.app, 'auto_refresh_seconds', 3600)
-    def get_setting_value(key: str) -> Optional[str]:
-        with _db_session_factory() as db:
-            setting = db.query(Setting).filter(Setting.key == key).first()
-            return setting.value if setting else None
-
-    _prediction_manager = PredictionManager(
-        cfg,
-        poll_interval=poll_interval,
-        settings_getter=get_setting_value,
-    )
+    _prediction_manager = PredictionManager(cfg, poll_interval=poll_interval)
     _prediction_manager.start()
     logger.info("Background prediction manager started (interval=%ds)", poll_interval)
 
@@ -340,8 +324,7 @@ async def get_predictions(
 
             output["sessions"][sess] = {
                 "predictions": ranked_list,
-                "weather": data.get("meta", {}).get("weather", {}),
-                "frozen": data.get("frozen", False)
+                "weather": data.get("meta", {}).get("weather", {})
             }
 
         return output
@@ -399,8 +382,7 @@ async def get_predictions_stream(
 
                 output["sessions"][sess] = {
                     "predictions": ranked_list,
-                    "weather": data.get("meta", {}).get("weather", {}),
-                    "frozen": data.get("frozen", False)
+                    "weather": data.get("meta", {}).get("weather", {})
                 }
 
             q.put({"type": "results", "data": output})
@@ -505,10 +487,7 @@ async def login_for_access_token(
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = create_access_token(
-        data={"sub": user.username},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
+    access_token = create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/api/settings")

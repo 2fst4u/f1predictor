@@ -9,12 +9,8 @@ from unittest.mock import patch
 def client():
     # Use real config for simple init
     cfg = load_config("config.yaml")
-    # 🛡️ Sentinel: Use extremely long poll interval for tests to prevent
-    # background cycles from triggering during interpreter shutdown.
-    cfg.app.auto_refresh_seconds = 86400
     init_web(cfg)
-    with TestClient(app) as c:
-        yield c
+    yield TestClient(app)
     if web_module._prediction_manager:
         web_module._prediction_manager.stop()
 

@@ -15,7 +15,7 @@ import time
 import httpx
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from .util import get_logger
 
@@ -289,10 +289,9 @@ class PredictionManager:
     detects when results change, and notifies connected clients.
     """
 
-    def __init__(self, cfg, poll_interval: int = 3600, settings_getter: Optional[Callable[[str], Optional[str]]] = None):
+    def __init__(self, cfg, poll_interval: int = 3600):
         self.cfg = cfg
         self.poll_interval = max(60, poll_interval)  # Minimum 60 seconds
-        self._settings_getter = settings_getter
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
@@ -458,38 +457,16 @@ class PredictionManager:
                 
             round_i = int(r_info["round"])
             
-            # Determine if we should poll this round
+            # Daily updates for non-next rounds. If interval is 3600s, 24 cycles = 1 day.
             is_next = (round_i == next_r)
+            if not is_next:
+                if cycle_count % 24 != 0:
+                    with self._lock:
+                        has_data = str(round_i) in self._latest_results["rounds"]
+                    if has_data:
+                        continue  # skip to save time
 
-            with self._lock:
-                existing_data = self._latest_results["rounds"].get(str(round_i))
-
-            # Polling strategy:
-            # 1. Always poll the 'next' round.
-            # 2. Poll any round that exists but is not 'frozen' (i.e., results not yet finalized).
-            #    We only consider competitive sessions (race/qual/sprint) for completion.
-            # 3. For finished & frozen rounds, only re-poll once a day (every 24 cycles).
-            should_poll = is_next
-            if not should_poll:
-                if existing_data:
-                    # Only check completion for competitive sessions
-                    competitive = ["race", "qualifying", "sprint", "sprint_qualifying"]
-                    sessions_to_check = {
-                        k: v for k, v in existing_data.get("sessions", {}).items()
-                        if k in competitive
-                    }
-                    is_complete = all(s.get("frozen", False) for s in sessions_to_check.values())
-
-                    if not is_complete:
-                        should_poll = True
-                    elif cycle_count % 24 == 0:
-                        should_poll = True
-                else:
-                    # No data yet for this round, poll it
-                    should_poll = True
-
-            if should_poll:
-                self._predict_round(jc, season, round_i, r_info)
+            self._predict_round(jc, season, round_i, r_info)
             
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
@@ -510,96 +487,6 @@ class PredictionManager:
                 json.dump(self._latest_results, f)
         except Exception as e:
             logger.warning("[PredictionManager] Failed to save disk cache: %s", e)
-
-    def _get_setting(self, key: str) -> Optional[str]:
-        if not self._settings_getter:
-            return None
-        try:
-            value = self._settings_getter(key)
-        except Exception as e:
-            logger.warning("[PredictionManager] Failed to read setting '%s': %s", key, e)
-            return None
-        if value is None:
-            return None
-        if isinstance(value, str):
-            value = value.strip()
-        return value or None
-
-    def _send_discord_webhook(self, diff: PredictionDiff, event_title: str) -> None:
-        webhook_url = self._get_setting("discord_webhook_url")
-        if not webhook_url:
-            return
-
-        movement_lines = []
-        for movement in diff.movements[:8]:
-            direction = "up" if movement.direction > 0 else "down"
-            movement_lines.append(
-                f"- {movement.code or movement.driver_name}: P{movement.old_position} -> P{movement.new_position} ({direction} {abs(movement.direction)})"
-            )
-
-        content_lines = [
-            "F1 Predictor update",
-            f"Event: {event_title}",
-            f"Session: {diff.session}",
-            "",
-            "Position changes:",
-            *movement_lines,
-        ]
-
-        if diff.changed_variables:
-            content_lines.extend([
-                "",
-                "Detected input changes:",
-                "- " + " | ".join(diff.changed_variables[:4]),
-            ])
-
-        payload = {"content": "\n".join(content_lines)}
-
-        delay_s = 1.0
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                response = httpx.post(webhook_url, json=payload, timeout=10.0)
-                if response.status_code in (200, 204):
-                    return
-
-                if response.status_code == 429 and attempt < max_attempts:
-                    retry_after = response.headers.get("Retry-After")
-                    try:
-                        delay_s = max(float(retry_after), delay_s)
-                    except (TypeError, ValueError):
-                        pass
-                    logger.warning("[PredictionManager] Discord webhook rate limited; retrying in %.1fs", delay_s)
-                    time.sleep(delay_s)
-                    delay_s *= 2
-                    continue
-
-                if attempt < max_attempts:
-                    logger.warning(
-                        "[PredictionManager] Discord webhook failed (status=%s), retrying in %.1fs",
-                        response.status_code,
-                        delay_s,
-                    )
-                    time.sleep(delay_s)
-                    delay_s *= 2
-                    continue
-
-                logger.warning(
-                    "[PredictionManager] Discord webhook failed after retries (status=%s): %s",
-                    response.status_code,
-                    response.text[:300],
-                )
-            except Exception as e:
-                if attempt < max_attempts:
-                    logger.warning(
-                        "[PredictionManager] Discord webhook error (%s), retrying in %.1fs",
-                        e,
-                        delay_s,
-                    )
-                    time.sleep(delay_s)
-                    delay_s *= 2
-                    continue
-                logger.warning("[PredictionManager] Discord webhook failed after retries: %s", e)
 
     def _predict_round(self, jc, season_i, round_i, race_info) -> None:
         import math
@@ -630,12 +517,29 @@ class PredictionManager:
             sessions=sessions,
             return_results=True,
             progress_callback=progress_cb,
-            use_actuals=True, # Use actuals for background manager too
         )
 
         if not results:
             logger.info("[PredictionManager] No results generated for %s", event_title)
             return
+
+        # Fetch actual results to determine if round is frozen and calculate deltas
+        actual_results = {}
+        try:
+            for s in sessions:
+                if s == "race":
+                    res = jc.get_race_results(str(season_i), str(round_i))
+                elif s == "qualifying":
+                    res = jc.get_qualifying_results(str(season_i), str(round_i))
+                elif s == "sprint":
+                    res = jc.get_sprint_results(str(season_i), str(round_i))
+                else:
+                    res = []
+
+                if res:
+                    actual_results[s] = res
+        except Exception as e:
+            logger.warning("Failed to fetch actual results for %s: %s", event_title, e)
 
         output = {
             "season": results["season"],
@@ -660,9 +564,27 @@ class PredictionManager:
         for sess, data in results["sessions"].items():
             ranked_df = data["ranked"]
             ranked_list = ranked_df.to_dict(orient="records")
-            is_frozen = data.get("frozen", False)
+
+            # Map actual results
+            sess_actuals = actual_results.get(sess, [])
+            actual_pos_map = {}
+            for row in sess_actuals:
+                driver_id = row.get("Driver", {}).get("driverId")
+                pos = row.get("position")
+                if driver_id and pos:
+                    try:
+                        actual_pos_map[driver_id] = int(pos)
+                    except ValueError:
+                        pass
+
+            is_frozen = len(actual_pos_map) > 0
 
             for row in ranked_list:
+                d_id = row.get("driverId")
+                if is_frozen and d_id in actual_pos_map:
+                    row["actual_position"] = actual_pos_map[d_id]
+                row["frozen"] = is_frozen
+
                 for k, v in row.items():
                     row[k] = _sanitize(v)
 
@@ -712,7 +634,8 @@ class PredictionManager:
                 "data": diff.to_dict(),
                 "timestamp": now,
             })
-            self._send_discord_webhook(diff, event_title)
+            if hasattr(self, '_send_discord_webhook'):
+                self._send_discord_webhook(diff, event_title)
             
         self._broadcast({
             "type": "prediction_round",
