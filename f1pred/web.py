@@ -43,6 +43,10 @@ class SettingUpdate(BaseModel):
     key: str
     value: str
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
 
 def _sanitize_for_json(v: Any, _math: Any = math) -> Any:
     """Recursively sanitize a value so it is safe to embed in JSON.
@@ -511,5 +515,21 @@ async def update_settings(
         else:
             new_setting = Setting(key=item.key, value=item.value)
             db.add(new_setting)
+    db.commit()
+    return {"status": "success"}
+
+@app.post("/api/auth/change-password")
+async def change_password(
+    request: PasswordChangeRequest,
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user)
+):
+    if not verify_password(request.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Incorrect current password"
+        )
+
+    current_user.hashed_password = get_password_hash(request.new_password)
     db.commit()
     return {"status": "success"}
