@@ -289,9 +289,10 @@ class PredictionManager:
     detects when results change, and notifies connected clients.
     """
 
-    def __init__(self, cfg, poll_interval: int = 3600):
+    def __init__(self, cfg, poll_interval: int = 3600, db_session_factory=None):
         self.cfg = cfg
         self.poll_interval = max(60, poll_interval)  # Minimum 60 seconds
+        self.db_session_factory = db_session_factory
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
@@ -320,6 +321,19 @@ class PredictionManager:
         # SSE subscriber management
         self._subscribers: Set[asyncio.Queue] = set()
         self._subscriber_lock = threading.Lock()
+
+    def _get_setting(self, key: str) -> Optional[str]:
+        """Fetch a setting from the database."""
+        if not self.db_session_factory:
+            return None
+        from .models_db import Setting
+        try:
+            with self.db_session_factory() as db:
+                setting = db.query(Setting).filter(Setting.key == key).first()
+                return setting.value if setting else None
+        except Exception as e:
+            logger.warning("[PredictionManager] Failed to fetch setting %s: %s", key, e)
+            return None
 
     @property
     def latest_results(self) -> Optional[Dict[str, Any]]:
@@ -642,3 +656,40 @@ class PredictionManager:
             "data": output,
             "timestamp": now,
         })
+
+    def _send_discord_webhook(self, diff: PredictionDiff, event_title: str) -> None:
+        """Send a notification to Discord if a webhook URL is configured."""
+        webhook_url = self._get_setting("discord_webhook_url")
+        if not webhook_url:
+            return
+
+        try:
+            embed = {
+                "title": f"📈 Prediction Change: {event_title}",
+                "description": f"Detected changes in **{', '.join(diff.changed_variables)}** for session **{diff.session}**.",
+                "color": 0xe10600,  # F1 Red
+                "fields": [],
+                "timestamp": diff.timestamp
+            }
+
+            # Add top 5 movers
+            for m in diff.movements[:5]:
+                direction_icon = "🔼" if m.direction > 0 else "🔽"
+                field_val = (
+                    f"P{m.old_position} → **P{m.new_position}** "
+                    f"({direction_icon} {abs(m.direction)})\n"
+                    f"*Reason: {', '.join(m.reasons)}*"
+                )
+                embed["fields"].append({
+                    "name": f"{m.driver_name} ({m.code})",
+                    "value": field_val,
+                    "inline": False
+                })
+
+            payload = {"embeds": [embed]}
+            # Use a short timeout for the outgoing request
+            httpx.post(webhook_url, json=payload, timeout=5.0)
+            logger.info("[PredictionManager] Discord notification sent for %s", diff.session)
+
+        except Exception as e:
+            logger.warning("[PredictionManager] Failed to send Discord webhook: %s", e)
