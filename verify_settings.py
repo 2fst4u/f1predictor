@@ -27,7 +27,7 @@ def run_cuj(page):
     # Fill out discord webhook
     page.locator("input[type='text']").last.fill("https://discord.com/api/webhooks/123/abc")
     page.wait_for_timeout(500)
-    page.locator("button:has-text('Save Settings')").click()
+    page.evaluate("document.querySelector('button[type=\"submit\"]').click()")
     page.wait_for_timeout(1000)
 
     # Take screenshot of success state

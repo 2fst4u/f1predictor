@@ -634,8 +634,7 @@ class PredictionManager:
                 "data": diff.to_dict(),
                 "timestamp": now,
             })
-            if hasattr(self, '_send_discord_webhook'):
-                self._send_discord_webhook(diff, event_title)
+            self._send_discord_webhook(diff, event_title)
             
         self._broadcast({
             "type": "prediction_round",

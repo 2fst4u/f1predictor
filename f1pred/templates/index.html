@@ -641,12 +641,12 @@
                         <form @submit.prevent="login" class="space-y-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-300">Username <span class="text-xs text-gray-500 font-normal ml-1">(default: admin)</span></label>
-                                <input type="text" x-model="authUsername" required
+                                <input type="text" x-model="authUsername" required value="admin"
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-300">Password <span class="text-xs text-gray-500 font-normal ml-1">(default: admin)</span></label>
-                                <input type="password" x-model="authPassword" required
+                                <input type="password" x-model="authPassword" required value="admin"
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>
                             <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
@@ -737,8 +737,8 @@
                 // --- Settings & Auth State ---
                 activeTab: 'predictions', // 'predictions' or 'settings'
                 isLoggedIn: false,
-                authUsername: '',
-                authPassword: '',
+                authUsername: 'admin',
+                authPassword: 'admin',
                 authError: '',
                 settings: {
                     discord_webhook_url: '',
