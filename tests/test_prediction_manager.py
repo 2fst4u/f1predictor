@@ -371,7 +371,9 @@ class TestPredictionManagerCycle:
 
         with patch('f1pred.predict.run_predictions_for_event') as mock_predict:
             mock_predict.return_value = fake_results2
-            manager._predict_round(jc, 2024, 1, {"raceName": "Bahrain Grand Prix", "round": 1})
+            with patch.object(manager, '_send_discord_webhook', create=True) as mock_discord:
+                manager._predict_round(jc, 2024, 1, {"raceName": "Bahrain Grand Prix", "round": 1})
+                assert mock_discord.call_count > 0
 
         assert len(manager.latest_diffs) > 0
         diff = manager.latest_diffs[-1]
