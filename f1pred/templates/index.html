@@ -640,13 +640,13 @@
 
                         <form @submit.prevent="login" class="space-y-4">
                             <div>
-                                <label class="block text-sm font-medium text-gray-300">Username <span class="text-xs text-gray-500 font-normal ml-1">(default: admin)</span></label>
-                                <input type="text" x-model="authUsername" required value="admin"
+                                <label for="login-username" class="block text-sm font-medium text-gray-300">Username</label>
+                                <input id="login-username" type="text" x-model="authUsername" required
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-300">Password <span class="text-xs text-gray-500 font-normal ml-1">(default: admin)</span></label>
-                                <input type="password" x-model="authPassword" required value="admin"
+                                <label for="login-password" class="block text-sm font-medium text-gray-300">Password</label>
+                                <input id="login-password" type="password" x-model="authPassword" required
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>
                             <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
@@ -659,8 +659,35 @@
                 <template x-if="isLoggedIn">
                     <div>
                         <div class="flex justify-between items-center mb-6">
-                            <p class="text-sm text-gray-400">Authenticated as <span class="text-white font-semibold" x-text="authUsername || 'admin'"></span></p>
+                            <p class="text-sm text-gray-400">Authenticated as <span class="text-white font-semibold" x-text="authUsername"></span></p>
                             <button @click="logout" class="text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">Logout</button>
+                        </div>
+
+                        <div class="mb-8 border-b border-gray-700 pb-8">
+                            <h3 class="text-sm font-medium text-gray-200 mb-3">Account Security</h3>
+                            <div class="bg-gray-900/50 p-4 rounded border border-gray-700">
+                                <form @submit.prevent="changePassword" class="space-y-4">
+                                    <div x-show="passwordChangeError" class="text-xs text-red-400" x-text="passwordChangeError"></div>
+                                    <div x-show="passwordChangeSuccess" class="text-xs text-green-400">Password changed successfully!</div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label for="current-password" class="block text-xs font-medium text-gray-400 mb-1">Current Password</label>
+                                            <input id="current-password" type="password" x-model="passChange.current" required
+                                                class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                        </div>
+                                        <div>
+                                            <label for="new-password" class="block text-xs font-medium text-gray-400 mb-1">New Password</label>
+                                            <input id="new-password" type="password" x-model="passChange.new" required
+                                                class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                        </div>
+                                    </div>
+                                    <button type="submit" :disabled="passChangeLoading"
+                                        class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-xs py-1.5 px-4 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
+                                        Update Password
+                                    </button>
+                                </form>
+                            </div>
                         </div>
 
                         <form @submit.prevent="saveSettings" class="space-y-6">
@@ -737,8 +764,8 @@
                 // --- Settings & Auth State ---
                 activeTab: 'predictions', // 'predictions' or 'settings'
                 isLoggedIn: false,
-                authUsername: 'admin',
-                authPassword: 'admin',
+                authUsername: '',
+                authPassword: '',
                 authError: '',
                 settings: {
                     discord_webhook_url: '',
@@ -746,6 +773,13 @@
                     llm_api_key: ''
                 },
                 settingsSaved: false,
+                passChange: {
+                    current: '',
+                    new: ''
+                },
+                passChangeLoading: false,
+                passwordChangeError: '',
+                passwordChangeSuccess: false,
 
                 // Live prediction state
                 liveConnected: false,
@@ -837,6 +871,43 @@
                         }
                     } catch (e) {
                         console.error("Error saving settings", e);
+                    }
+                },
+                async changePassword() {
+                    const token = localStorage.getItem('f1pred_token');
+                    if (!token) return;
+
+                    this.passwordChangeError = '';
+                    this.passwordChangeSuccess = false;
+                    this.passChangeLoading = true;
+
+                    try {
+                        const res = await fetch('/api/auth/change-password', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                            },
+                            body: JSON.stringify({
+                                current_password: this.passChange.current,
+                                new_password: this.passChange.new
+                            })
+                        });
+
+                        if (res.ok) {
+                            this.passwordChangeSuccess = true;
+                            this.passChange.current = '';
+                            this.passChange.new = '';
+                            setTimeout(() => { this.passwordChangeSuccess = false; }, 3000);
+                        } else {
+                            const data = await res.json();
+                            this.passwordChangeError = data.detail || 'Failed to change password';
+                        }
+                    } catch (e) {
+                        console.error("Error changing password", e);
+                        this.passwordChangeError = 'Network error';
+                    } finally {
+                        this.passChangeLoading = false;
                     }
                 },
 
