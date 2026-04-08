@@ -171,7 +171,23 @@
             </div>
         </header>
 
-        <main class="max-w-[1400px] w-full mx-auto px-2 py-4 md:p-8">
+        <!-- Navigation Tabs -->
+        <div class="max-w-[1400px] mx-auto px-2 sm:px-4 mb-4 mt-4">
+            <div class="flex space-x-4 border-b border-gray-700">
+                <button @click="activeTab = 'predictions'"
+                    :class="activeTab === 'predictions' ? 'border-red-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'"
+                    class="py-2 px-1 border-b-2 font-medium text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded">
+                    Predictions
+                </button>
+                <button @click="activeTab = 'settings'"
+                    :class="activeTab === 'settings' ? 'border-red-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'"
+                    class="py-2 px-1 border-b-2 font-medium text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded">
+                    Settings
+                </button>
+            </div>
+        </div>
+
+        <main class="max-w-[1400px] w-full mx-auto px-2 py-4 md:p-8" x-show="activeTab === 'predictions'">
             <!-- Controls -->
             <div class="card p-4 md:p-6 mb-4 md:mb-8 shadow-xl">
                 <div class="flex flex-col gap-4">
@@ -611,6 +627,81 @@
             </div>
         </main>
 
+        <!-- Settings View -->
+        <main class="max-w-[1400px] w-full mx-auto px-2 py-4 md:p-8" x-show="activeTab === 'settings'" style="display: none;">
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 max-w-2xl">
+                <h2 class="text-xl font-bold mb-6 text-white border-b border-gray-700 pb-2">Application Settings</h2>
+
+                <template x-if="!isLoggedIn">
+                    <div>
+                        <p class="text-sm text-gray-400 mb-4">Please log in to manage application settings.</p>
+
+                        <div x-show="authError" class="mb-4 bg-red-900/50 border-l-4 border-red-500 p-4 text-red-200" x-text="authError"></div>
+
+                        <form @submit.prevent="login" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300">Username <span class="text-xs text-gray-500 font-normal ml-1">(default: admin)</span></label>
+                                <input type="text" x-model="authUsername" required value="admin"
+                                    class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300">Password <span class="text-xs text-gray-500 font-normal ml-1">(default: admin)</span></label>
+                                <input type="password" x-model="authPassword" required value="admin"
+                                    class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                            </div>
+                            <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
+                                Login
+                            </button>
+                        </form>
+                    </div>
+                </template>
+
+                <template x-if="isLoggedIn">
+                    <div>
+                        <div class="flex justify-between items-center mb-6">
+                            <p class="text-sm text-gray-400">Authenticated as <span class="text-white font-semibold" x-text="authUsername || 'admin'"></span></p>
+                            <button @click="logout" class="text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">Logout</button>
+                        </div>
+
+                        <form @submit.prevent="saveSettings" class="space-y-6">
+                            <div>
+                                <h3 class="text-sm font-medium text-gray-200 mb-3">Notifications</h3>
+                                <div class="bg-gray-900/50 p-4 rounded border border-gray-700">
+                                    <label class="block text-sm font-medium text-gray-400 mb-1">Discord Webhook URL</label>
+                                    <input type="text" x-model="settings.discord_webhook_url" placeholder="https://discord.com/api/webhooks/..."
+                                        class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                    <p class="mt-1 text-xs text-gray-500">Used to send alerts when prediction diffs occur.</p>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h3 class="text-sm font-medium text-gray-200 mb-3">Integrations (Coming Soon)</h3>
+                                <div class="bg-gray-900/50 p-4 rounded border border-gray-700 space-y-4 opacity-50 pointer-events-none">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-400 mb-1">LLM Server URL</label>
+                                        <input type="text" x-model="settings.llm_server_url" disabled
+                                            class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm text-white">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-400 mb-1">LLM API Key</label>
+                                        <input type="password" x-model="settings.llm_api_key" disabled
+                                            class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm text-white">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center space-x-4 pt-4 border-t border-gray-700">
+                                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
+                                    Save Settings
+                                </button>
+                                <span x-show="settingsSaved" x-transition.opacity class="text-sm text-green-400">Settings saved successfully!</span>
+                            </div>
+                        </form>
+                    </div>
+                </template>
+            </div>
+        </main>
+
         <footer class="mt-auto py-8 text-center text-gray-600 text-xs uppercase tracking-widest">
             &copy; 2024 F1 Outcome Predictor • Built with FastAPI & AI
         </footer>
@@ -643,6 +734,19 @@
                 _lastStatusRound: null,
                 _lastScheduleSeason: null,
 
+                // --- Settings & Auth State ---
+                activeTab: 'predictions', // 'predictions' or 'settings'
+                isLoggedIn: false,
+                authUsername: 'admin',
+                authPassword: 'admin',
+                authError: '',
+                settings: {
+                    discord_webhook_url: '',
+                    llm_server_url: '',
+                    llm_api_key: ''
+                },
+                settingsSaved: false,
+
                 // Live prediction state
                 liveConnected: false,
                 liveReconnecting: false,
@@ -652,6 +756,89 @@
                 recentChanges: [],       // Array of DriverMovement objects
                 _movements: {},          // session -> { driverId -> movement object }
                 _movementTimers: {},     // driverId -> timeout id
+
+                // --- Auth and Settings Methods ---
+                async login() {
+                    this.authError = '';
+                    try {
+                        const formData = new URLSearchParams();
+                        formData.append('username', this.authUsername);
+                        formData.append('password', this.authPassword);
+
+                        const res = await fetch('/api/auth/token', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/x-www-form-urlencoded'
+                            },
+                            body: formData.toString()
+                        });
+
+                        if (!res.ok) {
+                            this.authError = 'Invalid credentials';
+                            return;
+                        }
+
+                        const data = await res.json();
+                        localStorage.setItem('f1pred_token', data.access_token);
+                        this.isLoggedIn = true;
+                        this.authPassword = '';
+                        this.fetchSettings();
+                    } catch (e) {
+                        console.error("Login error", e);
+                        this.authError = 'Login failed';
+                    }
+                },
+                logout() {
+                    localStorage.removeItem('f1pred_token');
+                    this.isLoggedIn = false;
+                    this.settings = { discord_webhook_url: '', llm_server_url: '', llm_api_key: '' };
+                },
+                async fetchSettings() {
+                    const token = localStorage.getItem('f1pred_token');
+                    if (!token) return;
+                    try {
+                        const res = await fetch('/api/settings', {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (res.status === 401) {
+                            this.logout();
+                            return;
+                        }
+                        const data = await res.json();
+                        this.settings = {
+                            discord_webhook_url: data.discord_webhook_url || '',
+                            llm_server_url: data.llm_server_url || '',
+                            llm_api_key: data.llm_api_key || ''
+                        };
+                    } catch (e) {
+                        console.error("Error fetching settings", e);
+                    }
+                },
+                async saveSettings() {
+                    const token = localStorage.getItem('f1pred_token');
+                    if (!token) return;
+
+                    const payload = Object.entries(this.settings).map(([k, v]) => ({ key: k, value: v }));
+                    try {
+                        const res = await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                            },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (res.ok) {
+                            this.settingsSaved = true;
+                            setTimeout(() => { this.settingsSaved = false; }, 3000);
+                        } else if (res.status === 401) {
+                            this.logout();
+                        }
+                    } catch (e) {
+                        console.error("Error saving settings", e);
+                    }
+                },
 
                 saveState() {
                     try {
@@ -738,6 +925,13 @@
                         fetch('/api/seasons').then(r => r.json()).then(data => { this.seasons = data; }).catch(() => {});
 
                         // Pre-select if available AND we didn't load from state
+                        // Check if already logged in based on token
+                        const token = localStorage.getItem('f1pred_token');
+                        if (token) {
+                            this.isLoggedIn = true;
+                            this.fetchSettings();
+                        }
+
                         if (!hasLoadedState && this.config.next_event) {
                             this.params.season = String(this.config.next_event.season || '');
                             const round = this.config.next_event.round;

@@ -12,6 +12,7 @@ import json
 import os
 import threading
 import time
+import httpx
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
@@ -456,38 +457,16 @@ class PredictionManager:
                 
             round_i = int(r_info["round"])
             
-            # Determine if we should poll this round
+            # Daily updates for non-next rounds. If interval is 3600s, 24 cycles = 1 day.
             is_next = (round_i == next_r)
+            if not is_next:
+                if cycle_count % 24 != 0:
+                    with self._lock:
+                        has_data = str(round_i) in self._latest_results["rounds"]
+                    if has_data:
+                        continue  # skip to save time
 
-            with self._lock:
-                existing_data = self._latest_results["rounds"].get(str(round_i))
-
-            # Polling strategy:
-            # 1. Always poll the 'next' round.
-            # 2. Poll any round that exists but is not 'frozen' (i.e., results not yet finalized).
-            #    We only consider competitive sessions (race/qual/sprint) for completion.
-            # 3. For finished & frozen rounds, only re-poll once a day (every 24 cycles).
-            should_poll = is_next
-            if not should_poll:
-                if existing_data:
-                    # Only check completion for competitive sessions
-                    competitive = ["race", "qualifying", "sprint", "sprint_qualifying"]
-                    sessions_to_check = {
-                        k: v for k, v in existing_data.get("sessions", {}).items()
-                        if k in competitive
-                    }
-                    is_complete = all(s.get("frozen", False) for s in sessions_to_check.values())
-
-                    if not is_complete:
-                        should_poll = True
-                    elif cycle_count % 24 == 0:
-                        should_poll = True
-                else:
-                    # No data yet for this round, poll it
-                    should_poll = True
-
-            if should_poll:
-                self._predict_round(jc, season, round_i, r_info)
+            self._predict_round(jc, season, round_i, r_info)
             
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
@@ -538,12 +517,29 @@ class PredictionManager:
             sessions=sessions,
             return_results=True,
             progress_callback=progress_cb,
-            use_actuals=True, # Use actuals for background manager too
         )
 
         if not results:
             logger.info("[PredictionManager] No results generated for %s", event_title)
             return
+
+        # Fetch actual results to determine if round is frozen and calculate deltas
+        actual_results = {}
+        try:
+            for s in sessions:
+                if s == "race":
+                    res = jc.get_race_results(str(season_i), str(round_i))
+                elif s == "qualifying":
+                    res = jc.get_qualifying_results(str(season_i), str(round_i))
+                elif s == "sprint":
+                    res = jc.get_sprint_results(str(season_i), str(round_i))
+                else:
+                    res = []
+
+                if res:
+                    actual_results[s] = res
+        except Exception as e:
+            logger.warning("Failed to fetch actual results for %s: %s", event_title, e)
 
         output = {
             "season": results["season"],
@@ -568,9 +564,27 @@ class PredictionManager:
         for sess, data in results["sessions"].items():
             ranked_df = data["ranked"]
             ranked_list = ranked_df.to_dict(orient="records")
-            is_frozen = data.get("frozen", False)
+
+            # Map actual results
+            sess_actuals = actual_results.get(sess, [])
+            actual_pos_map = {}
+            for row in sess_actuals:
+                driver_id = row.get("Driver", {}).get("driverId")
+                pos = row.get("position")
+                if driver_id and pos:
+                    try:
+                        actual_pos_map[driver_id] = int(pos)
+                    except ValueError:
+                        pass
+
+            is_frozen = len(actual_pos_map) > 0
 
             for row in ranked_list:
+                d_id = row.get("driverId")
+                if is_frozen and d_id in actual_pos_map:
+                    row["actual_position"] = actual_pos_map[d_id]
+                row["frozen"] = is_frozen
+
                 for k, v in row.items():
                     row[k] = _sanitize(v)
 
@@ -620,6 +634,8 @@ class PredictionManager:
                 "data": diff.to_dict(),
                 "timestamp": now,
             })
+            if hasattr(self, '_send_discord_webhook'):
+                self._send_discord_webhook(diff, event_title)
             
         self._broadcast({
             "type": "prediction_round",

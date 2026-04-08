@@ -7,9 +7,12 @@ import json
 import math
 import threading
 import queue
-from fastapi import FastAPI, Request, Query, Path, HTTPException
+from fastapi import FastAPI, Request, Query, Path, HTTPException, Depends
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from .config import AppConfig
 from .util import get_logger, init_caches, ensure_dirs, __version__
@@ -18,7 +21,27 @@ from .data.jolpica import JolpicaClient
 from .data.fastf1_backend import init_fastf1
 from .prediction_manager import PredictionManager
 
+from .database import get_engine, get_session_local, init_db, get_db
+from .models_db import User, Setting
+from .auth import verify_password, create_access_token, get_current_user_dependency, get_password_hash
+
 logger = get_logger(__name__)
+
+# DB session dependency holder
+_db_session_factory = None
+
+def get_db_session():
+    db = _db_session_factory()
+    try:
+        yield db
+    finally:
+        db.close()
+
+get_current_user = get_current_user_dependency(get_db_session)
+
+class SettingUpdate(BaseModel):
+    key: str
+    value: str
 
 
 def _sanitize_for_json(v: Any, _math: Any = math) -> Any:
@@ -85,6 +108,23 @@ def init_web(cfg: AppConfig):
 
     # Initialize HTTP cache
     init_caches(cfg)
+
+    # Initialize Database
+    db_path = os.path.join(cfg.paths.cache_dir, "settings.db")
+    engine = get_engine(db_path)
+    init_db(engine)
+    global _db_session_factory
+    _db_session_factory = get_session_local(engine)
+
+    # Create default admin user if none exists
+    # The default password can be changed by the user later via DB, but is initialized to "admin" here.
+    with _db_session_factory() as db:
+        if db.query(User).filter(User.username == "admin").count() == 0:
+            hashed_pw = get_password_hash("admin")
+            admin_user = User(username="admin", hashed_password=hashed_pw)
+            db.add(admin_user)
+            db.commit()
+            logger.info("Created default admin user (username: admin, password: admin)")
 
     # Start background prediction manager
     poll_interval = getattr(cfg.app, 'auto_refresh_seconds', 3600)
@@ -284,8 +324,7 @@ async def get_predictions(
 
             output["sessions"][sess] = {
                 "predictions": ranked_list,
-                "weather": data.get("meta", {}).get("weather", {}),
-                "frozen": data.get("frozen", False)
+                "weather": data.get("meta", {}).get("weather", {})
             }
 
         return output
@@ -343,8 +382,7 @@ async def get_predictions_stream(
 
                 output["sessions"][sess] = {
                     "predictions": ranked_list,
-                    "weather": data.get("meta", {}).get("weather", {}),
-                    "frozen": data.get("frozen", False)
+                    "weather": data.get("meta", {}).get("weather", {})
                 }
 
             q.put({"type": "results", "data": output})
@@ -434,3 +472,44 @@ async def predictions_latest():
         "last_update": _prediction_manager.last_update,
         "status": _prediction_manager.status,
     }
+
+# --- Settings and Auth Endpoints ---
+
+@app.post("/api/auth/token")
+async def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db_session)
+):
+    user = db.query(User).filter(User.username == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token = create_access_token(data={"sub": user.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/settings")
+async def get_settings(
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user)
+):
+    settings = db.query(Setting).all()
+    return {s.key: s.value for s in settings}
+
+@app.post("/api/settings")
+async def update_settings(
+    settings_data: List[SettingUpdate],
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user)
+):
+    for item in settings_data:
+        setting = db.query(Setting).filter(Setting.key == item.key).first()
+        if setting:
+            setting.value = item.value
+        else:
+            new_setting = Setting(key=item.key, value=item.value)
+            db.add(new_setting)
+    db.commit()
+    return {"status": "success"}

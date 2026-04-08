@@ -448,12 +448,6 @@ class PredictionCache:
         import pandas as pd
         import numpy as np
         key = self._generate_key(inputs)
-        return self.get_by_key(key)
-
-    def get_by_key(self, key: str) -> Optional[Dict[str, Any]]:
-        """Retrieve cached results by an explicit key string."""
-        import pandas as pd
-        import numpy as np
         cache_file = self.cache_dir / f"{key}.json"
 
         with self.lock:
@@ -477,15 +471,9 @@ class PredictionCache:
                     logging.getLogger(__name__).warning(f"Failed to load prediction cache {key}: {e}")
         return None
 
-    def set(self, inputs: Optional[Dict[str, Any]], results: Dict[str, Any], key_override: Optional[str] = None) -> None:
+    def set(self, inputs: Dict[str, Any], results: Dict[str, Any]) -> None:
         """Save prediction results to the cache."""
-        if key_override:
-            key = key_override
-        elif inputs is not None:
-            key = self._generate_key(inputs)
-        else:
-            raise ValueError("Must provide either inputs or key_override")
-
+        key = self._generate_key(inputs)
         cache_file = self.cache_dir / f"{key}.json"
 
         with self.lock:
