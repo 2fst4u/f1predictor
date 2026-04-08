@@ -2,11 +2,13 @@ from __future__ import annotations
 from typing import Any, List, Optional
 import os
 import asyncio
+from datetime import datetime
 
 import json
 import math
 import threading
 import queue
+import httpx
 from fastapi import FastAPI, Request, Query, Path, HTTPException, Depends
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -46,6 +48,9 @@ class SettingUpdate(BaseModel):
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str
+
+class WebhookTestRequest(BaseModel):
+    url: str
 
 
 def _sanitize_for_json(v: Any, _math: Any = math) -> Any:
@@ -132,7 +137,7 @@ def init_web(cfg: AppConfig):
 
     # Start background prediction manager
     poll_interval = getattr(cfg.app, 'auto_refresh_seconds', 3600)
-    _prediction_manager = PredictionManager(cfg, poll_interval=poll_interval)
+    _prediction_manager = PredictionManager(cfg, poll_interval=poll_interval, db_session_factory=_db_session_factory)
     _prediction_manager.start()
     logger.info("Background prediction manager started (interval=%ds)", poll_interval)
 
@@ -533,3 +538,36 @@ async def change_password(
     current_user.hashed_password = get_password_hash(request.new_password)
     db.commit()
     return {"status": "success"}
+
+@app.post("/api/settings/test-webhook")
+async def test_webhook(
+    request: WebhookTestRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Send a test notification to the provided Discord webhook URL."""
+    try:
+        payload = {
+            "embeds": [{
+                "title": "🧪 F1 Predictor Webhook Test",
+                "description": "Your Discord webhook integration is working correctly!",
+                "color": 0x22c55e,  # Green
+                "fields": [
+                    {"name": "Status", "value": "Success", "inline": True},
+                    {"name": "Timestamp", "value": datetime.now().isoformat(), "inline": True}
+                ],
+                "footer": {"text": f"F1 Predictor v{__version__}"}
+            }]
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(request.url, json=payload, timeout=5.0)
+            if resp.status_code >= 400:
+                raise HTTPException(
+                    status_code=resp.status_code,
+                    detail=f"Discord API returned error: {resp.text}"
+                )
+        return {"status": "success"}
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=400, detail=f"Failed to connect to webhook URL: {str(e)}")
+    except Exception as e:
+        logger.exception("Webhook test failed")
+        raise HTTPException(status_code=500, detail=str(e))

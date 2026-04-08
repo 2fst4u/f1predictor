@@ -694,10 +694,19 @@
                             <div>
                                 <h3 class="text-sm font-medium text-gray-200 mb-3">Notifications</h3>
                                 <div class="bg-gray-900/50 p-4 rounded border border-gray-700">
-                                    <label class="block text-sm font-medium text-gray-400 mb-1">Discord Webhook URL</label>
-                                    <input type="text" x-model="settings.discord_webhook_url" placeholder="https://discord.com/api/webhooks/..."
-                                        class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                    <label for="discord-webhook-url" class="block text-sm font-medium text-gray-400 mb-1">Discord Webhook URL</label>
+                                    <div class="flex gap-2">
+                                        <input id="discord-webhook-url" type="text" x-model="settings.discord_webhook_url" placeholder="https://discord.com/api/webhooks/..."
+                                            class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                        <button type="button" @click="testWebhook" :disabled="webhookTesting || !settings.discord_webhook_url"
+                                            class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-xs py-1 px-4 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex-shrink-0">
+                                            <span x-show="!webhookTesting">Test</span>
+                                            <span x-show="webhookTesting"><i class="fas fa-circle-notch fa-spin"></i></span>
+                                        </button>
+                                    </div>
                                     <p class="mt-1 text-xs text-gray-500">Used to send alerts when prediction diffs occur.</p>
+                                    <div x-show="webhookTestError" x-transition class="mt-2 text-xs text-red-400" x-text="webhookTestError"></div>
+                                    <div x-show="webhookTestSuccess" x-transition class="mt-2 text-xs text-green-400">Test notification sent successfully! Check your Discord channel.</div>
                                 </div>
                             </div>
 
@@ -780,6 +789,10 @@
                 passChangeLoading: false,
                 passwordChangeError: '',
                 passwordChangeSuccess: false,
+
+                webhookTesting: false,
+                webhookTestError: '',
+                webhookTestSuccess: false,
 
                 // Live prediction state
                 liveConnected: false,
@@ -871,6 +884,39 @@
                         }
                     } catch (e) {
                         console.error("Error saving settings", e);
+                    }
+                },
+                async testWebhook() {
+                    const token = localStorage.getItem('f1pred_token');
+                    if (!token) return;
+                    if (!this.settings.discord_webhook_url) return;
+
+                    this.webhookTesting = true;
+                    this.webhookTestError = '';
+                    this.webhookTestSuccess = false;
+
+                    try {
+                        const res = await fetch('/api/settings/test-webhook', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                            },
+                            body: JSON.stringify({ url: this.settings.discord_webhook_url })
+                        });
+
+                        if (res.ok) {
+                            this.webhookTestSuccess = true;
+                            setTimeout(() => { this.webhookTestSuccess = false; }, 5000);
+                        } else {
+                            const data = await res.json();
+                            this.webhookTestError = data.detail || 'Webhook test failed';
+                        }
+                    } catch (e) {
+                        console.error("Error testing webhook", e);
+                        this.webhookTestError = 'Network error';
+                    } finally {
+                        this.webhookTesting = false;
                     }
                 },
                 async changePassword() {
