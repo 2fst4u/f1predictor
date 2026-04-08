@@ -780,9 +780,11 @@
 
                         const data = await res.json();
                         localStorage.setItem('f1pred_token', data.access_token);
-                        this.isLoggedIn = true;
                         this.authPassword = '';
-                        this.fetchSettings();
+                        const ok = await this.fetchSettings();
+                        if (!ok) {
+                            this.authError = 'Login succeeded but settings could not be loaded';
+                        }
                     } catch (e) {
                         console.error("Login error", e);
                         this.authError = 'Login failed';
@@ -795,14 +797,20 @@
                 },
                 async fetchSettings() {
                     const token = localStorage.getItem('f1pred_token');
-                    if (!token) return;
+                    if (!token) {
+                        this.isLoggedIn = false;
+                        return false;
+                    }
                     try {
                         const res = await fetch('/api/settings', {
                             headers: { 'Authorization': `Bearer ${token}` }
                         });
                         if (res.status === 401) {
                             this.logout();
-                            return;
+                            return false;
+                        }
+                        if (!res.ok) {
+                            throw new Error(`HTTP ${res.status}`);
                         }
                         const data = await res.json();
                         this.settings = {
@@ -810,8 +818,12 @@
                             llm_server_url: data.llm_server_url || '',
                             llm_api_key: data.llm_api_key || ''
                         };
+                        this.isLoggedIn = true;
+                        return true;
                     } catch (e) {
                         console.error("Error fetching settings", e);
+                        this.isLoggedIn = false;
+                        return false;
                     }
                 },
                 async saveSettings() {
@@ -928,8 +940,7 @@
                         // Check if already logged in based on token
                         const token = localStorage.getItem('f1pred_token');
                         if (token) {
-                            this.isLoggedIn = true;
-                            this.fetchSettings();
+                            await this.fetchSettings();
                         }
 
                         if (!hasLoadedState && this.config.next_event) {

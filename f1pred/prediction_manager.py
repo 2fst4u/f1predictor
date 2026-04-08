@@ -15,7 +15,7 @@ import time
 import httpx
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from .util import get_logger
 
@@ -289,9 +289,10 @@ class PredictionManager:
     detects when results change, and notifies connected clients.
     """
 
-    def __init__(self, cfg, poll_interval: int = 3600):
+    def __init__(self, cfg, poll_interval: int = 3600, settings_getter: Optional[Callable[[str], Optional[str]]] = None):
         self.cfg = cfg
         self.poll_interval = max(60, poll_interval)  # Minimum 60 seconds
+        self._settings_getter = settings_getter
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
@@ -487,6 +488,96 @@ class PredictionManager:
                 json.dump(self._latest_results, f)
         except Exception as e:
             logger.warning("[PredictionManager] Failed to save disk cache: %s", e)
+
+    def _get_setting(self, key: str) -> Optional[str]:
+        if not self._settings_getter:
+            return None
+        try:
+            value = self._settings_getter(key)
+        except Exception as e:
+            logger.warning("[PredictionManager] Failed to read setting '%s': %s", key, e)
+            return None
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+        return value or None
+
+    def _send_discord_webhook(self, diff: PredictionDiff, event_title: str) -> None:
+        webhook_url = self._get_setting("discord_webhook_url")
+        if not webhook_url:
+            return
+
+        movement_lines = []
+        for movement in diff.movements[:8]:
+            direction = "up" if movement.direction > 0 else "down"
+            movement_lines.append(
+                f"- {movement.code or movement.driver_name}: P{movement.old_position} -> P{movement.new_position} ({direction} {abs(movement.direction)})"
+            )
+
+        content_lines = [
+            "F1 Predictor update",
+            f"Event: {event_title}",
+            f"Session: {diff.session}",
+            "",
+            "Position changes:",
+            *movement_lines,
+        ]
+
+        if diff.changed_variables:
+            content_lines.extend([
+                "",
+                "Detected input changes:",
+                "- " + " | ".join(diff.changed_variables[:4]),
+            ])
+
+        payload = {"content": "\n".join(content_lines)}
+
+        delay_s = 1.0
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = httpx.post(webhook_url, json=payload, timeout=10.0)
+                if response.status_code in (200, 204):
+                    return
+
+                if response.status_code == 429 and attempt < max_attempts:
+                    retry_after = response.headers.get("Retry-After")
+                    try:
+                        delay_s = max(float(retry_after), delay_s)
+                    except (TypeError, ValueError):
+                        pass
+                    logger.warning("[PredictionManager] Discord webhook rate limited; retrying in %.1fs", delay_s)
+                    time.sleep(delay_s)
+                    delay_s *= 2
+                    continue
+
+                if attempt < max_attempts:
+                    logger.warning(
+                        "[PredictionManager] Discord webhook failed (status=%s), retrying in %.1fs",
+                        response.status_code,
+                        delay_s,
+                    )
+                    time.sleep(delay_s)
+                    delay_s *= 2
+                    continue
+
+                logger.warning(
+                    "[PredictionManager] Discord webhook failed after retries (status=%s): %s",
+                    response.status_code,
+                    response.text[:300],
+                )
+            except Exception as e:
+                if attempt < max_attempts:
+                    logger.warning(
+                        "[PredictionManager] Discord webhook error (%s), retrying in %.1fs",
+                        e,
+                        delay_s,
+                    )
+                    time.sleep(delay_s)
+                    delay_s *= 2
+                    continue
+                logger.warning("[PredictionManager] Discord webhook failed after retries: %s", e)
 
     def _predict_round(self, jc, season_i, round_i, race_info) -> None:
         import math
