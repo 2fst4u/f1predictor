@@ -29,11 +29,11 @@ __all__ = [
 
 # Human-readable reasons for variable changes
 _CHANGE_REASONS = {
-    "weather": "Weather forecast updated",
-    "grid": "Grid positions changed",
-    "calibration": "Model calibration weights updated",
-    "roster": "Driver roster changed",
-    "features": "Driver form/stats updated",
+    "weather": "🌦️ Weather forecast updated",
+    "grid": "🚥 Grid positions changed",
+    "calibration": "⚖️ Model calibration weights updated",
+    "roster": "👥 Driver roster changed",
+    "features": "📊 Driver form/stats updated",
 }
 
 
@@ -582,7 +582,7 @@ class PredictionManager:
             return v
 
         all_diffs: List[PredictionDiff] = []
-        webhook_updates = {}  # sess_key -> (diff, predictions)
+        webhook_updates = {}  # sess_key -> (diff, predictions, weather)
 
         for sess, data in results["sessions"].items():
             ranked_df = data["ranked"]
@@ -689,7 +689,7 @@ class PredictionManager:
                                 new_weather=weather,
                             )
                             if w_diff:
-                                webhook_updates[sess] = (w_diff, ranked_list)
+                                webhook_updates[sess] = (w_diff, ranked_list, weather)
 
                         # Even if no diff (e.g. first send), mark as sent to establish baseline
                         self._last_sent_webhook_fps[cache_key] = new_fp
@@ -727,7 +727,7 @@ class PredictionManager:
             "timestamp": now,
         })
 
-    def _send_discord_webhook(self, event_title: str, session_updates: dict[str, tuple[PredictionDiff, list[dict[str, Any]]]]) -> None:
+    def _send_discord_webhook(self, event_title: str, session_updates: dict[str, tuple[PredictionDiff, list[dict[str, Any]], dict[str, Any]]]) -> None:
         """Send a consolidated notification to Discord for all changed sessions in a round."""
         webhook_url = self._get_setting("discord_webhook_url")
         if not webhook_url:
@@ -735,42 +735,74 @@ class PredictionManager:
 
         try:
             embeds = []
-            for sess_name, (diff, predictions) in session_updates.items():
+            for sess_name, (diff, predictions, weather) in session_updates.items():
                 # Format session title (e.g. race -> Race, sprint_qualifying -> Sprint Qualifying)
                 display_sess = sess_name.replace("_", " ").title()
 
+                # Build weather description
+                weather_str = ""
+                if weather and weather.get("temp_mean") is not None:
+                    t = weather.get("temp_mean")
+                    r = weather.get("rain_sum", 0)
+                    w = weather.get("wind_mean", 0)
+                    weather_str = f"\n🌡️ **{t:.0f}°C** | 💧 **{r:.1f}mm** | 🌬️ **{w:.0f}km/h**"
+
                 embed = {
-                    "title": f"📈 Prediction Change: {event_title} ({display_sess})",
-                    "description": f"Detected changes in **{', '.join(diff.changed_variables)}**.",
+                    "author": {"name": "F1 Outcome Predictor"},
+                    "title": f"🏁 {event_title} ({display_sess})",
+                    "description": f"**Detected changes:** {', '.join(diff.changed_variables)}.{weather_str}",
                     "color": 0xe10600,  # F1 Red
                     "timestamp": diff.timestamp,
-                    "fields": []
+                    "fields": [],
+                    "footer": {"text": f"Model v{self.cfg.app.model_version}"}
                 }
+
+                # Top Movers highlight
+                top_gains = sorted([m for m in diff.movements if m.direction > 0],
+                                  key=lambda m: m.direction, reverse=True)[:3]
+                if top_gains:
+                    movers_text = "\n".join([f"⬆️ **{m.code}** (+{m.direction} positions)" for m in top_gains])
+                    embed["fields"].append({
+                        "name": "🚀 Movers & Shakers",
+                        "value": movers_text,
+                        "inline": False
+                    })
 
                 # Create position maps for movement indicators
                 movements = {m.driver_id: m for m in diff.movements}
 
-                # Build the grid display
-                grid_lines = []
-                sorted_preds = sorted(predictions, key=lambda x: int(x.get("predicted_position", 99)))
-                for p in sorted_preds:
-                    pos = p.get("predicted_position")
-                    code = p.get("code", "???")
-                    name = p.get("name", "Unknown")
-                    d_id = p.get("driverId")
+                # Build the grid display in two columns
+                sorted_preds = sorted(predictions, key=lambda x: int(x.get("predicted_position", 99) or 99))
 
-                    m = movements.get(d_id)
-                    if m:
-                        icon = "🔼" if m.direction > 0 else "🔽"
-                        diff_val = f"{icon} {abs(m.direction)}"
-                    else:
-                        diff_val = "⏺️"
+                def format_grid_lines(preds):
+                    lines = []
+                    for p in preds:
+                        pos_val = p.get("predicted_position")
+                        pos_str = f"{pos_val:02}" if pos_val is not None else "??"
+                        code = p.get("code", "???")
+                        d_id = p.get("driverId")
 
-                    grid_lines.append(f"`P{pos:2}` **{code}** ({name}) {diff_val}")
+                        m = movements.get(d_id)
+                        if m:
+                            icon = "⬆️" if m.direction > 0 else "⬇️"
+                            diff_val = f"{icon}{abs(m.direction)}"
+                        else:
+                            diff_val = "⏺️"
 
-                # Discord has a limit of 1024 characters per field, and 4096 per description.
-                # Grid of 20 drivers should fit easily in a description.
-                embed["description"] += "\n\n" + "\n".join(grid_lines)
+                        lines.append(f"`P{pos_str}` **{code}** {diff_val}")
+                    return "\n".join(lines) or "No data"
+
+                embed["fields"].append({
+                    "name": "Top 10",
+                    "value": format_grid_lines(sorted_preds[:10]),
+                    "inline": True
+                })
+                embed["fields"].append({
+                    "name": "Bottom 10",
+                    "value": format_grid_lines(sorted_preds[10:]),
+                    "inline": True
+                })
+
                 embeds.append(embed)
 
             if not embeds:

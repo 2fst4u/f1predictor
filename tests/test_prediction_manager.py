@@ -105,14 +105,14 @@ class TestComputePredictionDiff:
 
         result = compute_prediction_diff("race", old, new, old_weather, new_weather)
         assert result is not None
-        assert "Weather forecast updated" in result.changed_variables
+        assert "🌦️ Weather forecast updated" in result.changed_variables
 
     def test_diff_detects_grid_change(self):
         old = [self._make_pred("d1", 1, grid=1), self._make_pred("d2", 2, grid=2)]
         new = [self._make_pred("d1", 2, grid=5), self._make_pred("d2", 1, grid=1)]
         result = compute_prediction_diff("race", old, new)
         assert result is not None
-        assert "Grid positions changed" in result.changed_variables
+        assert "🚥 Grid positions changed" in result.changed_variables
 
     def test_diff_with_shap_reasons(self):
         old = [
@@ -383,7 +383,7 @@ class TestPredictionManagerCycle:
         diff = manager.latest_diffs[-1]
         assert diff["session"] == "R1_race"
         assert len(diff["movements"]) == 2
-        assert "Grid positions changed" in diff["changed_variables"]
+        assert "🚥 Grid positions changed" in diff["changed_variables"]
 
     def test_run_loop(self):
         import threading
@@ -656,18 +656,28 @@ class TestPredictionManagerDiscord:
                     assert len(payload["embeds"]) == 1
 
                     # Check race embed
-                    r_embed = next(e for e in payload["embeds"] if "Prediction Change: Test GP 2024 R1 (Race)" in e["title"])
-                    assert "HAM" in r_embed["description"]
-                    assert "VER" in r_embed["description"]
-                    assert "🔼" in r_embed["description"] # HAM moved up (from P2 to P1)
-                    assert "🔽" in r_embed["description"] # VER moved down (from P1 to P2)
+                    r_embed = next(e for e in payload["embeds"] if "🏁 Test GP 2024 R1 (Race)" in e["title"])
+                    top10_field = next(f for f in r_embed["fields"] if f["name"] == "Top 10")
+                    assert "HAM" in top10_field["value"]
+                    assert "VER" in top10_field["value"]
+                    assert "⬆️" in top10_field["value"] # HAM moved up (from P2 to P1)
+                    assert "⬇️" in top10_field["value"] # VER moved down (from P1 to P2)
 
-                    # Check order in description
-                    lines = r_embed["description"].split("\n")
-                    # Find lines with P1 and P2
-                    p1_line = next(l for l in lines if "`P 1`" in l)
-                    p2_line = next(l for l in lines if "`P 2`" in l)
+                    # Check order in Top 10 field
+                    lines = top10_field["value"].split("\n")
+                    # Find lines with P01 and P02
+                    p1_line = next(l for l in lines if "`P01`" in l)
+                    p2_line = next(l for l in lines if "`P02`" in l)
                     assert "HAM" in p1_line
                     assert "VER" in p2_line
-                    # P1 should come before P2 in the description lines
+                    # P1 should come before P2 in the lines
                     assert lines.index(p1_line) < lines.index(p2_line)
+
+                    # Check "Movers & Shakers" field
+                    movers_field = next(f for f in r_embed["fields"] if f["name"] == "🚀 Movers & Shakers")
+                    assert "HAM" in movers_field["value"]
+                    assert "(+1 positions)" in movers_field["value"]
+
+                    # Check two-column grid layout (Bottom 10 exists)
+                    bottom10_field = next(f for f in r_embed["fields"] if f["name"] == "Bottom 10")
+                    assert bottom10_field["inline"] is True
