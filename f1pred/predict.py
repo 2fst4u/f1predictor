@@ -716,59 +716,56 @@ def run_predictions_for_event(
                     if roster is not None and not roster.empty:
                         cached_roster = roster
 
-                # 1.5 Optimization check: Check for actual results if session is in the past
+                # 1.5 Optimization check: High-level cache for finished sessions
                 # We do this before heavy feature building to ensure near-instant results for finished sessions
                 # Skip when use_actuals=False (backtesting/calibration) to exercise the full prediction pipeline
+                sess_cache_key = f"{season_i}_{round_i}_{sess}_{cfg.app.model_version}"
+
                 if use_actuals and roster is not None and not roster.empty:
                     actual_positions = _get_actual_positions_for_session(
                         jc, season_i, round_i, sess,
                         roster[["driverId", "number", "code"]] if "number" in roster.columns else roster[["driverId"]]
                     )
 
-                if use_actuals and actual_positions is not None and not actual_positions.isna().all():
-                    spinner.update(f"Using actual results for {sess}...")
-                    logger.info(f"[predict] Using actual results for {season_i} R{round_i} {sess}")
+                    # If we have actual results, we check if we ALREADY have the full prediction
+                    # (with SHAP values, probabilities) in our high-level cache.
+                    if actual_positions is not None and not actual_positions.isna().all():
+                        cached_result = pred_cache.get_by_key(sess_cache_key)
+                        if cached_result is not None:
+                            spinner.update(f"Using cached prediction for finished {sess}...")
+                            logger.info(f"[predict] Using cached prediction for finished {season_i} R{round_i} {sess}")
 
-                    ranked = roster.copy()
-                    # Ensure columns for UI/Console mapping exist
-                    if "number" not in ranked.columns:
-                        ranked["number"] = pd.NA
-                    if "code" not in ranked.columns:
-                        ranked["code"] = ""
+                            ranked = cached_result["ranked"].copy()
+                            prob_matrix = cached_result["prob_matrix"]
+                            pairwise = cached_result["pairwise"]
+                            meta = cached_result.get("meta", {
+                                "season": season_i,
+                                "round": round_i,
+                                "circuit": circuit_name,
+                                "weather": {},
+                            })
 
-                    ranked["actual_position"] = actual_positions
-                    # Sort by actual position
-                    ranked = ranked.sort_values("actual_position").reset_index(drop=True)
+                            # Re-apply actual positions to ensure they are up-to-date
+                            pos_map = dict(zip(roster["driverId"], actual_positions))
+                            ranked["actual_position"] = ranked["driverId"].map(pos_map)
 
-                    # Fill in prediction-like columns for UI/Console consistency
-                    ranked["predicted_position"] = ranked["actual_position"]
-                    ranked["mean_pos"] = ranked["actual_position"].astype(float)
-                    ranked["p_win"] = (ranked["actual_position"] == 1).astype(float)
-                    ranked["p_top3"] = (ranked["actual_position"] <= 3).astype(float)
-                    ranked["p_dnf"] = ranked["actual_position"].isna().astype(float)
-                    ranked["delta"] = 0
+                            # Keep these in variables so the downstream code doesn't fail
+                            p_top3 = ranked["p_top3"].values
+                            p_win = ranked["p_win"].values
+                            dnf_prob = ranked["p_dnf"].values
+                        else:
+                            # We have actual results but NO prediction cache. We MUST fall through
+                            # and run the full pipeline to generate the prediction (SHAP, win %, etc)
+                            # so that we can compare the prediction to the actuals.
+                            # We set a flag so we can save it to the high-level cache at the end.
+                            spinner.update(f"Generating full prediction for finished {sess}...")
+                            logger.info(f"[predict] Generating full prediction for finished {season_i} R{round_i} {sess} to build cache")
+                            # Set actual_positions to None temporarily so the standard prediction path executes
+                            # It will be fetched again at the end of the loop and appended correctly.
+                            actual_positions = None
 
-                    # Mock prob_matrix and pairwise for consistency
-                    prob_matrix = np.zeros((len(ranked), len(ranked)))
-                    for i in range(len(ranked)):
-                        val = ranked.loc[i, "actual_position"]
-                        if pd.notna(val):
-                            pos = int(val)
-                            if 1 <= pos <= len(ranked):
-                                prob_matrix[i, pos-1] = 1.0
-                    pairwise = None
-
-                    p_top3 = ranked["p_top3"].values
-                    p_win = ranked["p_win"].values
-                    dnf_prob = ranked["p_dnf"].values
-
-                    meta = {
-                        "season": season_i,
-                        "round": round_i,
-                        "circuit": circuit_name,
-                        "weather": {},
-                    }
-                else:
+                # Need to run full prediction pipeline if actual_positions is None (either not finished, or missed cache)
+                if actual_positions is None:
                     # 2. Build features (Expensive operation)
                     extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
                     spinner.update(f"Predicting {event_title} - {sess}: Building features...")
@@ -1085,6 +1082,16 @@ def run_predictions_for_event(
                             "pairwise": pairwise
                         })
 
+                        # If this is a finished session and we missed the high-level cache,
+                        # save it now so we don't need to rebuild it next time.
+                        if sess_dt and sess_dt < datetime.now(timezone.utc):
+                            pred_cache.set_by_key(f"{season_i}_{round_i}_{sess}_{cfg.app.model_version}", {
+                                "ranked": ranked,
+                                "prob_matrix": prob_matrix,
+                                "pairwise": pairwise,
+                                "meta": meta
+                            })
+
             # Ensure required columns exist for actuals mapping
             if "number" not in ranked.columns:
                 ranked["number"] = pd.Series([pd.NA] * len(ranked))
@@ -1092,6 +1099,7 @@ def run_predictions_for_event(
                 ranked["code"] = ""
 
             # actual_positions might have been resolved early in the loop for optimization
+            fetched_at_end = False
             if actual_positions is None and sess_dt and sess_dt < datetime.now(timezone.utc):
                 actual_positions = _get_actual_positions_for_session(
                     jc,
@@ -1100,13 +1108,18 @@ def run_predictions_for_event(
                     sess,
                     ranked[["driverId", "number", "code"]],
                 )
+                fetched_at_end = True
+
             if actual_positions is not None:
                 # If actual_positions was fetched early (for optimization), it is aligned to the
                 # original 'roster' index. If it was fetched at the end of the loop, it is aligned
                 # to the current 'ranked' index. To avoid scrambling results due to alignment
                 # mismatches after sorting, we map by driverId to ensure correct alignment.
                 if "actual_position" not in ranked.columns:
-                    pos_map = dict(zip(roster["driverId"], actual_positions))
+                    if fetched_at_end:
+                        pos_map = dict(zip(ranked["driverId"], actual_positions))
+                    else:
+                        pos_map = dict(zip(roster["driverId"], actual_positions))
                     ranked["actual_position"] = ranked["driverId"].map(pos_map)
 
                 ranked["delta"] = ranked["actual_position"] - ranked["predicted_position"]
