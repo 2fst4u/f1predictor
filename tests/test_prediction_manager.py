@@ -561,3 +561,97 @@ class TestPredictionManagerPredictRoundSessions:
             jc = MagicMock()
 
             manager._predict_round(jc, 2024, 1, {"raceName": "Normal GP", "round": 1})
+
+
+class TestPredictionManagerDiscord:
+    def test_consolidated_discord_webhook(self):
+        import pandas as pd
+        from unittest.mock import MagicMock, patch
+        from f1pred.prediction_manager import PredictionManager, _fingerprint_predictions
+
+        cfg = MagicMock()
+        cfg.modelling.targets.session_types = ["qualifying", "sprint_qualifying"]
+        cfg.paths.cache_dir = "cache"
+
+        manager = PredictionManager(cfg, poll_interval=60)
+        manager._latest_results = {"season": 2024, "rounds": {}}
+
+        # Setup previous state to trigger diffs
+        d1_old = {"driverId": "ver", "predicted_position": 1, "code": "VER", "name": "Max", "constructorName": "RB", "p_win": 0.5, "p_top3": 0.8, "mean_pos": 1.5}
+        d2_old = {"driverId": "ham", "predicted_position": 2, "code": "HAM", "name": "Lewis", "constructorName": "Merc", "p_win": 0.3, "p_top3": 0.6, "mean_pos": 2.5}
+        old_preds = [d1_old, d2_old]
+        old_fp = _fingerprint_predictions(old_preds)
+
+        manager._previous_fingerprints = {
+            "1_qualifying": old_fp,
+            "1_sprint_qualifying": old_fp
+        }
+        manager._previous_predictions = {
+            "1_qualifying": old_preds,
+            "1_sprint_qualifying": old_preds
+        }
+        manager._previous_weather = {
+            "1_qualifying": {"temp_mean": 20},
+            "1_sprint_qualifying": {"temp_mean": 20}
+        }
+
+        # New state: swapped positions for both sessions
+        d1_new = d1_old.copy()
+        d1_new["predicted_position"] = 2
+        d2_new = d2_old.copy()
+        d2_new["predicted_position"] = 1
+
+        df_new = pd.DataFrame([d2_new, d1_new]) # ham P1, ver P2
+
+        fake_results = {
+            "season": 2024,
+            "round": 1,
+            "sessions": {
+                "qualifying": {"ranked": df_new, "meta": {"weather": {"temp_mean": 25}}},
+                "sprint_qualifying": {"ranked": df_new, "meta": {"weather": {"temp_mean": 25}}}
+            }
+        }
+
+        # For testing exclusion of qualifying, we add a 'race' session
+        manager._previous_fingerprints["1_race"] = old_fp
+        manager._previous_predictions["1_race"] = old_preds
+        manager._previous_weather["1_race"] = {"temp_mean": 20}
+
+        fake_results["sessions"]["race"] = {"ranked": df_new, "meta": {"weather": {"temp_mean": 25}}}
+
+        with patch('f1pred.predict.run_predictions_for_event', return_value=fake_results):
+            with patch.object(manager, '_get_setting', return_value="https://discord.com/api/webhooks/test"):
+                with patch('httpx.post') as mock_post:
+                    jc = MagicMock()
+                    jc.get_race_results.return_value = []
+                    jc.get_qualifying_results.return_value = []
+
+                    manager._predict_round(jc, 2024, 1, {"raceName": "Test GP", "round": 1, "SprintQualifying": {}})
+
+                    # Assertions
+                    assert mock_post.called
+                    assert mock_post.call_count == 1
+
+                    args, kwargs = mock_post.call_args
+                    payload = kwargs['json']
+                    assert "embeds" in payload
+                    # Should ONLY contain 'race' embed now.
+                    # qualifying and sprint_qualifying are excluded.
+                    assert len(payload["embeds"]) == 1
+
+                    # Check race embed
+                    r_embed = next(e for e in payload["embeds"] if "Prediction Change: Test GP 2024 R1 (Race)" in e["title"])
+                    assert "HAM" in r_embed["description"]
+                    assert "VER" in r_embed["description"]
+                    assert "🔼" in r_embed["description"] # HAM moved up (from P2 to P1)
+                    assert "🔽" in r_embed["description"] # VER moved down (from P1 to P2)
+
+                    # Check order in description
+                    lines = r_embed["description"].split("\n")
+                    # Find lines with P1 and P2
+                    p1_line = next(l for l in lines if "`P 1`" in l)
+                    p2_line = next(l for l in lines if "`P 2`" in l)
+                    assert "HAM" in p1_line
+                    assert "VER" in p2_line
+                    # P1 should come before P2 in the description lines
+                    assert lines.index(p1_line) < lines.index(p2_line)

@@ -642,14 +642,32 @@ class PredictionManager:
             self._last_update = now
             self._save_to_disk()
 
+        # Send consolidated Discord webhook if changes occurred
+        if all_diffs and hasattr(self, '_send_discord_webhook'):
+            session_updates = {}
+            for d in all_diffs:
+                # Find the corresponding session key in output
+                # session format is e.g. "R1_race" or "R1_sprint_qualifying"
+                # Split on first underscore to get the prefix (R1) and the remainder (session_id)
+                parts = d.session.split('_', 1)
+                sess_key = parts[1] if len(parts) > 1 else d.session
+
+                # Exclude qualifying sessions from webhook updates as per requirements
+                if sess_key in ("qualifying", "sprint_qualifying"):
+                    continue
+
+                if sess_key in output["sessions"]:
+                    session_updates[sess_key] = (d, output["sessions"][sess_key]["predictions"])
+
+            if session_updates:
+                self._send_discord_webhook(event_title, session_updates)
+
         for diff in all_diffs:
             self._broadcast({
                 "type": "diff",
                 "data": diff.to_dict(),
                 "timestamp": now,
             })
-            if hasattr(self, '_send_discord_webhook'):
-                self._send_discord_webhook(diff, event_title)
             
         self._broadcast({
             "type": "prediction_round",
@@ -657,39 +675,59 @@ class PredictionManager:
             "timestamp": now,
         })
 
-    def _send_discord_webhook(self, diff: PredictionDiff, event_title: str) -> None:
-        """Send a notification to Discord if a webhook URL is configured."""
+    def _send_discord_webhook(self, event_title: str, session_updates: dict[str, tuple[PredictionDiff, list[dict[str, Any]]]]) -> None:
+        """Send a consolidated notification to Discord for all changed sessions in a round."""
         webhook_url = self._get_setting("discord_webhook_url")
         if not webhook_url:
             return
 
         try:
-            embed = {
-                "title": f"📈 Prediction Change: {event_title}",
-                "description": f"Detected changes in **{', '.join(diff.changed_variables)}** for session **{diff.session}**.",
-                "color": 0xe10600,  # F1 Red
-                "fields": [],
-                "timestamp": diff.timestamp
-            }
+            embeds = []
+            for sess_name, (diff, predictions) in session_updates.items():
+                # Format session title (e.g. race -> Race, sprint_qualifying -> Sprint Qualifying)
+                display_sess = sess_name.replace("_", " ").title()
 
-            # Add top 5 movers
-            for m in diff.movements[:5]:
-                direction_icon = "🔼" if m.direction > 0 else "🔽"
-                field_val = (
-                    f"P{m.old_position} → **P{m.new_position}** "
-                    f"({direction_icon} {abs(m.direction)})\n"
-                    f"*Reason: {', '.join(m.reasons)}*"
-                )
-                embed["fields"].append({
-                    "name": f"{m.driver_name} ({m.code})",
-                    "value": field_val,
-                    "inline": False
-                })
+                embed = {
+                    "title": f"📈 Prediction Change: {event_title} ({display_sess})",
+                    "description": f"Detected changes in **{', '.join(diff.changed_variables)}**.",
+                    "color": 0xe10600,  # F1 Red
+                    "timestamp": diff.timestamp,
+                    "fields": []
+                }
 
-            payload = {"embeds": [embed]}
-            # Use a short timeout for the outgoing request
+                # Create position maps for movement indicators
+                movements = {m.driver_id: m for m in diff.movements}
+
+                # Build the grid display
+                grid_lines = []
+                sorted_preds = sorted(predictions, key=lambda x: int(x.get("predicted_position", 99)))
+                for p in sorted_preds:
+                    pos = p.get("predicted_position")
+                    code = p.get("code", "???")
+                    name = p.get("name", "Unknown")
+                    d_id = p.get("driverId")
+
+                    m = movements.get(d_id)
+                    if m:
+                        icon = "🔼" if m.direction > 0 else "🔽"
+                        diff_val = f"{icon} {abs(m.direction)}"
+                    else:
+                        diff_val = "⏺️"
+
+                    grid_lines.append(f"`P{pos:2}` **{code}** ({name}) {diff_val}")
+
+                # Discord has a limit of 1024 characters per field, and 4096 per description.
+                # Grid of 20 drivers should fit easily in a description.
+                embed["description"] += "\n\n" + "\n".join(grid_lines)
+                embeds.append(embed)
+
+            if not embeds:
+                return
+
+            # Send up to 10 embeds in one message
+            payload = {"embeds": embeds[:10]}
             httpx.post(webhook_url, json=payload, timeout=5.0)
-            logger.info("[PredictionManager] Discord notification sent for %s", diff.session)
+            logger.info("[PredictionManager] Consolidated Discord notification sent for %d sessions", len(session_updates))
 
         except Exception as e:
             logger.warning("[PredictionManager] Failed to send Discord webhook: %s", e)
