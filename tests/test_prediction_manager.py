@@ -332,7 +332,7 @@ class TestPredictionManagerCycle:
         import pandas as pd
 
         cfg = MagicMock()
-        cfg.app.webhook_debounce_seconds = 0
+        cfg.app.webhook_min_stable_cycles = 0
         cfg.modelling.targets.session_types = ["qualifying", "race"]
         cfg.paths.cache_dir = "cache"
 
@@ -571,7 +571,7 @@ class TestPredictionManagerDiscord:
         from f1pred.prediction_manager import PredictionManager, _fingerprint_predictions
 
         cfg = MagicMock()
-        cfg.app.webhook_debounce_seconds = 0
+        cfg.app.webhook_min_stable_cycles = 0
         cfg.modelling.targets.session_types = ["qualifying", "sprint_qualifying"]
         cfg.paths.cache_dir = "cache"
 

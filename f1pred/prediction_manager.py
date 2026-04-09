@@ -319,7 +319,7 @@ class PredictionManager:
         # Webhook debounce state
         self._last_sent_webhook_fps: Dict[str, str] = {}
         self._pending_webhook_fps: Dict[str, str] = {}
-        self._pending_webhook_since: Dict[str, float] = {}
+        self._pending_webhook_cycles: Dict[str, int] = {}
         self._last_sent_predictions: Dict[str, List[Dict[str, Any]]] = {}
         self._last_sent_weather: Dict[str, Dict[str, Any]] = {}
 
@@ -644,7 +644,6 @@ class PredictionManager:
             # Webhooks are excluded for qualifying sessions
             if sess not in ("qualifying", "sprint_qualifying"):
                 last_sent_fp = self._last_sent_webhook_fps.get(cache_key)
-                current_time = time.time()
 
                 if last_sent_fp is None:
                     # First time seeing this session, establish baseline immediately
@@ -654,26 +653,28 @@ class PredictionManager:
                 # If current state is same as last sent, clear any pending debounce
                 elif new_fp == last_sent_fp:
                     self._pending_webhook_fps.pop(cache_key, None)
-                    self._pending_webhook_since.pop(cache_key, None)
+                    self._pending_webhook_cycles.pop(cache_key, None)
                 else:
                     pending_fp = self._pending_webhook_fps.get(cache_key)
                     if new_fp != pending_fp:
                         # State changed from what was pending, or no pending state
                         self._pending_webhook_fps[cache_key] = new_fp
-                        self._pending_webhook_since[cache_key] = current_time
+                        self._pending_webhook_cycles[cache_key] = 0
+                    else:
+                        # State is stable (same as pending)
+                        self._pending_webhook_cycles[cache_key] = self._pending_webhook_cycles.get(cache_key, 0) + 1
 
-                    # Check if stable for long enough
-                    since = self._pending_webhook_since.get(cache_key, current_time)
-                    elapsed = current_time - since
+                    # Check if stable for enough cycles
+                    cycles = self._pending_webhook_cycles.get(cache_key, 0)
 
-                    # Fetch debounce limit from config, ensuring it's a number
-                    debounce_limit = 300
-                    if hasattr(self.cfg, 'app') and hasattr(self.cfg.app, 'webhook_debounce_seconds'):
-                        val = self.cfg.app.webhook_debounce_seconds
-                        if isinstance(val, (int, float)):
-                            debounce_limit = val
+                    # Fetch cycle limit from config, ensuring it's a number
+                    cycle_limit = 1
+                    if hasattr(self.cfg, 'app') and hasattr(self.cfg.app, 'webhook_min_stable_cycles'):
+                        val = self.cfg.app.webhook_min_stable_cycles
+                        if isinstance(val, int):
+                            cycle_limit = val
 
-                    if elapsed >= debounce_limit:
+                    if cycles >= cycle_limit:
                         # Stable for long enough! Trigger update.
                         last_preds = self._last_sent_predictions.get(cache_key, [])
                         last_weather = self._last_sent_weather.get(cache_key)
@@ -695,7 +696,7 @@ class PredictionManager:
                         self._last_sent_predictions[cache_key] = ranked_list
                         self._last_sent_weather[cache_key] = weather
                         self._pending_webhook_fps.pop(cache_key, None)
-                        self._pending_webhook_since.pop(cache_key, None)
+                        self._pending_webhook_cycles.pop(cache_key, None)
 
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:

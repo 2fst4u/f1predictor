@@ -1,5 +1,4 @@
 import pytest
-import time
 import pandas as pd
 from unittest.mock import MagicMock, patch
 from f1pred.prediction_manager import PredictionManager, _fingerprint_predictions
@@ -7,7 +6,7 @@ from f1pred.prediction_manager import PredictionManager, _fingerprint_prediction
 @pytest.fixture
 def cfg():
     cfg = MagicMock()
-    cfg.app.webhook_debounce_seconds = 300
+    cfg.app.webhook_min_stable_cycles = 1
     cfg.modelling.targets.session_types = ["race"]
     cfg.paths.cache_dir = "cache"
     return cfg
@@ -27,8 +26,8 @@ def make_preds(positions):
         })
     return pd.DataFrame(data)
 
-def test_immediate_webhook_when_debounce_0(cfg):
-    cfg.app.webhook_debounce_seconds = 0
+def test_immediate_webhook_when_cycles_0(cfg):
+    cfg.app.webhook_min_stable_cycles = 0
     manager = PredictionManager(cfg)
 
     # First run establishes baseline (no diff to send yet, but sets last_sent)
@@ -46,12 +45,11 @@ def test_immediate_webhook_when_debounce_0(cfg):
 
     with patch("f1pred.predict.run_predictions_for_event", return_value=results2):
         with patch.object(manager, "_send_discord_webhook") as mock_webhook:
-            # Run twice: baseline was established, now we trigger the 0s debounce
             manager._predict_round(MagicMock(), 2024, 1, {"raceName": "GP"})
             mock_webhook.assert_called_once()
 
 def test_debounced_webhook_stable(cfg):
-    cfg.app.webhook_debounce_seconds = 100
+    cfg.app.webhook_min_stable_cycles = 1
     manager = PredictionManager(cfg)
 
     # Establish baseline
@@ -66,24 +64,19 @@ def test_debounced_webhook_stable(cfg):
 
     with patch("f1pred.predict.run_predictions_for_event", return_value=results2):
         with patch.object(manager, "_send_discord_webhook") as mock_webhook:
-            # First call: mark as pending
+            # First call: mark as pending (stable cycles = 0)
             manager._predict_round(MagicMock(), 2024, 1, {"raceName": "GP"})
             mock_webhook.assert_not_called()
             assert "1_race" in manager._pending_webhook_fps
+            assert manager._pending_webhook_cycles["1_race"] == 0
 
-            # Second call: still pending (not enough time)
+            # Second call: stable (stable cycles = 1)
             manager._predict_round(MagicMock(), 2024, 1, {"raceName": "GP"})
-            mock_webhook.assert_not_called()
-
-            # Fast forward time
-            mock_time = time.time() + 101
-            with patch("time.time", return_value=mock_time):
-                manager._predict_round(MagicMock(), 2024, 1, {"raceName": "GP"})
-                mock_webhook.assert_called_once()
-                assert "1_race" not in manager._pending_webhook_fps
+            mock_webhook.assert_called_once()
+            assert "1_race" not in manager._pending_webhook_fps
 
 def test_webhook_no_send_if_flapping(cfg):
-    cfg.app.webhook_debounce_seconds = 100
+    cfg.app.webhook_min_stable_cycles = 1
     manager = PredictionManager(cfg)
 
     # Baseline: A
@@ -107,7 +100,7 @@ def test_webhook_no_send_if_flapping(cfg):
             assert "1_race" not in manager._pending_webhook_fps # Pending cleared because it matches last sent
 
 def test_diff_calculated_against_last_sent(cfg):
-    cfg.app.webhook_debounce_seconds = 0
+    cfg.app.webhook_min_stable_cycles = 1
     manager = PredictionManager(cfg)
 
     # 1. Baseline: ver=1, ham=2
@@ -117,33 +110,29 @@ def test_diff_calculated_against_last_sent(cfg):
         manager._predict_round(MagicMock(), 2024, 1, {"raceName": "GP"})
 
     # 2. Update 1 (Debounced/SSE only): ver=2, ham=1
-    # We'll use 100s debounce to ensure it's not sent yet via webhook path
-    cfg.app.webhook_debounce_seconds = 100
     preds2 = make_preds({"ver": 2, "ham": 1})
     results2 = {"season": "2024", "round": "1", "sessions": {"race": {"ranked": preds2, "meta": {}}}}
-    mock_time_start = time.time()
-    with patch("time.time", return_value=mock_time_start):
-        with patch("f1pred.predict.run_predictions_for_event", return_value=results2):
-            manager._predict_round(MagicMock(), 2024, 1, {"raceName": "GP"})
+    with patch("f1pred.predict.run_predictions_for_event", return_value=results2):
+        # mark as pending
+        manager._predict_round(MagicMock(), 2024, 1, {"raceName": "GP"})
 
     # 3. Update 2: ver=3, ham=1, rus=2
     preds3 = make_preds({"ver": 3, "ham": 1, "rus": 2})
     results3 = {"season": "2024", "round": "1", "sessions": {"race": {"ranked": preds3, "meta": {}}}}
     with patch("f1pred.predict.run_predictions_for_event", return_value=results3):
-        # First call to Update 2: mark as pending
+        # First call to Update 2: mark as pending (re-timer)
         manager._predict_round(MagicMock(), 2024, 1, {"raceName": "GP"})
 
-        # Second call to Update 2: Force expiration
-        with patch("time.time", return_value=mock_time_start + 101):
-            with patch.object(manager, "_send_discord_webhook") as mock_webhook:
-                manager._predict_round(MagicMock(), 2024, 1, {"raceName": "GP"})
+        # Second call to Update 2: Stable, trigger
+        with patch.object(manager, "_send_discord_webhook") as mock_webhook:
+            manager._predict_round(MagicMock(), 2024, 1, {"raceName": "GP"})
 
-                mock_webhook.assert_called_once()
-                # The diff should be against results1 (ver: 1->3), not results2 (ver: 2->3)
-                args, _ = mock_webhook.call_args
-                updates = args[1]
-                diff = updates["race"][0]
+            mock_webhook.assert_called_once()
+            # The diff should be against results1 (ver: 1->3), not results2 (ver: 2->3)
+            args, _ = mock_webhook.call_args
+            updates = args[1]
+            diff = updates["race"][0]
 
-                ver_move = next(m for m in diff.movements if m.driver_id == "ver")
-                assert ver_move.old_position == 1
-                assert ver_move.new_position == 3
+            ver_move = next(m for m in diff.movements if m.driver_id == "ver")
+            assert ver_move.old_position == 1
+            assert ver_move.new_position == 3
