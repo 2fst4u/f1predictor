@@ -1334,7 +1334,6 @@ _FEATURE_LABELS: Dict[str, str] = {
     "weather_wind_mean":         "Wind Speed",
     "weather_pressure_mean":     "Air Pressure",
     "weather_humidity_mean":     "Humidity",
-    "team_tenure_events":        "Team Tenure",
     "is_race":                   "Race Session",
     "is_qualifying":             "Quali Session",
     "is_sprint":                 "Sprint Session",
