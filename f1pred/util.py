@@ -443,6 +443,61 @@ class PredictionCache:
         serialized_input = json.dumps(self._serialize(inputs, sort_dict=True), sort_keys=True)
         return hashlib.sha256(serialized_input.encode("utf-8")).hexdigest()
 
+
+    def get_by_key(self, key: str) -> Optional[Dict[str, Any]]:
+        """Retrieve cached prediction results using an explicit string key."""
+        import pandas as pd
+        import numpy as np
+
+        # We still hash the explicit key to ensure it's a valid, safe filename
+        safe_key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        cache_file = self.cache_dir / f"{safe_key}.json"
+
+        with self.lock:
+            if cache_file.exists():
+                try:
+                    with open(cache_file, "r") as f:
+                        data = json.load(f)
+
+                    # Deserialization of DataFrames
+                    if "ranked" in data and isinstance(data["ranked"], str):
+                        data["ranked"] = pd.read_json(io.StringIO(data["ranked"]), orient="split")
+                    if "prob_matrix" in data and isinstance(data["prob_matrix"], list):
+                        data["prob_matrix"] = np.array(data["prob_matrix"])
+                    if "pairwise" in data and isinstance(data["pairwise"], list):
+                        data["pairwise"] = np.array(data["pairwise"])
+
+                    # Update modification time to keep it in the rolling cache
+                    cache_file.touch()
+                    return data
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"Failed to load prediction cache {safe_key}: {e}")
+        return None
+
+    def set_by_key(self, key: str, results: Dict[str, Any]) -> None:
+        """Save prediction results to the cache using an explicit string key."""
+        safe_key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        cache_file = self.cache_dir / f"{safe_key}.json"
+
+        with self.lock:
+            try:
+                # Rolling deletion if limit exceeded
+                files = sorted(self.cache_dir.glob("*.json"), key=os.path.getmtime)
+                if len(files) >= self.max_entries:
+                    # Delete the oldest one(s)
+                    for f in files[:len(files) - self.max_entries + 1]:
+                        try:
+                            f.unlink()
+                        except Exception:
+                            pass
+
+                # Save new entry
+                serialized_data = self._serialize(results)
+                with open(cache_file, "w") as f:
+                    json.dump(serialized_data, f)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Failed to save prediction cache {safe_key}: {e}")
+
     def get(self, inputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Retrieve cached prediction results if they exist."""
         import pandas as pd
