@@ -33,7 +33,7 @@ _CHANGE_REASONS = {
     "grid": "🚥 Grid positions changed",
     "calibration": "⚖️ Model calibration weights updated",
     "roster": "👥 Driver roster changed",
-    "features": "📈 Driver form/stats updated",
+    "features": "📊 Driver form/stats updated",
 }
 
 
@@ -761,7 +761,7 @@ class PredictionManager:
                 top_gains = sorted([m for m in diff.movements if m.direction > 0],
                                   key=lambda m: m.direction, reverse=True)[:3]
                 if top_gains:
-                    movers_text = "\n".join([f"📈 **{m.code}** (+{m.direction} positions)" for m in top_gains])
+                    movers_text = "\n".join([f"⬆️ **{m.code}** (+{m.direction} positions)" for m in top_gains])
                     embed["fields"].append({
                         "name": "🚀 Movers & Shakers",
                         "value": movers_text,
@@ -784,7 +784,7 @@ class PredictionManager:
 
                         m = movements.get(d_id)
                         if m:
-                            icon = "📈" if m.direction > 0 else "📉"
+                            icon = "⬆️" if m.direction > 0 else "⬇️"
                             diff_val = f"{icon}{abs(m.direction)}"
                         else:
                             diff_val = "⏺️"

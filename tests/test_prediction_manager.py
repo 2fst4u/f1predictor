@@ -660,8 +660,8 @@ class TestPredictionManagerDiscord:
                     top10_field = next(f for f in r_embed["fields"] if f["name"] == "Top 10")
                     assert "HAM" in top10_field["value"]
                     assert "VER" in top10_field["value"]
-                    assert "📈" in top10_field["value"] # HAM moved up (from P2 to P1)
-                    assert "📉" in top10_field["value"] # VER moved down (from P1 to P2)
+                    assert "⬆️" in top10_field["value"] # HAM moved up (from P2 to P1)
+                    assert "⬇️" in top10_field["value"] # VER moved down (from P1 to P2)
 
                     # Check order in Top 10 field
                     lines = top10_field["value"].split("\n")
