@@ -728,53 +728,6 @@ def compute_circuit_proficiency(df: pd.DataFrame, circuit_id: str, ref_date: dat
     return metrics
 
 
-def compute_driver_team_form(
-    df: pd.DataFrame,
-    roster: pd.DataFrame,
-    ref_date: datetime,
-    half_life_days: int,
-    window_days: int = 730,
-    current_season: Optional[int] = None,
-    boost_factor: float = 1.0,
-) -> pd.DataFrame:
-    """Driver-team specific form for current constructor."""
-    if df.empty or roster.empty:
-        return pd.DataFrame(columns=["driverId", "driver_team_form_index", "team_tenure_events"])
-
-    min_dt = ref_date - timedelta(days=window_days)
-    races = df[(df["session"] == "race") & (df["date"] >= min_dt)].copy()
-    races = races.dropna(subset=["driverId", "constructorId", "date"])
-
-    cur_map = roster.set_index("driverId")["constructorId"].to_dict()
-    races["cur_constructor"] = races["driverId"].map(cur_map)
-    races = races[races["constructorId"] == races["cur_constructor"]].copy()
-    if races.empty:
-        return pd.DataFrame(columns=["driverId", "driver_team_form_index", "team_tenure_events"])
-
-    races["pos_score"] = -races["position"].astype(float).fillna(0.0)
-    races["pts_score"] = races["points"].astype(float).fillna(0.0)
-    w = exponential_weights(races["date"], ref_date, half_life_days)
-    if current_season is not None and boost_factor != 1.0 and "season" in races.columns:
-        w = np.where(races["season"] == current_season, w * boost_factor, w)
-    races["w"] = w
-
-    races["weighted_val"] = (races["pos_score"] + races["pts_score"]) * races["w"]
-    races = races.dropna(subset=["driverId"])
-
-    driver_codes, uniques = pd.factorize(races["driverId"])
-    w_sum = np.bincount(driver_codes, weights=races["w"])
-    val_sum = np.bincount(driver_codes, weights=races["weighted_val"])
-    events_count = np.bincount(driver_codes)
-
-    agg = pd.DataFrame({
-        "driverId": uniques,
-        "driver_team_form_index": val_sum / np.clip(w_sum, 1e-6, None),
-        "team_tenure_events": events_count
-    })
-
-    return agg
-
-
 def compute_teammate_delta(
     hist: pd.DataFrame,
     ref_date: datetime,
