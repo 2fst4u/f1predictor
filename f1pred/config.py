@@ -14,6 +14,7 @@ class AppSettings:
     random_seed: int
     timezone: str
     live_refresh_seconds: int
+    webhook_debounce_seconds: int = 300
     log_level: str = "WARNING"
     auto_refresh_seconds: int = 3600
 
@@ -311,6 +312,12 @@ def load_config(path: str) -> AppConfig:
             auto_refresh = app_cfg["auto_refresh_seconds"]
             if not isinstance(auto_refresh, int) or auto_refresh < 60:
                 errors.append("app.auto_refresh_seconds must be at least 60 seconds")
+
+        # Webhook Debounce
+        if "webhook_debounce_seconds" in app_cfg:
+            debounce = app_cfg["webhook_debounce_seconds"]
+            if not isinstance(debounce, int) or debounce < 0:
+                errors.append("app.webhook_debounce_seconds must be a non-negative integer")
 
     except KeyError as e:
         errors.append(str(e))

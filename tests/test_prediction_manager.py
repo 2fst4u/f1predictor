@@ -332,6 +332,7 @@ class TestPredictionManagerCycle:
         import pandas as pd
 
         cfg = MagicMock()
+        cfg.app.webhook_debounce_seconds = 0
         cfg.modelling.targets.session_types = ["qualifying", "race"]
         cfg.paths.cache_dir = "cache"
 
@@ -570,11 +571,24 @@ class TestPredictionManagerDiscord:
         from f1pred.prediction_manager import PredictionManager, _fingerprint_predictions
 
         cfg = MagicMock()
+        cfg.app.webhook_debounce_seconds = 0
         cfg.modelling.targets.session_types = ["qualifying", "sprint_qualifying"]
         cfg.paths.cache_dir = "cache"
 
         manager = PredictionManager(cfg, poll_interval=60)
         manager._latest_results = {"season": 2024, "rounds": {}}
+
+        # Mock baseline for webhook path
+        manager._last_sent_webhook_fps = {
+            "1_qualifying": "oldfp",
+            "1_sprint_qualifying": "oldfp",
+            "1_race": "oldfp"
+        }
+        manager._last_sent_predictions = {
+            "1_qualifying": [{"driverId": "ver", "predicted_position": 1}],
+            "1_sprint_qualifying": [{"driverId": "ver", "predicted_position": 1}],
+            "1_race": [{"driverId": "ver", "predicted_position": 1}, {"driverId": "ham", "predicted_position": 2}]
+        }
 
         # Setup previous state to trigger diffs
         d1_old = {"driverId": "ver", "predicted_position": 1, "code": "VER", "name": "Max", "constructorName": "RB", "p_win": 0.5, "p_top3": 0.8, "mean_pos": 1.5}
@@ -626,6 +640,8 @@ class TestPredictionManagerDiscord:
                     jc.get_race_results.return_value = []
                     jc.get_qualifying_results.return_value = []
 
+                    # Run twice: first to establish baseline, second to trigger debounced (0s) update
+                    manager._predict_round(jc, 2024, 1, {"raceName": "Test GP", "round": 1, "SprintQualifying": {}})
                     manager._predict_round(jc, 2024, 1, {"raceName": "Test GP", "round": 1, "SprintQualifying": {}})
 
                     # Assertions
