@@ -652,6 +652,10 @@ class PredictionManager:
                 parts = d.session.split('_', 1)
                 sess_key = parts[1] if len(parts) > 1 else d.session
 
+                # Exclude qualifying sessions from webhook updates as per requirements
+                if sess_key in ("qualifying", "sprint_qualifying"):
+                    continue
+
                 if sess_key in output["sessions"]:
                     session_updates[sess_key] = (d, output["sessions"][sess_key]["predictions"])
 

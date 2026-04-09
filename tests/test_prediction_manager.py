@@ -612,6 +612,13 @@ class TestPredictionManagerDiscord:
             }
         }
 
+        # For testing exclusion of qualifying, we add a 'race' session
+        manager._previous_fingerprints["1_race"] = old_fp
+        manager._previous_predictions["1_race"] = old_preds
+        manager._previous_weather["1_race"] = {"temp_mean": 20}
+
+        fake_results["sessions"]["race"] = {"ranked": df_new, "meta": {"weather": {"temp_mean": 25}}}
+
         with patch('f1pred.predict.run_predictions_for_event', return_value=fake_results):
             with patch.object(manager, '_get_setting', return_value="https://discord.com/api/webhooks/test"):
                 with patch('httpx.post') as mock_post:
@@ -628,21 +635,19 @@ class TestPredictionManagerDiscord:
                     args, kwargs = mock_post.call_args
                     payload = kwargs['json']
                     assert "embeds" in payload
-                    assert len(payload["embeds"]) == 2
+                    # Should ONLY contain 'race' embed now.
+                    # qualifying and sprint_qualifying are excluded.
+                    assert len(payload["embeds"]) == 1
 
-                    # Check qualifying embed
-                    q_embed = next(e for e in payload["embeds"] if "Prediction Change: Test GP 2024 R1 (Qualifying)" in e["title"])
-                    assert "HAM" in q_embed["description"]
-
-                    # Check sprint qualifying embed - this verifies multi-word key parsing fix
-                    sq_embed = next(e for e in payload["embeds"] if "Prediction Change: Test GP 2024 R1 (Sprint Qualifying)" in e["title"])
-                    assert "HAM" in sq_embed["description"]
-                    assert "VER" in sq_embed["description"]
-                    assert "🔼" in sq_embed["description"] # HAM moved up (from P2 to P1)
-                    assert "🔽" in sq_embed["description"] # VER moved down (from P1 to P2)
+                    # Check race embed
+                    r_embed = next(e for e in payload["embeds"] if "Prediction Change: Test GP 2024 R1 (Race)" in e["title"])
+                    assert "HAM" in r_embed["description"]
+                    assert "VER" in r_embed["description"]
+                    assert "🔼" in r_embed["description"] # HAM moved up (from P2 to P1)
+                    assert "🔽" in r_embed["description"] # VER moved down (from P1 to P2)
 
                     # Check order in description
-                    lines = sq_embed["description"].split("\n")
+                    lines = r_embed["description"].split("\n")
                     # Find lines with P1 and P2
                     p1_line = next(l for l in lines if "`P 1`" in l)
                     p2_line = next(l for l in lines if "`P 2`" in l)
