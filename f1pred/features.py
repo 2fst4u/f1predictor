@@ -1282,7 +1282,16 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         team_form["w"] = w
         team_form["weighted_points"] = team_form["points"] * team_form["w"]
 
-        sums = team_form.groupby("constructorId")[["weighted_points", "w"]].sum().reset_index()
+        # ⚡ Bolt: Fast factorization instead of groupby.sum()
+        df_clean = team_form.dropna(subset=["constructorId", "weighted_points", "w"])
+        codes, uniques = pd.factorize(df_clean["constructorId"])
+        w_pts_sum = np.bincount(codes, weights=df_clean["weighted_points"])
+        w_sum = np.bincount(codes, weights=df_clean["w"])
+        sums = pd.DataFrame({
+            "constructorId": uniques,
+            "weighted_points": w_pts_sum,
+            "w": w_sum
+        })
         sums["team_form_index"] = sums["weighted_points"] / sums["w"].clip(lower=1e-6)
         team_idx = sums[["constructorId", "team_form_index"]]
     else:
