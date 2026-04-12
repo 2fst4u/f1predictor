@@ -1,3 +1,5 @@
+import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -9,8 +11,7 @@ from sqlalchemy.orm import Session
 
 from .models_db import User
 
-# In a real app, this should be an environment variable.
-SECRET_KEY = "f1pred-super-secret-key-change-me"
+SECRET_KEY = os.environ.get("F1PRED_SECRET_KEY", secrets.token_urlsafe(32))
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
 
