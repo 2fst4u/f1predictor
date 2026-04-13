@@ -201,7 +201,7 @@
 
                     <div>
                         <div id="round-label" class="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Round (Auto-Predicted)</div>
-                        <div role="group" aria-labelledby="round-label" class="flex space-x-2 overflow-x-auto no-scrollbar pb-2" :class="{'opacity-50 pointer-events-none': scheduleLoading}">
+                        <div role="group" aria-labelledby="round-label" tabindex="0" class="flex space-x-2 overflow-x-auto no-scrollbar pb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded" :class="{'opacity-50 pointer-events-none': scheduleLoading}">
                             <template x-if="scheduleLoading">
                                 <span class="flex items-center text-xs text-gray-500 italic mt-1.5 pt-1">
                                     <i class="fas fa-circle-notch fa-spin mr-1.5" aria-hidden="true"></i>Loading schedule...
@@ -245,8 +245,8 @@
                         <h3 class="text-xs font-bold uppercase tracking-widest text-gray-400">Prediction Progress</h3>
                         <span class="ml-2 text-[10px] text-gray-500 italic" x-text="'(Processing Round ' + params.round + ')'"></span>
                     </summary>
-                    <div class="bg-black bg-opacity-30 rounded p-3 font-mono text-xs h-32 overflow-y-auto space-y-1"
-                        id="log-container" aria-live="polite">
+                    <div class="bg-black bg-opacity-30 rounded p-3 font-mono text-xs h-32 overflow-y-auto space-y-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                        id="log-container" aria-live="polite" tabindex="0" role="region" aria-label="Prediction Progress Logs">
                         <template x-for="log in logs">
                             <div class="flex">
                                 <span class="text-blue-500 mr-2" aria-hidden="true">></span>
@@ -275,7 +275,7 @@
                             <span class="ml-2 text-xs bg-green-600 text-white px-1.5 py-0.5 rounded-full"
                                 x-text="filteredRecentChanges().length"></span>
                         </summary>
-                        <div class="space-y-2 max-h-48 overflow-y-auto">
+                        <div class="space-y-2 max-h-48 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 rounded p-1" tabindex="0" role="region" aria-label="Recent Position Changes">
                             <template x-for="(change, ci) in filteredRecentChanges()" :key="ci">
                                 <div class="bg-black bg-opacity-30 rounded p-2 text-sm flex items-center gap-3">
                                     <span class="text-xs text-gray-500 font-mono w-14 flex-shrink-0"
@@ -320,9 +320,9 @@
                 </div>
 
                 <!-- Session Tabs -->
-                <div class="flex border-b border-gray-700 mb-6 overflow-x-auto" role="tablist"
+                <div class="flex border-b border-gray-700 mb-6 overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded" role="tablist"
                     x-show="getAvailableSessions().length > 1"
-                    aria-label="Session Results">
+                    aria-label="Session Results" tabindex="0">
                     <template x-for="sess in getAvailableSessions()" :key="sess">
                         <button @click="activeSession = sess" role="tab"
                             :aria-selected="(activeSession === sess).toString()" :id="'tab-' + sess"
@@ -379,7 +379,7 @@
 
                         <!-- Predictions Table -->
                         <div class="card shadow-2xl overflow-hidden">
-                            <div class="overflow-x-auto" tabindex="0" role="region" aria-label="Prediction Results Table">
+                            <div class="overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded" tabindex="0" role="region" aria-label="Prediction Results Table">
                                 <table class="w-full text-left">
                                     <thead>
                                         <tr
