@@ -164,6 +164,7 @@ Run the local test suite (requires installing test dependencies first):
 ```bash
 make install
 pip install pytest pytest-cov httpx playwright fastparquet pyarrow colorama
+playwright install --with-deps chromium
 make test
 ```
 
