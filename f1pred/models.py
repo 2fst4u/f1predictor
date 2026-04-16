@@ -60,6 +60,12 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     if len(races) < 20:
         return None
 
+    # TODO: The form index target is computed as (-position + points), which conflates
+    # finishing position with non-linear championship points (25,18,15,...).  This
+    # disproportionately rewards top-5 finishes and under-differentiates midfield
+    # positions (P11-P20 all receive 0 points).  Using -position alone as the target
+    # may produce a cleaner, more monotonic learning signal.  Requires further
+    # investigation and confirmation.
     races["points"] = races["points"].fillna(0.0)
     races_full["points"] = races_full["points"].fillna(0.0)
 
@@ -190,6 +196,10 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
             w[is_p_cur_race] *= boost_factor
 
         # Boost current season sprints (use qual boost for sprints to match features.py)
+        # TODO: Sprint sessions are boosted with qual_boost_factor (current_season_
+        # qualifying_weight), but sprints are race-like sessions, not qualifying-like.
+        # A distinct sprint boost factor or using the race boost_factor may be more
+        # appropriate.  Requires further investigation and confirmation.
         is_p_cur_sprint = (p_season == s) & (p_sess == "sprint")
         if np.any(is_p_cur_sprint):
             w[is_p_cur_sprint] *= qual_boost_factor
@@ -475,6 +485,10 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     ], remainder="drop")
 
     # Model selection with eager hyperparameters
+    # TODO: GBM hyperparameters (n_estimators, learning_rate, max_depth, etc.) are
+    # hardcoded and not part of the calibration vector.  Including key GBM params in
+    # the calibration search, or adding cross-validation / early stopping, could yield
+    # significant accuracy gains.  Requires further investigation and confirmation.
     model = None
 
     # Try LightGBM
@@ -1029,6 +1043,10 @@ def estimate_dnf_probabilities(
     p_drv = current_X["driverId"].map(drv_map).astype(float).fillna(global_p)
     p_team = current_X["constructorId"].map(team_map).astype(float).fillna(global_p)
 
+    # TODO: driver_weight and team_weight are not constrained to sum to 1.0.
+    # The calibrator can set both to 1.0 (doubling DNF rates) or both to near-0
+    # (making DNFs negligible).  Normalising or constraining these weights could
+    # prevent degenerate DNF estimates.  Requires further investigation and confirmation.
     p = driver_weight * p_drv.values + team_weight * p_team.values
     p = p * circuit_modifier
     p = np.clip(p.astype(float), clip_min, clip_max)

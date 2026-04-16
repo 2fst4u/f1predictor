@@ -558,6 +558,11 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
         is_cur_sprint = (dfg["season"] == current_season) & (dfg["session"] == "sprint")
         w = np.where(is_cur_sprint, w * sprint_boost_factor, w)
     dfg["w"] = w
+    # TODO: Form index conflates position and points (pos_score + pts_score).  The
+    # non-linear points scale (25,18,15,...,1,0,0,...) creates a discontinuity at the
+    # scoring boundary (P10 vs P11) and over-emphasizes podium vs midfield gaps.
+    # Using pos_score alone may be a cleaner target.  Requires further investigation
+    # and confirmation.
     dfg["weighted_val"] = (dfg["pos_score"] + dfg["pts_score"]) * dfg["w"]
     dfg = dfg.dropna(subset=["driverId"])
 
@@ -1008,6 +1013,11 @@ def compute_weather_sensitivity(
         ]), {}
 
     # Vectorized weather sensitivity calculation
+    # TODO: Weather sensitivity is computed as Pearson correlation between z-scored
+    # performance and weather conditions.  With only 5+ events per driver, these
+    # correlations are noisy and may capture spurious associations rather than causal
+    # effects.  Using regularised regression or requiring a larger minimum sample
+    # size could reduce noise.  Requires further investigation and confirmation.
     # Filter drivers with fewer than 5 races (will default to 0.0 later via merge/fillna or explicit init)
     counts = races.groupby("driverId")["pos_inv_z"].count()
     valid_drivers = counts[counts >= 5].index

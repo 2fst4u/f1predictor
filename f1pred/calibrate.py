@@ -89,6 +89,10 @@ PARAM_BOUNDS = [
     (0.05, 1.0),    # 0  gbm_weight
     (0.05, 1.0),    # 1  baseline_weight
     (0.2, 2.0),     # 2  baseline_team_factor
+    # TODO: baseline_driver_team_factor is deprecated and fixed at (0.0, 0.0) but still
+    # occupies a slot in the optimisation vector, adding minor overhead.  Removing it
+    # would require updating _pack/_unpack helpers and the parameter layout.  Requires
+    # further investigation and confirmation.
     (0.0, 0.0),     # 3  baseline_driver_team_factor (DEPRECATED — kept for vector compat)
     (0.1, 0.95),    # 4  grid_factor
     (0.0, 1.0),     # 5  ens_pace
@@ -101,6 +105,11 @@ PARAM_BOUNDS = [
     (0.0, 1.0),     # 12 analytical_win_weight
     (0.1, 10.0),    # 13 dnf_alpha
     (0.1, 30.0),    # 14 dnf_beta
+    # TODO: dnf_driver_weight and dnf_team_weight are independently bounded [0,1]
+    # but not constrained to sum to 1.0 (or any fixed value).  If calibration sets
+    # both to 1.0, effective DNF probability is doubled; if both are near 0, DNF
+    # becomes negligible.  Adding a sum constraint or normalising these in _unpack_weights
+    # could prevent degenerate solutions.  Requires further investigation and confirmation.
     (0.0, 1.0),     # 15 dnf_driver_weight
     (0.0, 1.0),     # 16 dnf_team_weight
     (0.01, 0.5),    # 17 noise_factor
@@ -314,7 +323,12 @@ class CalibrationManager:
         return self.current_weights
 
     def save_weights(self):
-        """Save current weights to disk."""
+        """Save current weights to disk.
+
+        NOTE: The output file (calibration_weights.json) is listed in .gitignore
+        and should NOT be committed to the repository.  It is generated at runtime
+        and contains environment-specific calibration state (last_race_id, timestamp).
+        """
         try:
             ensure_dirs(str(self.weights_file.parent))
             with open(self.weights_file, "w") as f:
@@ -755,6 +769,14 @@ class CalibrationManager:
                 simultaneously learns good race predictions and good qualifying
                 predictions, including the correct trade-off between the GBM
                 and the statistical models for each session type.
+
+                TODO: This objective uses a simplified surrogate of the production
+                pipeline (static GBM predictions, simplified grid stickiness blend
+                instead of the anchor-delta model in models.py).  Parameters like
+                half_life_base, current_season_weight, and grid_factor are optimised
+                against a different pipeline than the one that uses them at inference
+                time.  Aligning this objective with the production logic could improve
+                calibration fidelity.  Requires further investigation and confirmation.
                 """
                 # Unpack race/blending params
                 wb_gbm = max(0, weights[0])
@@ -893,15 +915,18 @@ class CalibrationManager:
                     total_loss = race_loss
 
                 # Regularisation: very light L2 to discourage extreme corner solutions.
-                # The bounds (PARAM_BOUNDS) are the primary guardrails.
+                # The bounds (PARAM_BOUNDS) are the primary guardrails; regularisation
+                # only prevents degenerate solutions at the boundary edges.
                 defaults_arr = np.array(PARAM_DEFAULTS, dtype=float)
                 scales = np.maximum(np.abs(defaults_arr), 1.0)
                 diffs = ((weights - defaults_arr) / scales) ** 2
 
-                # Learnable params (0-9, 22-25): near-zero regularisation
-                # Other params (10-21): light anchor — less gradient signal
-                reg_weights = np.ones(N_PARAMS, dtype=float) * 1e-5
-                reg_weights[10:22] = 0.005
+                # Minimal regularisation — just enough to avoid degenerate solutions.
+                # Previously heavier anchoring (1e-5 / 0.005) prevented the optimizer
+                # from diverging from defaults.  The bounds already constrain the
+                # search space, so regularisation should only act as a tiebreaker.
+                reg_weights = np.ones(N_PARAMS, dtype=float) * 1e-7
+                reg_weights[10:22] = 1e-5
                 reg = float(np.sum(reg_weights * diffs))
 
                 return total_loss + reg
@@ -911,11 +936,48 @@ class CalibrationManager:
             # a potentially stale cached solution.  The bounds enforce safety.
             init_w = list(PARAM_DEFAULTS)
 
-            res = minimize(objective, init_w, bounds=PARAM_BOUNDS, method="L-BFGS-B",
-                           options={"maxiter": 300, "ftol": 1e-9})
+            # Multi-start optimisation: run L-BFGS-B from the default starting
+            # point AND from several perturbed initialisations to avoid getting
+            # trapped in the basin around the defaults.  The best result wins.
+            best_res = None
 
-            w_opt = res.x
-            logger.info("[calibrate] Optimisation result: fun=%.6f, success=%s", res.fun, res.success)
+            def _run_lbfgsb(x0, label):
+                return minimize(
+                    objective, x0, bounds=PARAM_BOUNDS, method="L-BFGS-B",
+                    options={"maxiter": 800, "ftol": 1e-12, "gtol": 1e-8},
+                )
+
+            # Start 0: from defaults
+            res0 = _run_lbfgsb(init_w, "defaults")
+            best_res = res0
+            logger.info("[calibrate] Start 0 (defaults): fun=%.6f success=%s", res0.fun, res0.success)
+
+            # Starts 1-4: perturbed initialisations within bounds
+            rng = np.random.RandomState(42)
+            for start_idx in range(1, 5):
+                perturbed = np.array(init_w, dtype=float)
+                noise = rng.uniform(-0.15, 0.15, size=N_PARAMS)
+                for pi in range(N_PARAMS):
+                    lo, hi = PARAM_BOUNDS[pi]
+                    span = hi - lo
+                    if span > 0:
+                        perturbed[pi] = np.clip(
+                            perturbed[pi] + noise[pi] * span,
+                            lo, hi,
+                        )
+                res_i = _run_lbfgsb(perturbed.tolist(), f"perturbed-{start_idx}")
+                logger.info(
+                    "[calibrate] Start %d (perturbed): fun=%.6f success=%s",
+                    start_idx, res_i.fun, res_i.success,
+                )
+                if res_i.fun < best_res.fun:
+                    best_res = res_i
+
+            w_opt = best_res.x
+            logger.info(
+                "[calibrate] Best optimisation result: fun=%.6f, success=%s (from %d starts)",
+                best_res.fun, best_res.success, 5,
+            )
 
             # Convert to nested structure
             self.current_weights = _unpack_weights(w_opt)
