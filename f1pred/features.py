@@ -558,12 +558,7 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
         is_cur_sprint = (dfg["season"] == current_season) & (dfg["session"] == "sprint")
         w = np.where(is_cur_sprint, w * sprint_boost_factor, w)
     dfg["w"] = w
-    # TODO: Form index conflates position and points (pos_score + pts_score).  The
-    # non-linear points scale (25,18,15,...,1,0,0,...) creates a discontinuity at the
-    # scoring boundary (P10 vs P11) and over-emphasizes podium vs midfield gaps.
-    # Using pos_score alone may be a cleaner target.  Requires further investigation
-    # and confirmation.
-    dfg["weighted_val"] = (dfg["pos_score"] + dfg["pts_score"]) * dfg["w"]
+    dfg["weighted_val"] = dfg["pos_score"] * dfg["w"]
     dfg = dfg.dropna(subset=["driverId"])
 
     driver_codes, uniques = pd.factorize(dfg["driverId"])

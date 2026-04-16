@@ -60,12 +60,6 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     if len(races) < 20:
         return None
 
-    # TODO: The form index target is computed as (-position + points), which conflates
-    # finishing position with non-linear championship points (25,18,15,...).  This
-    # disproportionately rewards top-5 finishes and under-differentiates midfield
-    # positions (P11-P20 all receive 0 points).  Using -position alone as the target
-    # may produce a cleaner, more monotonic learning signal.  Requires further
-    # investigation and confirmation.
     races["points"] = races["points"].fillna(0.0)
     races_full["points"] = races_full["points"].fillna(0.0)
 
@@ -109,7 +103,7 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     # Pre-calculate base values (position and points) for races (finishes)
     races_pos = races["position"].values.astype(float)
     races_pts = races["points"].values.astype(float)
-    races_val_base = -races_pos + races_pts
+    races_val_base = -races_pos
 
     # Pre-calculate DNF status from races_full
     if "is_dnf" in races_full.columns:
@@ -389,7 +383,7 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     """
     Train a model producing a "pace index" (lower is better/faster) per driver.
 
-    The form_index is calculated as: -position + points, so HIGHER form_index = BETTER driver.
+    The form_index is calculated as: -position, so HIGHER form_index = BETTER driver.
     For pace (where LOWER = FASTER), we use: y = -form_index as the target.
 
     The model learns to predict pace from features, then we blend with a baseline

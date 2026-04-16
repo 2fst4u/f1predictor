@@ -168,6 +168,7 @@ def _calibration_version() -> str:
         + str(PARAM_BOUNDS)
         + str(PARAM_DEFAULTS)
         + str(N_PARAMS)
+        + "v2_form_index"
     )
     return hashlib.sha256(sig.encode()).hexdigest()[:12]
 
