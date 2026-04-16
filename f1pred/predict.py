@@ -466,6 +466,11 @@ def _run_single_prediction(
         logger.warning("[predict._run_single] Pace standardization failed: %s", e)
     
     # Historical results for ensemble models
+    # TODO: lookback_years=75 fetches data back to 1950.  While exponential decay
+    # down-weights ancient data, the data collection pipeline pays the fetch/parse
+    # cost for decades of irrelevant results.  A shorter lookback (e.g. 10-20 years)
+    # may be sufficient given the half-life settings.  Requires further investigation
+    # and confirmation.
     roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
     hist = collect_historical_results(
         jc,
@@ -503,6 +508,10 @@ def _run_single_prediction(
             w_mixed=cfg.modelling.ensemble.w_mixed,
             w_gbm=cfg.modelling.ensemble.w_gbm,
             min_std=cfg.modelling.ensemble.min_std,
+            w_gbm_quali=getattr(cfg.modelling.ensemble, "w_gbm_quali", 0.7),
+            w_elo_quali=getattr(cfg.modelling.ensemble, "w_elo_quali", 0.1),
+            w_bt_quali=getattr(cfg.modelling.ensemble, "w_bt_quali", 0.1),
+            w_mixed_quali=getattr(cfg.modelling.ensemble, "w_mixed_quali", 0.1),
         )
         combined_pace = combine_pace(
             gbm_pace=pace_hat,
@@ -517,6 +526,9 @@ def _run_single_prediction(
         combined_pace = pace_hat
     
     # DNF probabilities (only for race/sprint)
+    # TODO: When X_override is provided, meta is an empty dict so event_weather is
+    # always None here, causing weather-aware DNF rates to fall back to overall rates.
+    # Requires further investigation and confirmation.
     dnf_prob = np.zeros(X.shape[0], dtype=float)
     if sess in ("race", "sprint"):
         try:
@@ -807,10 +819,14 @@ def run_predictions_for_event(
                             if "ensemble" in calibrated_weights:
                                 e = calibrated_weights["ensemble"]
                                 ens_cfg_obj = EnsembleConfig(
-                                    w_gbm=e.get("w_gbm", 0.25),
-                                    w_elo=e.get("w_elo", 0.25),
-                                    w_bt=e.get("w_bt", 0.25),
-                                    w_mixed=e.get("w_mixed", 0.25),
+                                    w_gbm=e.get("w_gbm", 0.4),
+                                    w_elo=e.get("w_elo", 0.2),
+                                    w_bt=e.get("w_bt", 0.2),
+                                    w_mixed=e.get("w_mixed", 0.2),
+                                    w_gbm_quali=e.get("w_gbm_quali", 0.7),
+                                    w_elo_quali=e.get("w_elo_quali", 0.1),
+                                    w_bt_quali=e.get("w_bt_quali", 0.1),
+                                    w_mixed_quali=e.get("w_mixed_quali", 0.1),
                                 )
 
                     # Universal Grid Feature logic (Race<-Quali, Sprint<-SprintQuali)
@@ -1029,6 +1045,12 @@ def run_predictions_for_event(
                                 dnf_prob[:] = 0.12
 
                         # Monte Carlo simulation
+                        # TODO: The random seed is deterministic per (season, round, session)
+                        # but does not incorporate calibration state.  This means cached
+                        # predictions and fresh predictions with updated weights produce
+                        # identical simulation noise patterns, which could mask the effect
+                        # of weight changes on final rankings.  Requires further
+                        # investigation and confirmation.
                         spinner.update("Simulating Monte Carlo...")
                         draws = cfg.modelling.monte_carlo.draws
 

@@ -585,6 +585,13 @@ def combine_pace(
 
     combined = w_gbm * g + w_elo * e + w_bt * b + w_mixed * m
 
+    # TODO: Each ensemble component (Elo, BT, Mixed) already z-score normalises its
+    # output, then this combined output is z-normalised again, and downstream code in
+    # models.py (grid stickiness) and predict.py normalises once more.  Multiple
+    # sequential z-normalisations destroy absolute magnitude information and make the
+    # system sensitive to small weight changes in non-intuitive ways.  Consolidating
+    # normalisation to a single canonical point could improve stability.  Requires
+    # further investigation and confirmation.
     mu = float(combined.mean())
     sd = float(combined.std())
     if not np.isfinite(sd) or sd < cfg.min_std:
