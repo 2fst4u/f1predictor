@@ -77,9 +77,11 @@ RUN mkdir -p /config .cache/matplotlib && \
 # Copy only required runtime files
 COPY main.py ./
 # We copy defaults to /app so they are available even if /config is shadowed by a volume
-COPY config.yaml calibration_weights.json ./
+# calibration_weights.json is generated at runtime by CalibrationManager and should
+# not be baked into the image — it will be created on first calibration run.
+COPY config.yaml ./
 # Also copy to /config for cases where no volume is mounted
-RUN cp config.yaml calibration_weights.json /config/
+RUN cp config.yaml /config/
 
 # Expose the port the app runs on
 EXPOSE 8000
