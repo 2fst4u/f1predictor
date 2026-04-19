@@ -456,9 +456,9 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         with:
-          # Use escalated model (Opus 4.7) if classifier flagged high complexity,
-          # otherwise use cost-effective Gemini 2.5 Flash
           model: ${{ needs.classify.outputs.escalate == 'true' && 'openrouter/anthropic/claude-opus-4.7' || 'openrouter/google/gemini-2.5-flash' }}
+          # To change models: update the two model IDs above. The rest of the pipeline
+          # adapts automatically — no agent prompts reference specific model names.
           agent: ${{ steps.task.outputs.agent }}
           share: true
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -582,8 +582,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             You are the AGGREGATE & REVIEW stage of a multi-stage AI pipeline.
-            You were written by a DIFFERENT AI (Google Gemini) — your job is to
-            review its work critically and independently.
+            Your job is to review the combined worker output critically and independently.
 
             ORIGINAL TASK:
             ${{ needs.gate.outputs.task }}
@@ -1027,13 +1026,13 @@ jobs:
           **Status:** $STATUS_BADGE
 
           ### Pipeline stages
-          | Stage | Model | Provider |
-          |-------|-------|----------|
-          | Classify | gemini-2.5-flash-lite | Google |
-          | Plan | gemini-2.5-pro | Google |
-          | Work | ${{ needs.classify.outputs.escalate == 'true' && 'claude-opus-4.7 (escalated)' || 'gemini-2.5-flash' }} | ${{ needs.classify.outputs.escalate == 'true' && 'Anthropic' || 'Google' }} |
-          | Review | gpt-4.1 | OpenAI |
-          | Fix | o4-mini | OpenAI |
+          | Stage | Escalated |
+          |-------|-----------|
+          | Classify | — |
+          | Plan | — |
+          | Work | ${{ needs.classify.outputs.escalate == 'true' && 'yes' || 'no' }} |
+          | Review | — |
+          | Fix (if needed) | — |
 
           ### Validation
           - Tests: ${{ needs.validate.outputs.test_count }} run, ${{ needs.validate.outputs.fail_count }} failed
