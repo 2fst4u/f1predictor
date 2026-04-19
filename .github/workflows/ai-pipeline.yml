@@ -1,7 +1,7 @@
 name: "AI Pipeline"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Multi-stage OpenCode pipeline for 2fst4u/f1predictor
+# Multi-stage OpenCode pipeline
 #
 # Trigger:   Comment "/develop <task>" on any issue or PR
 # Access:    Write/admin collaborators only (silent reject otherwise)
@@ -94,7 +94,7 @@ jobs:
             const body  = context.payload.comment.body;
             const match = body.match(/\/develop\s+([\s\S]+)/);
             if (!match || !match[1].trim()) {
-              core.setFailed('/develop requires a task description, e.g. /develop add Kalman smoothing');
+              core.setFailed('/develop requires a task description, e.g. /develop add retry logic to the data fetcher');
               return;
             }
             const task = match[1].trim().slice(0, 4000); // hard cap
@@ -213,7 +213,7 @@ jobs:
           share: true
           token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are the CLASSIFY stage of a multi-stage AI pipeline for the f1predictor repository.
+            You are the CLASSIFY stage of a multi-stage AI pipeline.
 
             TASK FROM USER:
             ${{ needs.gate.outputs.task }}
@@ -221,21 +221,22 @@ jobs:
             ISSUE/PR CONTEXT:
             ${{ needs.gate.outputs.context_json }}
 
-            Analyse the task and write a JSON classification file to `/tmp/pipeline/classification.json`.
-            Create the directory first with: mkdir -p /tmp/pipeline
+            First, briefly explore the repository structure (ls, find) to understand what kind
+            of project this is. Then analyse the task and write a JSON classification file to
+            `/tmp/pipeline/classification.json`. Create the directory first with: mkdir -p /tmp/pipeline
 
             The JSON must follow this exact schema:
             {
               "complexity": "low" | "medium" | "high",
               "escalate": true | false,
-              "domain": "prediction" | "data" | "infra" | "test" | "mixed",
+              "domain": "core" | "data" | "infra" | "test" | "mixed",
               "worker_count": 1 | 2 | 3 | 4,
               "task_ids": ["t1", "t2", ...],
               "rationale": "one sentence explanation"
             }
 
             Rules:
-            - escalate=true only when complexity="high" AND task requires deep ML expertise
+            - escalate=true only when complexity="high" AND the task requires deep specialist expertise
             - worker_count must equal length of task_ids array (max 4)
             - task_ids are short identifiers like "t1", "t2", "t3", "t4"
             - domain="mixed" when task spans multiple areas
@@ -311,7 +312,7 @@ jobs:
           share: true
           token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are the PLAN stage of a multi-stage AI pipeline for the f1predictor repository.
+            You are the PLAN stage of a multi-stage AI pipeline.
 
             TASK FROM USER:
             ${{ needs.gate.outputs.task }}
@@ -322,8 +323,8 @@ jobs:
             CLASSIFICATION (from previous stage):
             $(cat /tmp/pipeline/classification.json)
 
-            Read the classification, explore the repository structure, then write a detailed
-            work plan to `/tmp/pipeline/plan.json`.
+            Explore the repository structure thoroughly (ls, find, cat key files), then write a
+            detailed work plan to `/tmp/pipeline/plan.json`.
 
             The plan must be a JSON object with this exact schema:
             {
@@ -331,11 +332,11 @@ jobs:
                 {
                   "id": "t1",
                   "title": "short title",
-                  "domain": "prediction" | "data" | "infra" | "test",
-                  "agent": "worker-prediction" | "worker-data" | "worker-infra" | "worker-test",
-                  "prompt": "Detailed instructions for the worker agent. Be specific: name exact files, functions, and what to change.",
-                  "files": ["f1pred/predict.py", "tests/test_predict.py"],
-                  "acceptance": "How to verify this task is complete"
+                  "domain": "core" | "data" | "infra" | "test",
+                  "agent": "worker-core" | "worker-data" | "worker-infra" | "worker-test",
+                  "prompt": "Detailed, self-contained instructions for the worker. Name exact files, functions, line numbers. Describe before/after state clearly.",
+                  "files": ["path/to/file.py", "tests/test_file.py"],
+                  "acceptance": "Specific, testable criteria for completion"
                 }
               ],
               "integration_notes": "How the tasks fit together once all workers are done"
@@ -343,9 +344,9 @@ jobs:
 
             Rules:
             - task_ids must match exactly: ${{ needs.classify.outputs.task_ids }}
-            - Assign the right agent per domain (see agent field options above)
-            - Each task prompt must be self-contained — workers run in parallel and cannot communicate
-            - Reference specific existing files and functions by name — explore the repo first
+            - Each task prompt must be fully self-contained — workers run in parallel and share no state
+            - Reference actual files and functions by name — explore the repo first
+            - Avoid assigning two workers to the same file (causes merge conflicts)
             - Write ONLY the JSON plan file. Do not edit any source files.
 
       - name: Read plan artifact
@@ -462,7 +463,7 @@ jobs:
           share: true
           token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are a WORKER AGENT in a multi-stage AI pipeline for the f1predictor repository.
+            You are a WORKER AGENT in a multi-stage AI pipeline.
             Your task ID is: ${{ matrix.task_id }}
 
             ORIGINAL REQUEST FROM USER:
@@ -472,10 +473,11 @@ jobs:
             $(cat /tmp/pipeline/worker-prompt.txt)
 
             IMPORTANT CONSTRAINTS:
-            - Work only on the files relevant to your task (listed in the plan)
-            - Do not modify files outside your task scope — other workers handle those
-            - Run existing tests after your changes to check for breakage: python -m pytest tests/ -x -q 2>&1 | head -50
-            - If tests fail due to your changes, fix them before finishing
+            - Work only on the files listed in your task — other workers handle the rest
+            - Do not modify files outside your task scope
+            - After making changes, run the test suite to check for breakage:
+              python -m pytest tests/ -x -q 2>&1 | head -50
+            - Fix any test failures caused by your changes before finishing
             - Do not commit — the pipeline handles that
 
       - name: Capture changes as patch
@@ -676,11 +678,23 @@ jobs:
             echo "No diff to apply — validating base code"
           fi
 
+      - name: Detect source directory
+        id: srcdir
+        run: |
+          # Heuristic: find the top-level Python package (directory with __init__.py
+          # that is not 'tests'). Falls back to '.' if none found.
+          SRC=$(find . -maxdepth 2 -name "__init__.py" \
+            ! -path "./tests/*" ! -path "./.git/*" ! -path "./build/*" \
+            | head -1 | xargs -I{} dirname {} | sed 's|^\./||')
+          if [ -z "$SRC" ]; then SRC="."; fi
+          echo "src=$SRC" >> "$GITHUB_OUTPUT"
+          echo "Source directory: $SRC"
+
       - name: Lint with ruff
         id: lint
         continue-on-error: true
         run: |
-          ruff check f1pred/ --output-format=json \
+          ruff check "${{ steps.srcdir.outputs.src }}/" --output-format=json \
             --output-file=/tmp/pipeline/lint.json 2>/dev/null || true
           ISSUES=$(python3 -c "
           import json
@@ -697,7 +711,7 @@ jobs:
         id: tests
         continue-on-error: true
         run: |
-          python -m pytest --cov=f1pred tests/ \
+          python -m pytest --cov="${{ steps.srcdir.outputs.src }}" tests/ \
             --tb=short \
             --json-report \
             --json-report-file=/tmp/pipeline/pytest.json \
@@ -823,6 +837,16 @@ jobs:
             git apply --whitespace=fix /tmp/pipeline/aggregated.diff
           fi
 
+      - name: Detect source directory
+        id: srcdir
+        run: |
+          SRC=$(find . -maxdepth 2 -name "__init__.py" \
+            ! -path "./tests/*" ! -path "./.git/*" ! -path "./build/*" \
+            | head -1 | xargs -I{} dirname {} | sed 's|^\./||')
+          if [ -z "$SRC" ]; then SRC="."; fi
+          echo "src=$SRC" >> "$GITHUB_OUTPUT"
+          echo "Source directory: $SRC"
+
       - name: Run fixer agent
         uses: anomalyco/opencode/github@latest
         env:
@@ -833,7 +857,7 @@ jobs:
           share: true
           token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            You are the FIX stage of a multi-stage AI pipeline for the f1predictor repository.
+            You are the FIX stage of a multi-stage AI pipeline.
             Previous AI stages made code changes, but validation FAILED. Your job is to fix all failures.
 
             ORIGINAL TASK:
@@ -852,19 +876,20 @@ jobs:
             1. Read the validation report carefully — understand WHY each test failed
             2. Read the relevant source files and tests to understand the full context
             3. Fix all failing tests and lint issues
-            4. After fixing, run: python -m pytest tests/ -x -q 2>&1 | head -100
-            5. Run: ruff check f1pred/ 2>&1 | head -50
-            6. If issues remain, keep fixing until clean (or until you have exhausted reasonable approaches)
-            7. Do not revert the original intent of the changes — fix the implementation, not the goal
+            4. After fixing, run the test suite and lint to verify:
+               python -m pytest tests/ -x -q 2>&1 | head -100
+               ruff check . 2>&1 | head -50
+            5. If issues remain, keep fixing until clean (or until you have exhausted reasonable approaches)
+            6. Do not revert the original intent of the changes — fix the implementation, not the goal
 
       - name: Re-run validation after fix
         id: revalidate
         continue-on-error: true
         run: |
-          ruff check f1pred/ --output-format=json \
+          ruff check "${{ steps.srcdir.outputs.src }}/" --output-format=json \
             --output-file=/tmp/pipeline/lint2.json 2>/dev/null || true
 
-          python -m pytest --cov=f1pred tests/ \
+          python -m pytest --cov="${{ steps.srcdir.outputs.src }}" tests/ \
             --tb=short \
             --json-report \
             --json-report-file=/tmp/pipeline/pytest2.json \
