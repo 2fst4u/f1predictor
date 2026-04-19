@@ -545,6 +545,11 @@ async def test_webhook(
     current_user: User = Depends(get_current_user)
 ):
     """Send a test notification to the provided Discord webhook URL."""
+    # 🛡️ Sentinel: Defense in depth - Validate webhook URL to prevent SSRF
+    valid_prefixes = ("https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/")
+    if not request.url.startswith(valid_prefixes):
+        raise HTTPException(status_code=400, detail="URL must be a valid Discord webhook URL")
+
     try:
         payload = {
             "embeds": [{
