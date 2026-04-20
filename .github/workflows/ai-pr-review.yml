@@ -1,0 +1,400 @@
+name: "AI PR Review Responder"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Responds to review feedback on ai-pipeline/* PRs.
+#
+# Trigger:  Comment "/review" on any ai-pipeline/* PR
+#           (works from the PR thread or from the Files tab review comments)
+#
+# Behaviour:
+#   - Fetches the full PR comment thread + all line-level review comments
+#     + all formal review summaries — so the agent has complete discussion context
+#   - Fetches the full PR diff so the agent sees exactly what changed
+#   - Runs OpenCode to address all feedback on the existing branch
+#   - Commits and pushes to the same PR branch — no new PR
+#   - Re-runs ruff + pytest and posts a structured reply comment
+#
+# Access:   Write/admin collaborators only (silent reject otherwise)
+# Scope:    Only fires on ai-pipeline/* branches
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  # General PR thread comment (e.g. someone types /review after discussion)
+  issue_comment:
+    types: [created]
+
+  # Line-level review comment in the Files tab (e.g. /review on a specific line)
+  pull_request_review_comment:
+    types: [created]
+
+concurrency:
+  # One responder per PR at a time; cancel a stale run if /review is sent again
+  group: ai-pr-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  respond:
+    name: "Respond to Review"
+    runs-on: ubuntu-latest
+
+    # Only fire when:
+    #   1. Comment contains /review
+    #   2. Not also a /develop command (handled by ai-pipeline.yml)
+    if: |
+      contains(github.event.comment.body, '/review') &&
+      !contains(github.event.comment.body, '/develop')
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      # ── 1. Auth: write/admin collaborators only ────────────────────────────
+      - name: Check collaborator permission
+        id: auth
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const actor = context.payload.comment.user.login;
+            let level = 'none';
+            try {
+              const resp = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner:    context.repo.owner,
+                repo:     context.repo.repo,
+                username: actor,
+              });
+              level = resp.data.permission;
+            } catch (_) {}
+            const allowed = ['admin', 'write'].includes(level);
+            if (!allowed) core.notice(`@${actor} has '${level}' — /review ignored`);
+            core.setOutput('allowed', String(allowed));
+            core.setOutput('actor',   actor);
+
+      - name: Abort if not authorised
+        if: steps.auth.outputs.allowed != 'true'
+        run: exit 0
+
+      # ── 2. Resolve PR number and branch ───────────────────────────────────
+      - name: Resolve PR context
+        id: pr_ctx
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let prNumber, headRef, headSha, prTitle, prBody;
+
+            if (context.eventName === 'pull_request_review_comment') {
+              prNumber = context.payload.pull_request.number;
+              headRef  = context.payload.pull_request.head.ref;
+              headSha  = context.payload.pull_request.head.sha;
+              prTitle  = context.payload.pull_request.title;
+              prBody   = context.payload.pull_request.body || '';
+
+            } else {
+              // issue_comment on a PR — fetch PR details
+              const prUrl = context.payload.issue.pull_request?.url;
+              if (!prUrl) {
+                core.notice('/review used on an issue, not a PR — skipping');
+                core.setOutput('skip', 'true');
+                return;
+              }
+              const prNum  = parseInt(prUrl.split('/').pop());
+              const prData = await github.rest.pulls.get({
+                owner:       context.repo.owner,
+                repo:        context.repo.repo,
+                pull_number: prNum,
+              });
+              prNumber = prNum;
+              headRef  = prData.data.head.ref;
+              headSha  = prData.data.head.sha;
+              prTitle  = prData.data.title;
+              prBody   = prData.data.body || '';
+            }
+
+            // Only proceed on ai-pipeline/* branches
+            if (!headRef.startsWith('ai-pipeline/')) {
+              core.notice(`Branch '${headRef}' is not ai-pipeline/* — skipping`);
+              core.setOutput('skip', 'true');
+              return;
+            }
+
+            core.setOutput('skip',      'false');
+            core.setOutput('pr_number', String(prNumber));
+            core.setOutput('head_ref',  headRef);
+            core.setOutput('head_sha',  headSha);
+            core.setOutput('pr_title',  prTitle);
+            core.setOutput('pr_body',   prBody.slice(0, 4000));
+            core.notice(`PR #${prNumber} · ${headRef}`);
+
+      - name: Skip if not a qualifying PR
+        if: steps.pr_ctx.outputs.skip == 'true'
+        run: exit 0
+
+      # ── 3. Assemble full PR context ────────────────────────────────────────
+      # Fetches everything: thread comments, line-level review comments,
+      # formal review summaries, and the PR diff — giving the agent the same
+      # rich context a human reviewer would have.
+      - name: Assemble PR context
+        id: context
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs       = require('fs');
+            const prNumber = parseInt('${{ steps.pr_ctx.outputs.pr_number }}');
+            const owner    = context.repo.owner;
+            const repo     = context.repo.repo;
+
+            // ── Thread comments (top-level PR conversation) ────────────────
+            const issueComments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number: prNumber, per_page: 100 }
+            );
+            const threadComments = issueComments.map(c => ({
+              type:   'thread',
+              id:     c.id,
+              author: c.user.login,
+              bot:    c.user.login.includes('[bot]'),
+              body:   c.body.slice(0, 2000),
+              at:     c.created_at,
+            }));
+
+            // ── Line-level review comments (Files tab) ─────────────────────
+            const reviewComments = await github.paginate(
+              github.rest.pulls.listReviewComments,
+              { owner, repo, pull_number: prNumber, per_page: 100 }
+            );
+            const lineComments = reviewComments.map(c => ({
+              type:     'line',
+              id:       c.id,
+              author:   c.user.login,
+              bot:      c.user.login.includes('[bot]'),
+              file:     c.path,
+              line:     c.line || c.original_line,
+              body:     c.body.slice(0, 2000),
+              at:       c.created_at,
+            }));
+
+            // ── Formal review summaries (Approve / Request changes) ────────
+            const reviews = await github.paginate(
+              github.rest.pulls.listReviews,
+              { owner, repo, pull_number: prNumber, per_page: 100 }
+            );
+            const reviewSummaries = reviews
+              .filter(r => r.body || r.state !== 'COMMENTED')
+              .map(r => ({
+                type:   'review',
+                id:     r.id,
+                author: r.user.login,
+                bot:    r.user.login.includes('[bot]'),
+                state:  r.state,   // APPROVED | CHANGES_REQUESTED | COMMENTED
+                body:   (r.body || '').slice(0, 3000),
+                at:     r.submitted_at,
+              }));
+
+            const payload = {
+              pr_number:        prNumber,
+              pr_title:         '${{ steps.pr_ctx.outputs.pr_title }}',
+              thread_comments:  threadComments,
+              line_comments:    lineComments,
+              review_summaries: reviewSummaries,
+              // Human-only counts (bots excluded) — what the agent must address
+              human_thread:  threadComments.filter(c => !c.bot).length,
+              human_line:    lineComments.filter(c => !c.bot).length,
+              human_reviews: reviewSummaries.filter(r => !r.bot).length,
+            };
+
+            fs.mkdirSync('/tmp/review', { recursive: true });
+            fs.writeFileSync('/tmp/review/context.json', JSON.stringify(payload, null, 2));
+
+            const total = payload.human_thread + payload.human_line + payload.human_reviews;
+            core.setOutput('total_human_items', String(total));
+            core.notice(`Context: ${payload.human_thread} thread, ${payload.human_line} line, ${payload.human_reviews} review comments`);
+
+      # ── 4. Fetch PR diff ───────────────────────────────────────────────────
+      - name: Fetch PR diff
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            try {
+              const diff = await github.rest.pulls.get({
+                owner:       context.repo.owner,
+                repo:        context.repo.repo,
+                pull_number: parseInt('${{ steps.pr_ctx.outputs.pr_number }}'),
+                mediaType:   { format: 'diff' },
+              });
+              fs.writeFileSync('/tmp/review/pr.diff', String(diff.data).slice(0, 40000));
+            } catch (e) {
+              fs.writeFileSync('/tmp/review/pr.diff', '(diff unavailable)');
+            }
+
+      # ── 5. Checkout the PR branch ──────────────────────────────────────────
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref:                 ${{ steps.pr_ctx.outputs.head_ref }}
+          fetch-depth:         0
+          persist-credentials: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt 2>/dev/null || true
+          pip install ruff pytest-json-report
+
+      # ── 6. Run the pr-responder agent ─────────────────────────────────────
+      - name: Run pr-responder agent
+        id: responder
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          model: openrouter/anthropic/claude-sonnet-4.6
+          agent: pr-responder
+          share: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are responding to a /review command on a pull request generated by
+            an automated AI pipeline. Address all human feedback in this PR.
+
+            PR: #${{ steps.pr_ctx.outputs.pr_number }} — ${{ steps.pr_ctx.outputs.pr_title }}
+            BRANCH: ${{ steps.pr_ctx.outputs.head_ref }}
+            TRIGGERED BY: @${{ steps.auth.outputs.actor }}
+
+            ── FULL PR CONTEXT (thread + line comments + review summaries) ──
+            $(cat /tmp/review/context.json)
+
+            ── WHAT THE PIPELINE CHANGED (PR diff) ──
+            $(cat /tmp/review/pr.diff)
+
+            Instructions:
+            1. Read ALL of the above — understand the full discussion before touching anything
+            2. Identify every human comment that requires a code change or a response
+            3. For each actionable comment: read the relevant file in full, then make the change
+            4. After all changes, verify:
+               python -m pytest tests/ -x -q --tb=short 2>&1 | head -80
+               ruff check . 2>&1 | head -30
+            5. Fix any regressions your changes introduced
+            6. Write /tmp/review/response-summary.txt with:
+               - One bullet per comment addressed: what was asked, what you did
+               - One bullet per comment not acted on: what was asked, why you didn't change it
+               - Final line: test and lint status
+            7. Do NOT commit — the workflow handles that
+
+      # ── 7. Commit and push ─────────────────────────────────────────────────
+      - name: Commit and push
+        id: commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No file changes — feedback was addressed in the summary comment"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            git add -A
+            git commit \
+              -m "ai-pipeline: address review feedback (#${{ steps.pr_ctx.outputs.pr_number }})" \
+              -m "Triggered by: @${{ steps.auth.outputs.actor }} via /review" \
+              -m "Run: ${{ github.run_id }}"
+            git push origin "${{ steps.pr_ctx.outputs.head_ref }}"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 8. Re-validate ─────────────────────────────────────────────────────
+      - name: Re-validate
+        id: validate
+        continue-on-error: true
+        run: |
+          SRC=$(find . -maxdepth 2 -name "__init__.py" \
+            ! -path "./tests/*" ! -path "./.git/*" ! -path "./build/*" \
+            | head -1 | xargs -I{} dirname {} | sed 's|^\./||')
+          [ -z "$SRC" ] && SRC="."
+
+          ruff check "$SRC/" --output-format=json \
+            --output-file=/tmp/review/lint.json 2>/dev/null || true
+
+          python -m pytest --cov="$SRC" tests/ \
+            --tb=short --json-report \
+            --json-report-file=/tmp/review/pytest.json \
+            -q 2>&1 | tee /tmp/review/pytest.txt || true
+
+          python3 - <<'EOF'
+          import json, os
+          try:
+              r = json.load(open('/tmp/review/pytest.json'))
+              p = r['summary'].get('passed', 0)
+              f = r['summary'].get('failed', 0) + r['summary'].get('error', 0)
+          except:
+              p, f = 0, 1
+          try:
+              lint = len(json.load(open('/tmp/review/lint.json')))
+          except:
+              lint = 0
+          ok = f == 0 and lint == 0
+          out = os.environ['GITHUB_OUTPUT']
+          with open(out, 'a') as fh:
+              fh.write(f"passed={str(ok).lower()}\n")
+              fh.write(f"test_passed={p}\n")
+              fh.write(f"test_failed={f}\n")
+              fh.write(f"lint_issues={lint}\n")
+          print(f"Validation: passed={ok} tests={p}/{p+f} lint={lint}")
+          EOF
+
+      # ── 9. Post summary comment ────────────────────────────────────────────
+      - name: Post summary comment
+        uses: actions/github-script@v7
+        env:
+          HAS_CHANGES: ${{ steps.commit.outputs.has_changes }}
+          VAL_PASSED:  ${{ steps.validate.outputs.passed }}
+          TEST_OK:     ${{ steps.validate.outputs.test_passed }}
+          TEST_FAIL:   ${{ steps.validate.outputs.test_failed }}
+          LINT:        ${{ steps.validate.outputs.lint_issues }}
+          RUN_URL:     ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ACTOR:       ${{ steps.auth.outputs.actor }}
+        with:
+          script: |
+            const fs         = require('fs');
+            const hasChanges = process.env.HAS_CHANGES === 'true';
+            const valPassed  = process.env.VAL_PASSED  === 'true';
+            const testOk     = parseInt(process.env.TEST_OK   || '0');
+            const testFail   = parseInt(process.env.TEST_FAIL  || '0');
+            const lint       = parseInt(process.env.LINT       || '0');
+
+            let summary = '_No summary written._';
+            try { summary = fs.readFileSync('/tmp/review/response-summary.txt', 'utf8').slice(0, 3000); }
+            catch (_) {}
+
+            const valLine = valPassed
+              ? `✅ Tests passing (${testOk} passed), lint clean`
+              : `⚠️ ${testFail} test failure(s), ${lint} lint issue(s)`;
+
+            const lines = [
+              `### AI Pipeline — Review Response`,
+              ``,
+              `> Triggered by @${process.env.ACTOR} via \`/review\``,
+              ``,
+              hasChanges
+                ? `Code changes committed and pushed to this branch.`
+                : `No file changes required — all feedback addressed below.`,
+              ``,
+              `**Validation:** ${valLine}`,
+              ``,
+              `**What was done:**`,
+              summary,
+              ``,
+              `[View run](${process.env.RUN_URL})`,
+            ];
+
+            await github.rest.issues.createComment({
+              owner:        context.repo.owner,
+              repo:         context.repo.repo,
+              issue_number: parseInt('${{ steps.pr_ctx.outputs.pr_number }}'),
+              body:         lines.join('\n'),
+            });
