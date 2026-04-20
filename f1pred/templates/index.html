@@ -649,8 +649,9 @@
                                 <input id="login-password" type="password" x-model="authPassword" required
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>
-                            <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
-                                Login
+                            <button type="submit" :disabled="authLoading" class="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white py-2 px-4 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex justify-center items-center">
+                                <span x-show="!authLoading">Login</span>
+                                <span x-show="authLoading" x-cloak><i class="fas fa-circle-notch fa-spin mr-2"></i>Logging in...</span>
                             </button>
                         </form>
                     </div>
@@ -727,8 +728,9 @@
                             </div>
 
                             <div class="flex items-center space-x-4 pt-4 border-t border-gray-700">
-                                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
-                                    Save Settings
+                                <button type="submit" :disabled="settingsSaving" class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2 px-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex justify-center items-center">
+                                    <span x-show="!settingsSaving">Save Settings</span>
+                                    <span x-show="settingsSaving" x-cloak><i class="fas fa-circle-notch fa-spin mr-2"></i>Saving...</span>
                                 </button>
                                 <span x-show="settingsSaved" x-transition.opacity class="text-sm text-green-400">Settings saved successfully!</span>
                             </div>
@@ -776,12 +778,14 @@
                 authUsername: '',
                 authPassword: '',
                 authError: '',
+                authLoading: false,
                 settings: {
                     discord_webhook_url: '',
                     llm_server_url: '',
                     llm_api_key: ''
                 },
                 settingsSaved: false,
+                settingsSaving: false,
                 passChange: {
                     current: '',
                     new: ''
@@ -807,6 +811,7 @@
                 // --- Auth and Settings Methods ---
                 async login() {
                     this.authError = '';
+                    this.authLoading = true;
                     try {
                         const formData = new URLSearchParams();
                         formData.append('username', this.authUsername);
@@ -833,6 +838,8 @@
                     } catch (e) {
                         console.error("Login error", e);
                         this.authError = 'Login failed';
+                    } finally {
+                        this.authLoading = false;
                     }
                 },
                 logout() {
@@ -865,6 +872,7 @@
                     const token = localStorage.getItem('f1pred_token');
                     if (!token) return;
 
+                    this.settingsSaving = true;
                     const payload = Object.entries(this.settings).map(([k, v]) => ({ key: k, value: v }));
                     try {
                         const res = await fetch('/api/settings', {
@@ -884,6 +892,8 @@
                         }
                     } catch (e) {
                         console.error("Error saving settings", e);
+                    } finally {
+                        this.settingsSaving = false;
                     }
                 },
                 async testWebhook() {
