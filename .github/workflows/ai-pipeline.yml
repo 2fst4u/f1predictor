@@ -36,12 +36,14 @@ jobs:
     name: "Gate"
     runs-on: ubuntu-latest
 
-    # Only fire when:
-    #   - the comment begins with /develop (space or newline after — not a substring match)
-    #   - not a review comment on an ai-pipeline/* branch (handled by ai-pr-review.yml)
+    # Trigger when the comment contains /develop as a command token.
+    # Strict parsing (no substring match, no accidental trigger) happens inside
+    # the github-script step which has full JS string handling including real \n.
+    # The outer if: uses contains() because GitHub Actions expressions cannot
+    # represent a literal newline in startsWith() — \n is not an escape sequence
+    # in expression strings.
     if: |
-      (startsWith(github.event.comment.body, '/develop ') ||
-       startsWith(github.event.comment.body, '/develop\n')) &&
+      contains(github.event.comment.body, '/develop') &&
       !(github.event_name == 'pull_request_review_comment' &&
         startsWith(github.event.pull_request.head.ref, 'ai-pipeline/'))
 
@@ -148,17 +150,25 @@ jobs:
             }));
 
             // ── Derive task ────────────────────────────────────────────────
-            // Normalise line endings then strip the /develop command token
+            // Normalise line endings, then verify the comment starts with /develop.
+            // The outer if: uses contains() (GitHub Actions can't match real \n
+            // in startsWith), so we guard here against mid-comment /develop mentions.
             const commentBody = context.payload.comment.body
               .replace(/\r\n/g, '\n')
               .trim();
-            const afterCommand = commentBody
-              .replace(/^\/develop\s*/i, '')
-              .trim();
 
-            // If the user typed something after /develop, use that as the task.
-            // Otherwise fall back to the issue title + body so that commenting
-            // just "/develop" on a fully-described issue works naturally.
+            if (!/^\/develop(\s|$)/i.test(commentBody)) {
+              // /develop appeared somewhere in the comment but not at the start — ignore
+              core.notice('/develop not at start of comment — skipping');
+              return;
+            }
+
+            // Everything after "/develop" and any following whitespace is the inline task.
+            const afterCommand = commentBody.replace(/^\/develop\s*/i, '').trim();
+
+            // Task resolution:
+            //   1. Inline text after /develop          → explicit task
+            //   2. Issue/PR title + body               → implicit: /develop alone works
             let task = '';
             if (afterCommand) {
               task = afterCommand;
