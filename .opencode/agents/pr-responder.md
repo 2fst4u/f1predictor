@@ -63,11 +63,9 @@ comments — they are pipeline infrastructure, not human feedback.
 1. Parse the context JSON — identify every human, non-bot comment
 2. Read the files relevant to each comment fully before editing
 3. Make targeted, minimal changes
-4. Verify:
-   ```
-   python -m pytest tests/ -x -q --tb=short 2>&1 | head -80
-   ruff check . 2>&1 | head -30
-   ```
+4. Verify using the repository's existing validation commands when you can identify them.
+   If the project clearly uses Python, `pytest` and `ruff` are good defaults. Otherwise,
+   prefer the validation commands already present in the repo.
 5. Fix any regressions your changes introduced
 6. Write `/tmp/review/response-summary.txt`:
 
@@ -80,7 +78,26 @@ Not changed:
 - [review] @username: <what was asked> → <why you didn't change it>
 
 Validation: <tests passing / N failures, lint clean / N issues>
+
+Replies:
+{
+  "line_replies": [
+    {"comment_id": 123, "body": "Addressed by adding a null check and updating the tests."}
+  ],
+  "thread_comment": "### AI Pipeline — Review Response\n\n..."
+}
 ```
+
+The `Replies` JSON is consumed by the workflow to:
+- post inline replies to specific review comments
+- resolve review threads when code changes were made
+- post one PR-level summary comment
+
+Rules for `Replies`:
+- `comment_id` must refer to a line-level review comment from the provided context JSON
+- `body` should be concise and specific about what changed
+- `thread_comment` should be a complete markdown comment suitable for posting on the PR
+- If there are no inline replies, use `"line_replies": []`
 
 ## What not to do
 

@@ -6,16 +6,15 @@ name: "AI Pipeline"
 # Trigger:   Comment "/develop <task>" on any issue or PR
 # Access:    Write/admin collaborators only (silent reject otherwise)
 #
-# Stage │ Model                          │ Provider   │ Purpose
-# ──────┼────────────────────────────────┼────────────┼──────────────────────
-#   1   │ gemini-2.5-flash-lite          │ Google     │ Classify + route
-#   2   │ gemini-2.5-pro                 │ Google     │ Task decomposition
-#   3   │ gemini-2.5-flash               │ Google     │ Implement (default)
-#   3↑  │ claude-opus-4.7                │ Anthropic  │ Implement (escalated)
-#   4   │ gpt-4.1                        │ OpenAI     │ Review + aggregate
-#   5   │ (none)                         │ —          │ ruff + pytest
-#   6   │ o4-mini                        │ OpenAI     │ Fix failures
-#   7   │ (none)                         │ —          │ Summary + PR
+# Stage │ Purpose
+# ──────┼────────────────────────────────
+#   1   │ Classify + route
+#   2   │ Task decomposition
+#   3   │ Implement
+#   4   │ Review + aggregate
+#   5   │ Validate with repository CI commands
+#   6   │ Fix failures
+#   7   │ Summary + PR
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -38,12 +37,11 @@ jobs:
     runs-on: ubuntu-latest
 
     # Only fire when:
-    #   - comment contains /develop
-    #   - comment does not also contain /review (avoids double-trigger)
+    #   - the comment begins with /develop as a standalone slash command
+    #   - the comment does not also begin with /review
     #   - not a review comment on an ai-pipeline/* branch (handled by ai-pr-review.yml)
     if: |
-      contains(github.event.comment.body, '/develop') &&
-      !contains(github.event.comment.body, '/review') &&
+      startsWith(github.event.comment.body, '/develop ') &&
       !(github.event_name == 'pull_request_review_comment' &&
         startsWith(github.event.pull_request.head.ref, 'ai-pipeline/'))
 
@@ -185,7 +183,6 @@ jobs:
 
   # ───────────────────────────────────────────────────────────────────────────
   # STAGE 1 — CLASSIFY
-  # Model: google/gemini-2.5-flash-lite   ~$0.10/$0.40 per M tokens
   # Agent: classifier  (.opencode/agents/classifier.md)
   # Output artifact: classification.json
   # ───────────────────────────────────────────────────────────────────────────
@@ -282,7 +279,6 @@ jobs:
 
   # ───────────────────────────────────────────────────────────────────────────
   # STAGE 2 — PLAN
-  # Model: google/gemini-2.5-pro   ~$1.25/$10.00 per M tokens
   # Agent: planner  (.opencode/agents/planner.md)
   # Output artifact: plan.json
   # ───────────────────────────────────────────────────────────────────────────
@@ -387,8 +383,6 @@ jobs:
 
   # ───────────────────────────────────────────────────────────────────────────
   # STAGE 3 — WORKER AGENTS (parallel matrix, up to 4)
-  # Model (default):   google/gemini-2.5-flash   ~$0.30/$2.50 per M tokens
-  # Model (escalated): anthropic/claude-opus-4.7  ~$5.00/$25.00 per M tokens
   # Agent: worker-{domain}  (.opencode/agents/worker-*.md)
   # Output artifacts: patch-{id}.diff per worker
   # ───────────────────────────────────────────────────────────────────────────
@@ -509,10 +503,7 @@ jobs:
 
   # ───────────────────────────────────────────────────────────────────────────
   # STAGE 4 — AGGREGATE + REVIEW
-  # Model: openai/gpt-4.1   ~$2.00/$8.00 per M tokens
   # Agent: aggregator  (.opencode/agents/aggregator.md)
-  # Deliberately different provider (OpenAI) from workers (Google/Anthropic)
-  # to catch different classes of issues.
   # Output artifact: aggregated-patch.diff + review.json
   # ───────────────────────────────────────────────────────────────────────────
   aggregate:
@@ -657,17 +648,58 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
+      - name: Detect repository validation commands
+        id: detect
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import json, os, pathlib
+
+          root = pathlib.Path('.')
+
+          def exists(name: str) -> bool:
+              return (root / name).exists()
+
+          has_python = any(root.glob('**/*.py')) and (exists('pyproject.toml') or exists('requirements.txt') or exists('pytest.ini'))
+          has_js = exists('package.json')
+          tests_dir = exists('tests') or exists('test')
+
+          setup = []
+          lint = []
+          tests = []
+
+          if has_python:
+              setup.append('python3 -m pip install --upgrade pip')
+              if exists('requirements.txt'):
+                  setup.append('pip install -r requirements.txt')
+              setup.append('pip install ruff pytest pytest-json-report pytest-cov')
+              lint.append('ruff check . --output-format=json --output-file=/tmp/pipeline/lint.json || true')
+              if tests_dir:
+                  tests.append('python3 -m pytest tests/ --tb=short --json-report --json-report-file=/tmp/pipeline/pytest.json -q 2>&1 | tee /tmp/pipeline/pytest.txt || true')
+          elif has_js:
+              setup.append('npm install')
+              lint.append('npm run lint -- --json > /tmp/pipeline/lint.json 2>/dev/null || true')
+              tests.append('npm test -- --json > /tmp/pipeline/pytest.txt 2>&1 || true')
+
+          data = {
+              'has_python': has_python,
+              'setup': ' && '.join(setup) if setup else 'true',
+              'lint': lint[0] if lint else 'printf "[]" > /tmp/pipeline/lint.json',
+              'tests': tests[0] if tests else 'printf "{}" > /tmp/pipeline/pytest.json && printf "No standard test command detected\n" > /tmp/pipeline/pytest.txt',
+          }
+
+          with open('/tmp/pipeline/detect.json', 'w') as f:
+              json.dump(data, f)
+
+          out = os.environ['GITHUB_OUTPUT']
+          with open(out, 'a') as f:
+              for key, value in data.items():
+                  f.write(f"{key}={str(value).lower() if isinstance(value, bool) else value}\n")
+          EOF
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install ruff pytest-json-report
+        shell: bash
+        run: ${{ steps.detect.outputs.setup }}
 
       - name: Download aggregated diff
         uses: actions/download-artifact@v4
@@ -685,24 +717,12 @@ jobs:
             echo "No diff to apply — validating base code"
           fi
 
-      - name: Detect source directory
-        id: srcdir
-        run: |
-          # Heuristic: find the top-level Python package (directory with __init__.py
-          # that is not 'tests'). Falls back to '.' if none found.
-          SRC=$(find . -maxdepth 2 -name "__init__.py" \
-            ! -path "./tests/*" ! -path "./.git/*" ! -path "./build/*" \
-            | head -1 | xargs -I{} dirname {} | sed 's|^\./||')
-          if [ -z "$SRC" ]; then SRC="."; fi
-          echo "src=$SRC" >> "$GITHUB_OUTPUT"
-          echo "Source directory: $SRC"
-
       - name: Lint with ruff
         id: lint
         continue-on-error: true
+        shell: bash
         run: |
-          ruff check "${{ steps.srcdir.outputs.src }}/" --output-format=json \
-            --output-file=/tmp/pipeline/lint.json 2>/dev/null || true
+          ${{ steps.detect.outputs.lint }}
           ISSUES=$(python3 -c "
           import json
           try:
@@ -717,12 +737,9 @@ jobs:
       - name: Run tests
         id: tests
         continue-on-error: true
+        shell: bash
         run: |
-          python -m pytest --cov="${{ steps.srcdir.outputs.src }}" tests/ \
-            --tb=short \
-            --json-report \
-            --json-report-file=/tmp/pipeline/pytest.json \
-            -q 2>&1 | tee /tmp/pipeline/pytest.txt
+          ${{ steps.detect.outputs.tests }}
           echo "test_exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Build validation report
@@ -736,8 +753,9 @@ jobs:
           failures = []
           try:
               r = json.load(open('/tmp/pipeline/pytest.json'))
-              passed = r['summary'].get('passed', 0)
-              failed = r['summary'].get('failed', 0) + r['summary'].get('error', 0)
+              summary = r.get('summary', {}) if isinstance(r, dict) else {}
+              passed = summary.get('passed', 0)
+              failed = summary.get('failed', 0) + summary.get('error', 0)
               for t in r.get('tests', []):
                   if t['outcome'] in ('failed', 'error'):
                       failures.append({
@@ -795,9 +813,7 @@ jobs:
 
   # ───────────────────────────────────────────────────────────────────────────
   # STAGE 6 — FIX (feedback loop — only runs on validation failure)
-  # Model: openai/o4-mini   ~$1.10/$4.40 per M tokens
   # Agent: fixer  (.opencode/agents/fixer.md)
-  # Reasoning model — strong at analysing test failures
   # ───────────────────────────────────────────────────────────────────────────
   fix:
     name: "6 · Fix"
@@ -819,17 +835,49 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
+      - name: Detect repository validation commands
+        id: detect
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import json, os, pathlib
+
+          root = pathlib.Path('.')
+
+          def exists(name: str) -> bool:
+              return (root / name).exists()
+
+          has_python = any(root.glob('**/*.py')) and (exists('pyproject.toml') or exists('requirements.txt') or exists('pytest.ini'))
+          tests_dir = exists('tests') or exists('test')
+
+          setup = []
+          lint = []
+          tests = []
+
+          if has_python:
+              setup.append('python3 -m pip install --upgrade pip')
+              if exists('requirements.txt'):
+                  setup.append('pip install -r requirements.txt')
+              setup.append('pip install ruff pytest pytest-json-report pytest-cov')
+              lint.append('ruff check . --output-format=json --output-file=/tmp/pipeline/lint2.json || true')
+              if tests_dir:
+                  tests.append('python3 -m pytest tests/ --tb=short --json-report --json-report-file=/tmp/pipeline/pytest2.json -q 2>&1 | tee /tmp/pipeline/pytest2.txt || true')
+
+          data = {
+              'setup': ' && '.join(setup) if setup else 'true',
+              'lint': lint[0] if lint else 'printf "[]" > /tmp/pipeline/lint2.json',
+              'tests': tests[0] if tests else 'printf "{}" > /tmp/pipeline/pytest2.json && printf "No standard test command detected\n" > /tmp/pipeline/pytest2.txt',
+          }
+
+          out = os.environ['GITHUB_OUTPUT']
+          with open(out, 'a') as f:
+              for key, value in data.items():
+                  f.write(f"{key}={value}\n")
+          EOF
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install ruff pytest-json-report
+        shell: bash
+        run: ${{ steps.detect.outputs.setup }}
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -843,16 +891,6 @@ jobs:
           if [ -f /tmp/pipeline/aggregated.diff ] && [ -s /tmp/pipeline/aggregated.diff ]; then
             git apply --whitespace=fix /tmp/pipeline/aggregated.diff
           fi
-
-      - name: Detect source directory
-        id: srcdir
-        run: |
-          SRC=$(find . -maxdepth 2 -name "__init__.py" \
-            ! -path "./tests/*" ! -path "./.git/*" ! -path "./build/*" \
-            | head -1 | xargs -I{} dirname {} | sed 's|^\./||')
-          if [ -z "$SRC" ]; then SRC="."; fi
-          echo "src=$SRC" >> "$GITHUB_OUTPUT"
-          echo "Source directory: $SRC"
 
       - name: Run fixer agent
         uses: anomalyco/opencode/github@latest
@@ -892,21 +930,17 @@ jobs:
       - name: Re-run validation after fix
         id: revalidate
         continue-on-error: true
+        shell: bash
         run: |
-          ruff check "${{ steps.srcdir.outputs.src }}/" --output-format=json \
-            --output-file=/tmp/pipeline/lint2.json 2>/dev/null || true
-
-          python -m pytest --cov="${{ steps.srcdir.outputs.src }}" tests/ \
-            --tb=short \
-            --json-report \
-            --json-report-file=/tmp/pipeline/pytest2.json \
-            -q 2>&1 | tee /tmp/pipeline/pytest2.txt
+          ${{ steps.detect.outputs.lint }}
+          ${{ steps.detect.outputs.tests }}
 
           python3 - <<'EOF'
           import json, os
           try:
               r = json.load(open('/tmp/pipeline/pytest2.json'))
-              failed = r['summary'].get('failed', 0) + r['summary'].get('error', 0)
+              summary = r.get('summary', {}) if isinstance(r, dict) else {}
+              failed = summary.get('failed', 0) + summary.get('error', 0)
           except:
               failed = 1
           try:
@@ -1070,7 +1104,6 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # Use cheapest model — just formatting a comment, not reasoning
           model: openrouter/google/gemini-2.5-flash-lite
           share: true
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -1100,7 +1133,7 @@ jobs:
             Format:
             - Lead with a one-line status (✅ complete / ⚠️ partial / ❌ failed)
             - Short paragraph on what was done
-            - Pipeline stage table with model/provider used per stage
+            - Pipeline stage table with stage outcomes only
             - Validation results
             - Link to PR (if created)
             - Link to Actions run for full logs

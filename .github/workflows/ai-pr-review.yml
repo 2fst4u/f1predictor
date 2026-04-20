@@ -12,7 +12,8 @@ name: "AI PR Review Responder"
 #   - Fetches the full PR diff so the agent sees exactly what changed
 #   - Runs OpenCode to address all feedback on the existing branch
 #   - Commits and pushes to the same PR branch — no new PR
-#   - Re-runs ruff + pytest and posts a structured reply comment
+#   - Runs repository validation commands when they can be detected
+#   - Posts targeted replies on the PR and resolves addressed review threads
 #
 # Access:   Write/admin collaborators only (silent reject otherwise)
 # Scope:    Only fires on ai-pipeline/* branches
@@ -37,12 +38,9 @@ jobs:
     name: "Respond to Review"
     runs-on: ubuntu-latest
 
-    # Only fire when:
-    #   1. Comment contains /review
-    #   2. Not also a /develop command (handled by ai-pipeline.yml)
+    # Only fire when the comment begins with /review as a standalone slash command.
     if: |
-      contains(github.event.comment.body, '/review') &&
-      !contains(github.event.comment.body, '/develop')
+      startsWith(github.event.comment.body, '/review')
 
     permissions:
       contents: write
@@ -236,17 +234,56 @@ jobs:
           fetch-depth:         0
           persist-credentials: true
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
+      - name: Detect repository validation commands
+        id: detect
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import json, os, pathlib
+
+          root = pathlib.Path('.')
+
+          def exists(name: str) -> bool:
+              return (root / name).exists()
+
+          has_python = any(root.glob('**/*.py')) and (exists('pyproject.toml') or exists('requirements.txt') or exists('pytest.ini'))
+          has_js = exists('package.json')
+          tests_dir = exists('tests') or exists('test')
+
+          setup = []
+          validate = []
+
+          if has_python:
+              setup.append('python3 -m pip install --upgrade pip')
+              if exists('requirements.txt'):
+                  setup.append('pip install -r requirements.txt')
+              setup.append('pip install ruff pytest pytest-json-report pytest-cov')
+              validate.append('ruff check . --output-format=json --output-file=/tmp/review/lint.json || true')
+              if tests_dir:
+                  validate.append('python3 -m pytest tests/ --tb=short --json-report --json-report-file=/tmp/review/pytest.json -q 2>&1 | tee /tmp/review/pytest.txt || true')
+              else:
+                  validate.append('printf "{}" > /tmp/review/pytest.json && printf "No tests directory detected\\n" > /tmp/review/pytest.txt')
+          elif has_js:
+              setup.append('npm install')
+              validate.append('printf "[]" > /tmp/review/lint.json')
+              validate.append('printf "{}" > /tmp/review/pytest.json && printf "No generic JS validation configured\\n" > /tmp/review/pytest.txt')
+          else:
+              validate.append('printf "[]" > /tmp/review/lint.json')
+              validate.append('printf "{}" > /tmp/review/pytest.json && printf "No standard validation command detected\\n" > /tmp/review/pytest.txt')
+
+          data = {
+              'setup': ' && '.join(setup) if setup else 'true',
+              'validate': ' && '.join(validate),
+          }
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              for key, value in data.items():
+                  f.write(f"{key}={value}\\n")
+          EOF
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt 2>/dev/null || true
-          pip install ruff pytest-json-report
+        shell: bash
+        run: ${{ steps.detect.outputs.setup }}
 
       # ── 6. Run the pr-responder agent ─────────────────────────────────────
       - name: Run pr-responder agent
@@ -278,12 +315,18 @@ jobs:
             2. Identify every human comment that requires a code change or a response
             3. For each actionable comment: read the relevant file in full, then make the change
             4. After all changes, verify:
-               python -m pytest tests/ -x -q --tb=short 2>&1 | head -80
-               ruff check . 2>&1 | head -30
+               use the repository's existing validation commands when you can identify them
             5. Fix any regressions your changes introduced
             6. Write /tmp/review/response-summary.txt with:
                - One bullet per comment addressed: what was asked, what you did
                - One bullet per comment not acted on: what was asked, why you didn't change it
+               - A section named "Replies" containing JSON with this schema:
+                 {
+                   "line_replies": [
+                     {"comment_id": 123, "body": "Short reply describing what changed."}
+                   ],
+                   "thread_comment": "A concise PR-level summary comment."
+                 }
                - Final line: test and lint status
             7. Do NOT commit — the workflow handles that
 
@@ -311,26 +354,17 @@ jobs:
       - name: Re-validate
         id: validate
         continue-on-error: true
+        shell: bash
         run: |
-          SRC=$(find . -maxdepth 2 -name "__init__.py" \
-            ! -path "./tests/*" ! -path "./.git/*" ! -path "./build/*" \
-            | head -1 | xargs -I{} dirname {} | sed 's|^\./||')
-          [ -z "$SRC" ] && SRC="."
-
-          ruff check "$SRC/" --output-format=json \
-            --output-file=/tmp/review/lint.json 2>/dev/null || true
-
-          python -m pytest --cov="$SRC" tests/ \
-            --tb=short --json-report \
-            --json-report-file=/tmp/review/pytest.json \
-            -q 2>&1 | tee /tmp/review/pytest.txt || true
+          ${{ steps.detect.outputs.validate }}
 
           python3 - <<'EOF'
           import json, os
           try:
               r = json.load(open('/tmp/review/pytest.json'))
-              p = r['summary'].get('passed', 0)
-              f = r['summary'].get('failed', 0) + r['summary'].get('error', 0)
+              summary = r.get('summary', {}) if isinstance(r, dict) else {}
+              p = summary.get('passed', 0)
+              f = summary.get('failed', 0) + summary.get('error', 0)
           except:
               p, f = 0, 1
           try:
@@ -348,7 +382,7 @@ jobs:
           EOF
 
       # ── 9. Post summary comment ────────────────────────────────────────────
-      - name: Post summary comment
+      - name: Post replies and resolve review threads
         uses: actions/github-script@v7
         env:
           HAS_CHANGES: ${{ steps.commit.outputs.has_changes }}
@@ -371,6 +405,13 @@ jobs:
             try { summary = fs.readFileSync('/tmp/review/response-summary.txt', 'utf8').slice(0, 3000); }
             catch (_) {}
 
+            let replies = { line_replies: [], thread_comment: '' };
+            try {
+              const text = fs.readFileSync('/tmp/review/response-summary.txt', 'utf8');
+              const match = text.match(/Replies:\s*([\s\S]*)$/);
+              if (match) replies = JSON.parse(match[1]);
+            } catch (_) {}
+
             const valLine = valPassed
               ? `✅ Tests passing (${testOk} passed), lint clean`
               : `⚠️ ${testFail} test failure(s), ${lint} lint issue(s)`;
@@ -392,9 +433,54 @@ jobs:
               `[View run](${process.env.RUN_URL})`,
             ];
 
+            for (const reply of (replies.line_replies || [])) {
+              try {
+                await github.rest.pulls.createReplyForReviewComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: parseInt('${{ steps.pr_ctx.outputs.pr_number }}'),
+                  comment_id: reply.comment_id,
+                  body: reply.body,
+                });
+              } catch (_) {}
+            }
+
+            if (hasChanges) {
+              try {
+                const query = `query($owner:String!, $repo:String!, $number:Int!) {
+                  repository(owner:$owner, name:$repo) {
+                    pullRequest(number:$number) {
+                      reviewThreads(first:100) {
+                        nodes {
+                          id
+                          isResolved
+                          comments(first:20) { nodes { databaseId } }
+                        }
+                      }
+                    }
+                  }
+                }`;
+                const resp = await github.graphql(query, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  number: parseInt('${{ steps.pr_ctx.outputs.pr_number }}'),
+                });
+                const targetIds = new Set((replies.line_replies || []).map(r => r.comment_id));
+                const threads = resp.repository.pullRequest.reviewThreads.nodes || [];
+                for (const thread of threads) {
+                  if (thread.isResolved) continue;
+                  const hasTarget = (thread.comments.nodes || []).some(c => targetIds.has(c.databaseId));
+                  if (!hasTarget) continue;
+                  try {
+                    await github.graphql(`mutation($threadId:ID!) { resolveReviewThread(input:{threadId:$threadId}) { thread { id isResolved } } }`, { threadId: thread.id });
+                  } catch (_) {}
+                }
+              } catch (_) {}
+            }
+
             await github.rest.issues.createComment({
               owner:        context.repo.owner,
               repo:         context.repo.repo,
               issue_number: parseInt('${{ steps.pr_ctx.outputs.pr_number }}'),
-              body:         lines.join('\n'),
+              body:         replies.thread_comment || lines.join('\n'),
             });
