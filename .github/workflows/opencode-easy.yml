@@ -1,18 +1,15 @@
-name: opencode
+name: opencode-easy
 
 on:
   issue_comment:
     types: [created]
   pull_request_review_comment:
     types: [created]
-  issues:
-    types: [opened]
 
 jobs:
   opencode:
     if: |
-      contains(github.event.comment.body || github.event.issue.body, '/oc') ||
-      contains(github.event.comment.body || github.event.issue.body, '/opencode')
+      contains(github.event.comment.body, '/oc-easy')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -32,5 +29,5 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: openrouter/google/gemini-2.5-flash-lite
+          model: openrouter/google/gemini-2.5-flash
           use_github_token: true
