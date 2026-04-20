@@ -18,8 +18,13 @@ name: "AI Pipeline"
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
+  # New issue created with /develop in the body
+  issues:
+    types: [opened]
+  # Comment posted on an existing issue or PR
   issue_comment:
     types: [created]
+  # Line-level review comment on a PR
   pull_request_review_comment:
     types: [created]
 
@@ -37,16 +42,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
 
-    # Trigger when the comment contains /develop as a command token.
-    # Strict parsing (no substring match, no accidental trigger) happens inside
-    # the github-script step which has full JS string handling including real \n.
-    # The outer if: uses contains() because GitHub Actions expressions cannot
-    # represent a literal newline in startsWith() — \n is not an escape sequence
-    # in expression strings.
+    # Fires on:
+    #   - issues: opened    when /develop appears in the new issue body
+    #   - issue_comment     when /develop appears in a comment
+    #   - pull_request_review_comment  same, but not on ai-pipeline/* branches
+    # Strict command parsing (anchor check, not substring) is done in JS below.
     if: |
-      contains(github.event.comment.body, '/develop') &&
-      !(github.event_name == 'pull_request_review_comment' &&
-        startsWith(github.event.pull_request.head.ref, 'ai-pipeline/'))
+      (github.event_name == 'issues' && contains(github.event.issue.body, '/develop')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/develop') &&
+        !(github.event_name == 'pull_request_review_comment' &&
+          startsWith(github.event.pull_request.head.ref, 'ai-pipeline/'))) ||
+      (github.event_name == 'pull_request_review_comment' &&
+        contains(github.event.comment.body, '/develop') &&
+        !startsWith(github.event.pull_request.head.ref, 'ai-pipeline/'))
 
     permissions:
       contents: read
@@ -68,7 +76,10 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const actor = context.payload.comment.user.login;
+            // Actor differs by event type
+            const actor = context.eventName === 'issues'
+              ? context.payload.issue.user.login
+              : context.payload.comment.user.login;
             let level;
             try {
               const resp = await github.rest.repos.getCollaboratorPermissionLevel({
@@ -78,7 +89,6 @@ jobs:
               });
               level = resp.data.permission; // admin | write | read | none
             } catch (e) {
-              // User is not a collaborator at all
               level = 'none';
             }
             const allowed = ['admin', 'write'].includes(level);
@@ -86,6 +96,7 @@ jobs:
               core.notice(`@${actor} has permission '${level}' — /develop ignored`);
             }
             core.setOutput('allowed', String(allowed));
+            core.setOutput('actor', actor);
             return allowed;
 
       - name: Abort if not authorised
@@ -153,26 +164,28 @@ jobs:
               at:     c.created_at,
             }));
 
-            // ── Derive task ────────────────────────────────────────────────
-            // Normalise line endings, then verify the comment starts with /develop.
-            // The outer if: uses contains() (GitHub Actions can't match real \n
-            // in startsWith), so we guard here against mid-comment /develop mentions.
-            const commentBody = context.payload.comment.body
-              .replace(/\r\n/g, '\n')
-              .trim();
+            // ── Derive trigger body and actor (differs by event type) ────────
+            // issues: opened  → body is the issue body; actor is the issue author
+            // issue_comment   → body is the comment; actor is the commenter
+            // pull_request_review_comment → same as issue_comment
+            const isIssueOpen  = context.eventName === 'issues';
+            const triggerBody  = isIssueOpen
+              ? (context.payload.issue.body || '').replace(/\r\n/g, '\n').trim()
+              : (context.payload.comment.body || '').replace(/\r\n/g, '\n').trim();
+            const triggerActor = isIssueOpen
+              ? context.payload.issue.user.login
+              : context.payload.comment.user.login;
 
-            if (!/^\/develop(\s|$)/i.test(commentBody)) {
-              // /develop appeared somewhere in the comment but not at the start — ignore
-              core.notice('/develop not at start of comment — skipping');
+            // ── Verify /develop is at the start of the trigger text ───────────
+            if (!/^\/develop(\s|$)/i.test(triggerBody)) {
+              core.notice('/develop not at start of trigger body — skipping');
               return;
             }
 
-            // Everything after "/develop" and any following whitespace is the inline task.
-            const afterCommand = commentBody.replace(/^\/develop\s*/i, '').trim();
-
-            // Task resolution:
-            //   1. Inline text after /develop          → explicit task
-            //   2. Issue/PR title + body               → implicit: /develop alone works
+            // ── Derive task ────────────────────────────────────────────────────
+            // Everything after "/develop" is the inline task.
+            // If nothing follows, fall back to issue title + body.
+            const afterCommand = triggerBody.replace(/^\/develop\s*/i, '').trim();
             let task = '';
             if (afterCommand) {
               task = afterCommand;
@@ -191,7 +204,7 @@ jobs:
             task = task.slice(0, 4000);
             core.notice(`Task (first 200 chars): ${task.slice(0, 200)}`);
 
-            // ── Assemble context JSON ──────────────────────────────────────
+            // ── Assemble context JSON ──────────────────────────────────────────
             const url = isPR
               ? `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${number}`
               : `https://github.com/${context.repo.owner}/${context.repo.repo}/issues/${number}`;
@@ -204,8 +217,8 @@ jobs:
               body:            issueBody.slice(0, 8000),
               comments,
               pr_diff:         diff,
-              trigger_comment: context.payload.comment.body,
-              actor:           context.payload.comment.user.login,
+              trigger_comment: triggerBody,
+              actor:           triggerActor,
             });
 
             core.setOutput('task',          task);
