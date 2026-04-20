@@ -317,7 +317,7 @@ jobs:
           model: openrouter/google/gemini-2.5-flash-lite
           agent: classifier
           share: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          use_github_token: true
           prompt: |
             You are the CLASSIFY stage of a multi-stage AI pipeline.
 
@@ -437,7 +437,7 @@ jobs:
           model: openrouter/google/gemini-2.5-pro
           agent: planner
           share: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          use_github_token: true
           prompt: |
             You are the PLAN stage of a multi-stage AI pipeline.
 
@@ -611,7 +611,7 @@ jobs:
           # adapts automatically — no agent prompts reference specific model names.
           agent: ${{ steps.task.outputs.agent }}
           share: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          use_github_token: true
           prompt: |
             You are a WORKER AGENT in a multi-stage AI pipeline.
             Your task ID is: ${{ matrix.task_id }}
@@ -748,7 +748,7 @@ jobs:
           model: openrouter/openai/gpt-4.1
           agent: aggregator
           share: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          use_github_token: true
           prompt: |
             You are the AGGREGATE & REVIEW stage of a multi-stage AI pipeline.
             Your job is to review the combined worker output critically and independently.
@@ -1181,7 +1181,7 @@ jobs:
           model: openrouter/openai/o4-mini
           agent: fixer
           share: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          use_github_token: true
           prompt: |
             You are the FIX stage of a multi-stage AI pipeline.
             Previous AI stages made code changes, but validation FAILED. Your job is to fix all failures.
