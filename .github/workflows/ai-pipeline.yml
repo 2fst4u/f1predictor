@@ -51,7 +51,7 @@ jobs:
       pull-requests: read
 
     outputs:
-      task:         ${{ steps.extract.outputs.task }}
+      task:         ${{ steps.context.outputs.task }}
       context_json: ${{ steps.context.outputs.context_json }}
       is_pr:        ${{ steps.context.outputs.is_pr }}
       issue_number: ${{ steps.context.outputs.issue_number }}
@@ -90,24 +90,12 @@ jobs:
           echo "Unauthorised user — stopping pipeline."
           exit 1
 
-      # ── 2. Extract task text (everything after /develop) ──────────────────
-      - name: Extract task
-        id: extract
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const body  = context.payload.comment.body.trim();
-            const match = body.match(/^\/develop(?:\s+([\s\S]+))?$/);
-            if (!match || !match[1] || !match[1].trim()) {
-              core.setFailed('/develop requires a task description, e.g. /develop add retry logic to the data fetcher');
-              return;
-            }
-            const task = match[1].trim().slice(0, 4000); // hard cap
-            core.setOutput('task', task);
-            core.notice(`Task: ${task}`);
-
-      # ── 3. Assemble full context: issue/PR body + full comment thread ──────
-      - name: Assemble context
+      # ── 2 + 3. Extract task and assemble full context in one step ────────────
+      # Task resolution order:
+      #   1. Text after /develop in the comment  (explicit override)
+      #   2. Issue/PR title + body               (implicit — just comment /develop)
+      # The full thread (all previous comments) is always included as context.
+      - name: Extract task and assemble context
         id: context
         uses: actions/github-script@v7
         with:
@@ -117,23 +105,22 @@ jobs:
             const number = context.payload.issue?.number ||
                            context.payload.pull_request?.number;
 
-            // Fetch issue / PR body
-            let title = '', body = '', diff = '';
+            // ── Fetch issue / PR body ──────────────────────────────────────
+            let title = '', issueBody = '', diff = '';
             if (isPR) {
               const pr = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo:  context.repo.repo,
+                owner:       context.repo.owner,
+                repo:        context.repo.repo,
                 pull_number: number,
               });
-              title = pr.data.title;
-              body  = pr.data.body || '';
-              // Fetch diff (capped at 20 KB to avoid blowing context)
+              title     = pr.data.title;
+              issueBody = pr.data.body || '';
               try {
                 const diffResp = await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo:  context.repo.repo,
+                  owner:       context.repo.owner,
+                  repo:        context.repo.repo,
                   pull_number: number,
-                  mediaType: { format: 'diff' },
+                  mediaType:   { format: 'diff' },
                 });
                 diff = String(diffResp.data).slice(0, 20000);
               } catch (_) {}
@@ -143,11 +130,11 @@ jobs:
                 repo:         context.repo.repo,
                 issue_number: number,
               });
-              title = issue.data.title;
-              body  = issue.data.body || '';
+              title     = issue.data.title;
+              issueBody = issue.data.body || '';
             }
 
-            // Fetch all comments (up to 100)
+            // ── Fetch all comments (up to 100) ─────────────────────────────
             const commentsResp = await github.rest.issues.listComments({
               owner:        context.repo.owner,
               repo:         context.repo.repo,
@@ -160,22 +147,54 @@ jobs:
               at:     c.created_at,
             }));
 
-            const ctx = JSON.stringify({
-              repo:     `${context.repo.owner}/${context.repo.repo}`,
-              number,
-              is_pr:    isPR,
-              title,
-              body:     body.slice(0, 8000),
-              comments,
-              pr_diff:  diff,
-              trigger_comment: context.payload.comment.body,
-              actor:    context.payload.comment.user.login,
-            });
+            // ── Derive task ────────────────────────────────────────────────
+            // Normalise line endings then strip the /develop command token
+            const commentBody = context.payload.comment.body
+              .replace(/\r\n/g, '\n')
+              .trim();
+            const afterCommand = commentBody
+              .replace(/^\/develop\s*/i, '')
+              .trim();
 
+            // If the user typed something after /develop, use that as the task.
+            // Otherwise fall back to the issue title + body so that commenting
+            // just "/develop" on a fully-described issue works naturally.
+            let task = '';
+            if (afterCommand) {
+              task = afterCommand;
+            } else if (title || issueBody) {
+              task = [title, issueBody].filter(Boolean).join('\n\n').trim();
+            }
+
+            if (!task) {
+              core.setFailed(
+                'No task found. Either add a description after /develop, ' +
+                'or make sure the issue has a title and body.'
+              );
+              return;
+            }
+
+            task = task.slice(0, 4000);
+            core.notice(`Task (first 200 chars): ${task.slice(0, 200)}`);
+
+            // ── Assemble context JSON ──────────────────────────────────────
             const url = isPR
               ? `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${number}`
               : `https://github.com/${context.repo.owner}/${context.repo.repo}/issues/${number}`;
 
+            const ctx = JSON.stringify({
+              repo:            `${context.repo.owner}/${context.repo.repo}`,
+              number,
+              is_pr:           isPR,
+              title,
+              body:            issueBody.slice(0, 8000),
+              comments,
+              pr_diff:         diff,
+              trigger_comment: context.payload.comment.body,
+              actor:           context.payload.comment.user.login,
+            });
+
+            core.setOutput('task',          task);
             core.setOutput('context_json',  ctx);
             core.setOutput('is_pr',         String(isPR));
             core.setOutput('issue_number',  isPR ? '' : String(number));
