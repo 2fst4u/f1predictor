@@ -49,7 +49,7 @@ jobs:
 
     permissions:
       contents: read
-      issues: read
+      issues: write        # needed to post the acknowledgement comment
       pull-requests: read
 
     outputs:
