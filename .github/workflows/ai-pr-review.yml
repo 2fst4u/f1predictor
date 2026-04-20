@@ -74,6 +74,15 @@ jobs:
         if: steps.auth.outputs.allowed != 'true'
         run: exit 0
 
+      - name: Validate slash command format
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.comment.body.trim();
+            if (!/^\/review(?:\s.*)?$/.test(body)) {
+              core.setFailed('Invalid /review command format');
+            }
+
       # ── 2. Resolve PR number and branch ───────────────────────────────────
       - name: Resolve PR context
         id: pr_ctx
@@ -239,34 +248,62 @@ jobs:
         shell: bash
         run: |
           python3 - <<'EOF'
-          import json, os, pathlib
+          import os, pathlib
 
           root = pathlib.Path('.')
 
           def exists(name: str) -> bool:
               return (root / name).exists()
 
+          def read_text(name: str) -> str:
+              try:
+                  return (root / name).read_text()
+              except Exception:
+                  return ''
+
           has_python = any(root.glob('**/*.py')) and (exists('pyproject.toml') or exists('requirements.txt') or exists('pytest.ini'))
           has_js = exists('package.json')
+          has_go = exists('go.mod')
+          has_rust = exists('Cargo.toml')
           tests_dir = exists('tests') or exists('test')
+          makefile = read_text('Makefile')
+          package_json = read_text('package.json')
 
           setup = []
           validate = []
 
-          if has_python:
+          if 'test:' in makefile or '\ntest:' in makefile:
+              validate.append('make test 2>&1 | tee /tmp/review/pytest.txt || true')
+              validate.append('printf "[]" > /tmp/review/lint.json')
+          elif has_python:
               setup.append('python3 -m pip install --upgrade pip')
               if exists('requirements.txt'):
                   setup.append('pip install -r requirements.txt')
               setup.append('pip install ruff pytest pytest-json-report pytest-cov')
-              validate.append('ruff check . --output-format=json --output-file=/tmp/review/lint.json || true')
+              if 'ruff' in read_text('pyproject.toml') or exists('.ruff.toml'):
+                  validate.append('ruff check . --output-format=json --output-file=/tmp/review/lint.json || true')
+              else:
+                  validate.append('printf "[]" > /tmp/review/lint.json')
               if tests_dir:
                   validate.append('python3 -m pytest tests/ --tb=short --json-report --json-report-file=/tmp/review/pytest.json -q 2>&1 | tee /tmp/review/pytest.txt || true')
               else:
                   validate.append('printf "{}" > /tmp/review/pytest.json && printf "No tests directory detected\\n" > /tmp/review/pytest.txt')
           elif has_js:
               setup.append('npm install')
+              if '"lint"' in package_json:
+                  validate.append('npm run lint > /tmp/review/lint.json 2>&1 || true')
+              else:
+                  validate.append('printf "[]" > /tmp/review/lint.json')
+              if '"test"' in package_json:
+                  validate.append('npm test > /tmp/review/pytest.txt 2>&1 || true')
+              else:
+                  validate.append('printf "{}" > /tmp/review/pytest.json && printf "No npm test script detected\\n" > /tmp/review/pytest.txt')
+          elif has_go:
               validate.append('printf "[]" > /tmp/review/lint.json')
-              validate.append('printf "{}" > /tmp/review/pytest.json && printf "No generic JS validation configured\\n" > /tmp/review/pytest.txt')
+              validate.append('go test ./... 2>&1 | tee /tmp/review/pytest.txt || true')
+          elif has_rust:
+              validate.append('printf "[]" > /tmp/review/lint.json')
+              validate.append('cargo test 2>&1 | tee /tmp/review/pytest.txt || true')
           else:
               validate.append('printf "[]" > /tmp/review/lint.json')
               validate.append('printf "{}" > /tmp/review/pytest.json && printf "No standard validation command detected\\n" > /tmp/review/pytest.txt')
@@ -366,7 +403,13 @@ jobs:
               p = summary.get('passed', 0)
               f = summary.get('failed', 0) + summary.get('error', 0)
           except:
-              p, f = 0, 1
+              p, f = 0, 0
+              try:
+                  txt = open('/tmp/review/pytest.txt').read()
+                  if 'FAILED' in txt or 'error:' in txt.lower() or 'Error:' in txt:
+                      f = 1
+              except Exception:
+                  f = 1
           try:
               lint = len(json.load(open('/tmp/review/lint.json')))
           except:

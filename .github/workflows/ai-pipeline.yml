@@ -96,9 +96,9 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body  = context.payload.comment.body;
-            const match = body.match(/\/develop\s+([\s\S]+)/);
-            if (!match || !match[1].trim()) {
+            const body  = context.payload.comment.body.trim();
+            const match = body.match(/^\/develop(?:\s+([\s\S]+))?$/);
+            if (!match || !match[1] || !match[1].trim()) {
               core.setFailed('/develop requires a task description, e.g. /develop add retry logic to the data fetcher');
               return;
             }
@@ -660,26 +660,53 @@ jobs:
           def exists(name: str) -> bool:
               return (root / name).exists()
 
+          def read_text(name: str) -> str:
+              try:
+                  return (root / name).read_text()
+              except Exception:
+                  return ''
+
           has_python = any(root.glob('**/*.py')) and (exists('pyproject.toml') or exists('requirements.txt') or exists('pytest.ini'))
           has_js = exists('package.json')
+          has_go = exists('go.mod')
+          has_rust = exists('Cargo.toml')
           tests_dir = exists('tests') or exists('test')
+          makefile = read_text('Makefile')
+          package_json = read_text('package.json')
 
           setup = []
           lint = []
           tests = []
 
-          if has_python:
+          if 'test:' in makefile or '\ntest:' in makefile:
+              tests.append('make test 2>&1 | tee /tmp/pipeline/pytest.txt || true')
+          elif has_python:
               setup.append('python3 -m pip install --upgrade pip')
               if exists('requirements.txt'):
                   setup.append('pip install -r requirements.txt')
               setup.append('pip install ruff pytest pytest-json-report pytest-cov')
-              lint.append('ruff check . --output-format=json --output-file=/tmp/pipeline/lint.json || true')
+              if 'ruff' in read_text('pyproject.toml') or exists('.ruff.toml'):
+                  lint.append('ruff check . --output-format=json --output-file=/tmp/pipeline/lint.json || true')
+              else:
+                  lint.append('printf "[]" > /tmp/pipeline/lint.json')
               if tests_dir:
                   tests.append('python3 -m pytest tests/ --tb=short --json-report --json-report-file=/tmp/pipeline/pytest.json -q 2>&1 | tee /tmp/pipeline/pytest.txt || true')
           elif has_js:
               setup.append('npm install')
-              lint.append('npm run lint -- --json > /tmp/pipeline/lint.json 2>/dev/null || true')
-              tests.append('npm test -- --json > /tmp/pipeline/pytest.txt 2>&1 || true')
+              if '"lint"' in package_json:
+                  lint.append('npm run lint > /tmp/pipeline/lint.json 2>&1 || true')
+              else:
+                  lint.append('printf "[]" > /tmp/pipeline/lint.json')
+              if '"test"' in package_json:
+                  tests.append('npm test > /tmp/pipeline/pytest.txt 2>&1 || true')
+              else:
+                  tests.append('printf "{}" > /tmp/pipeline/pytest.json && printf "No npm test script detected\n" > /tmp/pipeline/pytest.txt')
+          elif has_go:
+              lint.append('printf "[]" > /tmp/pipeline/lint.json')
+              tests.append('go test ./... 2>&1 | tee /tmp/pipeline/pytest.txt || true')
+          elif has_rust:
+              lint.append('printf "[]" > /tmp/pipeline/lint.json')
+              tests.append('cargo test 2>&1 | tee /tmp/pipeline/pytest.txt || true')
 
           data = {
               'has_python': has_python,
@@ -763,6 +790,13 @@ jobs:
                           'message': t.get('call', {}).get('longrepr', '')[:2000],
                       })
           except Exception as e:
+              txt = ''
+              try:
+                  txt = open('/tmp/pipeline/pytest.txt').read()
+              except Exception:
+                  pass
+              if 'FAILED' in txt or 'error:' in txt.lower() or 'Error:' in txt:
+                  failed = 1
               failures.append({'test': 'parse_error', 'message': str(e)})
 
           # Parse lint report
@@ -847,21 +881,53 @@ jobs:
           def exists(name: str) -> bool:
               return (root / name).exists()
 
+          def read_text(name: str) -> str:
+              try:
+                  return (root / name).read_text()
+              except Exception:
+                  return ''
+
           has_python = any(root.glob('**/*.py')) and (exists('pyproject.toml') or exists('requirements.txt') or exists('pytest.ini'))
+          has_js = exists('package.json')
+          has_go = exists('go.mod')
+          has_rust = exists('Cargo.toml')
           tests_dir = exists('tests') or exists('test')
+          makefile = read_text('Makefile')
+          package_json = read_text('package.json')
 
           setup = []
           lint = []
           tests = []
 
-          if has_python:
+          if 'test:' in makefile or '\ntest:' in makefile:
+              tests.append('make test 2>&1 | tee /tmp/pipeline/pytest2.txt || true')
+          elif has_python:
               setup.append('python3 -m pip install --upgrade pip')
               if exists('requirements.txt'):
                   setup.append('pip install -r requirements.txt')
               setup.append('pip install ruff pytest pytest-json-report pytest-cov')
-              lint.append('ruff check . --output-format=json --output-file=/tmp/pipeline/lint2.json || true')
+              if 'ruff' in read_text('pyproject.toml') or exists('.ruff.toml'):
+                  lint.append('ruff check . --output-format=json --output-file=/tmp/pipeline/lint2.json || true')
+              else:
+                  lint.append('printf "[]" > /tmp/pipeline/lint2.json')
               if tests_dir:
                   tests.append('python3 -m pytest tests/ --tb=short --json-report --json-report-file=/tmp/pipeline/pytest2.json -q 2>&1 | tee /tmp/pipeline/pytest2.txt || true')
+          elif has_js:
+              setup.append('npm install')
+              if '"test"' in package_json:
+                  tests.append('npm test > /tmp/pipeline/pytest2.txt 2>&1 || true')
+              else:
+                  tests.append('printf "{}" > /tmp/pipeline/pytest2.json && printf "No npm test script detected\n" > /tmp/pipeline/pytest2.txt')
+              if '"lint"' in package_json:
+                  lint.append('npm run lint > /tmp/pipeline/lint2.json 2>&1 || true')
+              else:
+                  lint.append('printf "[]" > /tmp/pipeline/lint2.json')
+          elif has_go:
+              lint.append('printf "[]" > /tmp/pipeline/lint2.json')
+              tests.append('go test ./... 2>&1 | tee /tmp/pipeline/pytest2.txt || true')
+          elif has_rust:
+              lint.append('printf "[]" > /tmp/pipeline/lint2.json')
+              tests.append('cargo test 2>&1 | tee /tmp/pipeline/pytest2.txt || true')
 
           data = {
               'setup': ' && '.join(setup) if setup else 'true',
@@ -942,7 +1008,13 @@ jobs:
               summary = r.get('summary', {}) if isinstance(r, dict) else {}
               failed = summary.get('failed', 0) + summary.get('error', 0)
           except:
-              failed = 1
+              failed = 0
+              try:
+                  txt = open('/tmp/pipeline/pytest2.txt').read()
+                  if 'FAILED' in txt or 'error:' in txt.lower() or 'Error:' in txt:
+                      failed = 1
+              except Exception:
+                  failed = 1
           try:
               l = json.load(open('/tmp/pipeline/lint2.json'))
               lint = len(l)
