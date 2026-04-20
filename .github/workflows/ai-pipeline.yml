@@ -1241,12 +1241,6 @@ jobs:
           VALIDATE_PASSED: ${{ needs.validate.outputs.passed }}
           FIX_PASSED:      ${{ needs.fix.outputs.fix_passed }}
           FIX_RESULT:      ${{ needs.fix.result }}
-          TEST_COUNT:      ${{ needs.validate.outputs.test_count }}
-          FAIL_COUNT:      ${{ needs.validate.outputs.fail_count }}
-          LINT_ISSUES:     ${{ needs.validate.outputs.lint_issues }}
-          COMPLEXITY:      ${{ needs.classify.outputs.complexity }}
-          DOMAIN:          ${{ needs.classify.outputs.domain }}
-          ESCALATED:       ${{ needs.classify.outputs.escalate }}
           HAS_CHANGES:     ${{ steps.branch.outputs.has_changes }}
           PR_URL:          ${{ steps.pr.outputs.pr_url }}
           CLASSIFY_RESULT: ${{ needs.classify.result }}
@@ -1269,48 +1263,36 @@ jobs:
             const planOk         = process.env.PLAN_RESULT       === 'success';
             const aggOk          = process.env.AGG_RESULT        === 'success';
 
-            const testCount  = process.env.TEST_COUNT  || '0';
-            const failCount  = process.env.FAIL_COUNT  || '0';
-            const lintIssues = process.env.LINT_ISSUES || '0';
-            const complexity = process.env.COMPLEXITY  || '—';
-            const domain     = process.env.DOMAIN      || '—';
-            const escalated  = process.env.ESCALATED   === 'true' ? 'yes' : 'no';
-
-            // Determine overall status
-            let statusLine;
+            // Determine overall outcome — expressed in plain terms, no test/lint details
+            // (those live on the PR, not the issue)
+            let statusLine, detail;
             if (!classifyOk || !planOk) {
-              statusLine = '❌ **Pipeline failed** — could not classify or plan the task';
+              statusLine = '❌ **Could not start work**';
+              detail = 'The pipeline failed to understand or plan the task. Check the [run logs](' + runUrl + ') for details.';
             } else if (!aggOk) {
-              statusLine = '❌ **Pipeline failed** — worker or aggregation stage failed';
-            } else if (validatePassed) {
-              statusLine = '✅ **Complete** — all checks passing';
-            } else if (fixRan && fixPassed) {
-              statusLine = '✅ **Complete** — checks passing after fix';
-            } else if (hasChanges) {
-              statusLine = '⚠️ **Partial** — changes made but checks still failing';
+              statusLine = '❌ **Development failed**';
+              detail = 'The worker stage encountered an error. Check the [run logs](' + runUrl + ') for details.';
+            } else if (!hasChanges) {
+              statusLine = '❌ **No changes produced**';
+              detail = 'The pipeline ran but did not generate any code changes. The task may be ambiguous or already complete.';
+            } else if (validatePassed || (fixRan && fixPassed)) {
+              statusLine = '✅ **Done**';
+              detail = prUrl
+                ? `Changes are ready for review in ${prUrl}`
+                : 'Changes were made but no pull request was opened.';
             } else {
-              statusLine = '❌ **Failed** — no changes produced';
+              statusLine = '⚠️ **Changes made — needs review**';
+              detail = prUrl
+                ? `A pull request has been opened but some checks did not pass. See ${prUrl} for details.`
+                : 'Changes were made but some checks did not pass. Check the [run logs](' + runUrl + ').';
             }
-
-            const validationLine = validatePassed || (fixRan && fixPassed)
-              ? `✅ ${testCount} tests passing, lint clean`
-              : `⚠️ ${failCount} test failure(s), ${lintIssues} lint issue(s)`;
 
             const lines = [
               statusLine,
               ``,
-              `**Task:** ${task}${task.length >= 300 ? '…' : ''}`,
+              detail,
               ``,
-              `| Stage | Result |`,
-              `|-------|--------|`,
-              `| Classify | ${classifyOk ? `✅ ${complexity} / ${domain}` : '❌'} |`,
-              `| Plan | ${planOk ? '✅' : '❌'} |`,
-              `| Work | ${aggOk ? `✅${escalated === 'yes' ? ' (escalated)' : ''}` : '❌'} |`,
-              `| Review | ${aggOk ? '✅' : '—'} |`,
-              `| Validate | ${aggOk ? validationLine : '—'} |`,
-              fixRan ? `| Fix | ${fixPassed ? '✅' : '⚠️'} |` : '',
-              ``,
-              prUrl      ? `**Pull request:** ${prUrl}` : '_No pull request created._',
+              prUrl ? `**Pull request:** ${prUrl}` : '',
               `**Run:** [View full logs](${runUrl})`,
             ].filter(l => l !== '').join('\n');
 
