@@ -1,0 +1,1212 @@
+name: "AI Pipeline"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Multi-stage OpenCode pipeline
+#
+# Trigger:   Comment "/develop <task>" on any issue or PR
+# Access:    Write/admin collaborators only (silent reject otherwise)
+#
+# Stage │ Purpose
+# ──────┼────────────────────────────────
+#   1   │ Classify + route
+#   2   │ Task decomposition
+#   3   │ Implement
+#   4   │ Review + aggregate
+#   5   │ Validate with repository CI commands
+#   6   │ Fix failures
+#   7   │ Summary + PR
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+# One pipeline per issue/PR at a time — never cancel in-flight runs
+concurrency:
+  group: ai-pipeline-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # GATE — auth check, context assembly, task extraction
+  # ───────────────────────────────────────────────────────────────────────────
+  gate:
+    name: "Gate"
+    runs-on: ubuntu-latest
+
+    # Only fire when:
+    #   - the comment begins with /develop (space or newline after — not a substring match)
+    #   - not a review comment on an ai-pipeline/* branch (handled by ai-pr-review.yml)
+    if: |
+      (startsWith(github.event.comment.body, '/develop ') ||
+       startsWith(github.event.comment.body, '/develop\n')) &&
+      !(github.event_name == 'pull_request_review_comment' &&
+        startsWith(github.event.pull_request.head.ref, 'ai-pipeline/'))
+
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+
+    outputs:
+      task:         ${{ steps.extract.outputs.task }}
+      context_json: ${{ steps.context.outputs.context_json }}
+      is_pr:        ${{ steps.context.outputs.is_pr }}
+      issue_number: ${{ steps.context.outputs.issue_number }}
+      thread_url:   ${{ steps.context.outputs.thread_url }}
+
+    steps:
+      # ── 1. Auth: only write/admin collaborators may trigger ────────────────
+      - name: Check collaborator permission
+        id: auth
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const actor = context.payload.comment.user.login;
+            let level;
+            try {
+              const resp = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                username: actor,
+              });
+              level = resp.data.permission; // admin | write | read | none
+            } catch (e) {
+              // User is not a collaborator at all
+              level = 'none';
+            }
+            const allowed = ['admin', 'write'].includes(level);
+            if (!allowed) {
+              core.notice(`@${actor} has permission '${level}' — /develop ignored`);
+            }
+            core.setOutput('allowed', String(allowed));
+            return allowed;
+
+      - name: Abort if not authorised
+        if: steps.auth.outputs.allowed != 'true'
+        run: |
+          echo "Unauthorised user — stopping pipeline."
+          exit 1
+
+      # ── 2. Extract task text (everything after /develop) ──────────────────
+      - name: Extract task
+        id: extract
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body  = context.payload.comment.body.trim();
+            const match = body.match(/^\/develop(?:\s+([\s\S]+))?$/);
+            if (!match || !match[1] || !match[1].trim()) {
+              core.setFailed('/develop requires a task description, e.g. /develop add retry logic to the data fetcher');
+              return;
+            }
+            const task = match[1].trim().slice(0, 4000); // hard cap
+            core.setOutput('task', task);
+            core.notice(`Task: ${task}`);
+
+      # ── 3. Assemble full context: issue/PR body + full comment thread ──────
+      - name: Assemble context
+        id: context
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isPR   = !!context.payload.issue?.pull_request ||
+                           context.eventName === 'pull_request_review_comment';
+            const number = context.payload.issue?.number ||
+                           context.payload.pull_request?.number;
+
+            // Fetch issue / PR body
+            let title = '', body = '', diff = '';
+            if (isPR) {
+              const pr = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                pull_number: number,
+              });
+              title = pr.data.title;
+              body  = pr.data.body || '';
+              // Fetch diff (capped at 20 KB to avoid blowing context)
+              try {
+                const diffResp = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  pull_number: number,
+                  mediaType: { format: 'diff' },
+                });
+                diff = String(diffResp.data).slice(0, 20000);
+              } catch (_) {}
+            } else {
+              const issue = await github.rest.issues.get({
+                owner:        context.repo.owner,
+                repo:         context.repo.repo,
+                issue_number: number,
+              });
+              title = issue.data.title;
+              body  = issue.data.body || '';
+            }
+
+            // Fetch all comments (up to 100)
+            const commentsResp = await github.rest.issues.listComments({
+              owner:        context.repo.owner,
+              repo:         context.repo.repo,
+              issue_number: number,
+              per_page:     100,
+            });
+            const comments = commentsResp.data.map(c => ({
+              author: c.user.login,
+              body:   c.body.slice(0, 2000),
+              at:     c.created_at,
+            }));
+
+            const ctx = JSON.stringify({
+              repo:     `${context.repo.owner}/${context.repo.repo}`,
+              number,
+              is_pr:    isPR,
+              title,
+              body:     body.slice(0, 8000),
+              comments,
+              pr_diff:  diff,
+              trigger_comment: context.payload.comment.body,
+              actor:    context.payload.comment.user.login,
+            });
+
+            const url = isPR
+              ? `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${number}`
+              : `https://github.com/${context.repo.owner}/${context.repo.repo}/issues/${number}`;
+
+            core.setOutput('context_json',  ctx);
+            core.setOutput('is_pr',         String(isPR));
+            core.setOutput('issue_number',  isPR ? '' : String(number));
+            core.setOutput('thread_url',    url);
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 1 — CLASSIFY
+  # Agent: classifier  (.opencode/agents/classifier.md)
+  # Output artifact: classification.json
+  # ───────────────────────────────────────────────────────────────────────────
+  classify:
+    name: "1 · Classify"
+    needs: gate
+    if: needs.gate.result == 'success' && needs.gate.outputs.task != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      complexity:    ${{ steps.read.outputs.complexity }}
+      escalate:      ${{ steps.read.outputs.escalate }}
+      worker_count:  ${{ steps.read.outputs.worker_count }}
+      domain:        ${{ steps.read.outputs.domain }}
+      task_ids:      ${{ steps.read.outputs.task_ids }}
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run classifier
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          model: openrouter/google/gemini-2.5-flash-lite
+          agent: classifier
+          share: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are the CLASSIFY stage of a multi-stage AI pipeline.
+
+            TASK FROM USER:
+            ${{ needs.gate.outputs.task }}
+
+            ISSUE/PR CONTEXT:
+            ${{ needs.gate.outputs.context_json }}
+
+            First, briefly explore the repository structure (ls, find) to understand what kind
+            of project this is. Then analyse the task and write a JSON classification file to
+            `/tmp/pipeline/classification.json`. Create the directory first with: mkdir -p /tmp/pipeline
+
+            The JSON must follow this exact schema:
+            {
+              "complexity": "low" | "medium" | "high",
+              "escalate": true | false,
+              "domain": "core" | "data" | "infra" | "test" | "mixed",
+              "worker_count": 1 | 2 | 3 | 4,
+              "task_ids": ["t1", "t2", ...],
+              "rationale": "one sentence explanation"
+            }
+
+            Rules:
+            - escalate=true only when complexity="high" AND the task requires deep specialist expertise
+            - worker_count must equal length of task_ids array (max 4)
+            - task_ids are short identifiers like "t1", "t2", "t3", "t4"
+            - domain="mixed" when task spans multiple areas
+            - Write ONLY the JSON file. Do not edit any source files.
+
+      - name: Read classification artifact
+        id: read
+        run: |
+          FILE=/tmp/pipeline/classification.json
+          if [ ! -f "$FILE" ]; then
+            echo "::error::classifier did not write $FILE"
+            exit 1
+          fi
+          cat "$FILE"
+          python3 - <<'EOF'
+          import json, os, sys
+          with open('/tmp/pipeline/classification.json') as f:
+              d = json.load(f)
+          out = os.environ['GITHUB_OUTPUT']
+          with open(out, 'a') as f:
+              f.write(f"complexity={d['complexity']}\n")
+              f.write(f"escalate={str(d.get('escalate', False)).lower()}\n")
+              f.write(f"worker_count={min(int(d.get('worker_count', 1)), 4)}\n")
+              f.write(f"domain={d.get('domain', 'mixed')}\n")
+              f.write(f"task_ids={json.dumps(d.get('task_ids', ['t1']))}\n")
+          print(f"complexity={d['complexity']} escalate={d.get('escalate')} workers={d.get('worker_count')} domain={d.get('domain')}")
+          EOF
+
+      - name: Upload classification
+        uses: actions/upload-artifact@v4
+        with:
+          name: classification
+          path: /tmp/pipeline/classification.json
+          retention-days: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 2 — PLAN
+  # Agent: planner  (.opencode/agents/planner.md)
+  # Output artifact: plan.json
+  # ───────────────────────────────────────────────────────────────────────────
+  plan:
+    name: "2 · Plan"
+    needs: [gate, classify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      task_ids:  ${{ steps.read.outputs.task_ids }}
+      plan_json: ${{ steps.read.outputs.plan_json }}
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download classification
+        uses: actions/download-artifact@v4
+        with:
+          name: classification
+          path: /tmp/pipeline
+
+      - name: Run planner
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          model: openrouter/google/gemini-2.5-pro
+          agent: planner
+          share: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are the PLAN stage of a multi-stage AI pipeline.
+
+            TASK FROM USER:
+            ${{ needs.gate.outputs.task }}
+
+            ISSUE/PR CONTEXT:
+            ${{ needs.gate.outputs.context_json }}
+
+            CLASSIFICATION (from previous stage):
+            $(cat /tmp/pipeline/classification.json)
+
+            Explore the repository structure thoroughly (ls, find, cat key files), then write a
+            detailed work plan to `/tmp/pipeline/plan.json`.
+
+            The plan must be a JSON object with this exact schema:
+            {
+              "tasks": [
+                {
+                  "id": "t1",
+                  "title": "short title",
+                  "domain": "core" | "data" | "infra" | "test",
+                  "agent": "worker-core" | "worker-data" | "worker-infra" | "worker-test",
+                  "prompt": "Detailed, self-contained instructions for the worker. Name exact files, functions, line numbers. Describe before/after state clearly.",
+                  "files": ["path/to/file.py", "tests/test_file.py"],
+                  "acceptance": "Specific, testable criteria for completion"
+                }
+              ],
+              "integration_notes": "How the tasks fit together once all workers are done"
+            }
+
+            Rules:
+            - task_ids must match exactly: ${{ needs.classify.outputs.task_ids }}
+            - Each task prompt must be fully self-contained — workers run in parallel and share no state
+            - Reference actual files and functions by name — explore the repo first
+            - Avoid assigning two workers to the same file (causes merge conflicts)
+            - Write ONLY the JSON plan file. Do not edit any source files.
+
+      - name: Read plan artifact
+        id: read
+        run: |
+          FILE=/tmp/pipeline/plan.json
+          if [ ! -f "$FILE" ]; then
+            echo "::error::planner did not write $FILE"
+            exit 1
+          fi
+          cat "$FILE"
+          python3 - <<'EOF'
+          import json, os
+          with open('/tmp/pipeline/plan.json') as f:
+              d = json.load(f)
+          ids = [t['id'] for t in d['tasks']]
+          out = os.environ['GITHUB_OUTPUT']
+          with open(out, 'a') as f:
+              f.write(f"task_ids={json.dumps(ids)}\n")
+              f.write(f"plan_json={json.dumps(d)}\n")
+          print(f"Planned {len(ids)} tasks: {ids}")
+          EOF
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: /tmp/pipeline/plan.json
+          retention-days: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 3 — WORKER AGENTS (parallel matrix, up to 4)
+  # Agent: worker-{domain}  (.opencode/agents/worker-*.md)
+  # Output artifacts: patch-{id}.diff per worker
+  # ───────────────────────────────────────────────────────────────────────────
+  work:
+    name: "3 · Work [${{ matrix.task_id }}]"
+    needs: [gate, classify, plan]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false   # all workers run; aggregator handles partial results
+      matrix:
+        task_id: ${{ fromJson(needs.plan.outputs.task_ids) }}
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      # GitHub Actions matrix outputs — each worker sets these; last writer wins
+      # (used only for share links; actual changes travel via patch artifacts)
+      share_url: ${{ steps.worker.outputs.share_url }}
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download plan
+        uses: actions/download-artifact@v4
+        with:
+          name: plan
+          path: /tmp/pipeline
+
+      - name: Extract task prompt for this worker
+        id: task
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          with open('/tmp/pipeline/plan.json') as f:
+              plan = json.load(f)
+          task_id = os.environ['TASK_ID']
+          task = next((t for t in plan['tasks'] if t['id'] == task_id), None)
+          if not task:
+              print(f"::error::Task {task_id} not found in plan")
+              exit(1)
+          out = os.environ['GITHUB_OUTPUT']
+          with open(out, 'a') as f:
+              f.write(f"agent={task['agent']}\n")
+              # Write full prompt to file to avoid shell escaping issues
+          with open('/tmp/pipeline/worker-prompt.txt', 'w') as f:
+              f.write(task['prompt'])
+          print(f"Task {task_id}: agent={task['agent']}")
+          EOF
+        env:
+          TASK_ID: ${{ matrix.task_id }}
+
+      - name: Snapshot repo state before worker
+        run: git diff HEAD > /tmp/pipeline/before-${{ matrix.task_id }}.snap || true
+
+      - name: Run worker agent
+        id: worker
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          model: ${{ needs.classify.outputs.escalate == 'true' && 'openrouter/anthropic/claude-opus-4.7' || 'openrouter/google/gemini-2.5-flash' }}
+          # To change models: update the two model IDs above. The rest of the pipeline
+          # adapts automatically — no agent prompts reference specific model names.
+          agent: ${{ steps.task.outputs.agent }}
+          share: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are a WORKER AGENT in a multi-stage AI pipeline.
+            Your task ID is: ${{ matrix.task_id }}
+
+            ORIGINAL REQUEST FROM USER:
+            ${{ needs.gate.outputs.task }}
+
+            YOUR SPECIFIC TASK:
+            $(cat /tmp/pipeline/worker-prompt.txt)
+
+            IMPORTANT CONSTRAINTS:
+            - Work only on the files listed in your task — other workers handle the rest
+            - Do not modify files outside your task scope
+            - After making changes, run the test suite to check for breakage:
+              python -m pytest tests/ -x -q 2>&1 | head -50
+            - Fix any test failures caused by your changes before finishing
+            - Do not commit — the pipeline handles that
+
+      - name: Capture changes as patch
+        run: |
+          mkdir -p /tmp/pipeline
+          git diff HEAD > /tmp/pipeline/patch-${{ matrix.task_id }}.diff
+          if [ -s /tmp/pipeline/patch-${{ matrix.task_id }}.diff ]; then
+            echo "Worker ${{ matrix.task_id }} produced changes:"
+            git diff HEAD --stat
+          else
+            echo "Worker ${{ matrix.task_id }} produced no file changes"
+          fi
+
+      - name: Upload patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch-${{ matrix.task_id }}
+          path: /tmp/pipeline/patch-${{ matrix.task_id }}.diff
+          retention-days: 1
+          if-no-files-found: ignore
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 4 — AGGREGATE + REVIEW
+  # Agent: aggregator  (.opencode/agents/aggregator.md)
+  # Output artifact: aggregated-patch.diff + review.json
+  # ───────────────────────────────────────────────────────────────────────────
+  aggregate:
+    name: "4 · Aggregate & Review"
+    needs: [gate, classify, plan, work]
+    runs-on: ubuntu-latest
+    # Run even if some workers failed — review partial results
+    if: always() && needs.plan.result == 'success'
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      has_changes: ${{ steps.merge.outputs.has_changes }}
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download all worker patches
+        uses: actions/download-artifact@v4
+        with:
+          pattern: patch-*
+          path: /tmp/pipeline/patches
+          merge-multiple: true
+
+      - name: Download plan
+        uses: actions/download-artifact@v4
+        with:
+          name: plan
+          path: /tmp/pipeline
+
+      - name: Merge worker patches
+        id: merge
+        run: |
+          mkdir -p /tmp/pipeline
+          PATCHES=$(ls /tmp/pipeline/patches/patch-*.diff 2>/dev/null || true)
+          if [ -z "$PATCHES" ]; then
+            echo "No patches to merge."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Apply each patch, skipping empty ones
+          APPLIED=0
+          for patch in /tmp/pipeline/patches/patch-*.diff; do
+            if [ -s "$patch" ]; then
+              echo "Applying $patch..."
+              git apply --whitespace=fix "$patch" && APPLIED=$((APPLIED + 1)) || \
+                echo "::warning::Could not apply $patch cleanly — skipping"
+            fi
+          done
+
+          echo "Applied $APPLIED patches"
+          git diff HEAD > /tmp/pipeline/merged.diff
+
+          if [ -s /tmp/pipeline/merged.diff ]; then
+            git diff HEAD --stat
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run aggregator review agent
+        if: steps.merge.outputs.has_changes == 'true'
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          model: openrouter/openai/gpt-4.1
+          agent: aggregator
+          share: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are the AGGREGATE & REVIEW stage of a multi-stage AI pipeline.
+            Your job is to review the combined worker output critically and independently.
+
+            ORIGINAL TASK:
+            ${{ needs.gate.outputs.task }}
+
+            PLAN THAT WAS EXECUTED:
+            $(cat /tmp/pipeline/plan.json)
+
+            COMBINED DIFF FROM ALL WORKERS:
+            $(cat /tmp/pipeline/merged.diff)
+
+            Your responsibilities:
+            1. Read the merged diff carefully
+            2. Check for bugs, logic errors, missing edge cases, security issues
+            3. Check for style inconsistencies with the existing codebase
+            4. Fix any issues you find directly in the files
+            5. Write a review summary to `/tmp/pipeline/review.json`:
+               {
+                 "issues_found": ["description of each issue"],
+                 "issues_fixed": ["description of each fix applied"],
+                 "overall_quality": "good" | "acceptable" | "poor",
+                 "summary": "one paragraph summary of the changes and your review"
+               }
+
+            Be thorough — you are the last AI check before tests run.
+            If the code looks good, say so. Do not invent problems.
+
+      - name: Capture final aggregated diff
+        run: |
+          git diff HEAD > /tmp/pipeline/aggregated.diff
+          echo "has_changes=$([ -s /tmp/pipeline/aggregated.diff ] && echo true || echo false)" >> "$GITHUB_OUTPUT" || true
+
+      - name: Upload aggregated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aggregated
+          path: |
+            /tmp/pipeline/aggregated.diff
+            /tmp/pipeline/review.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 5 — VALIDATE
+  # No model — pure CI signals. ruff + pytest.
+  # Output artifact: validation.json
+  # ───────────────────────────────────────────────────────────────────────────
+  validate:
+    name: "5 · Validate"
+    needs: [gate, classify, plan, aggregate]
+    runs-on: ubuntu-latest
+    if: always() && needs.aggregate.result == 'success'
+    permissions:
+      contents: read
+
+    outputs:
+      passed:      ${{ steps.report.outputs.passed }}
+      test_count:  ${{ steps.report.outputs.test_count }}
+      fail_count:  ${{ steps.report.outputs.fail_count }}
+      lint_issues: ${{ steps.report.outputs.lint_issues }}
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Detect repository validation commands
+        id: detect
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import json, os, pathlib
+
+          root = pathlib.Path('.')
+
+          def exists(name: str) -> bool:
+              return (root / name).exists()
+
+          def read_text(name: str) -> str:
+              try:
+                  return (root / name).read_text()
+              except Exception:
+                  return ''
+
+          has_python = any(root.glob('**/*.py')) and (exists('pyproject.toml') or exists('requirements.txt') or exists('pytest.ini'))
+          has_js = exists('package.json')
+          has_go = exists('go.mod')
+          has_rust = exists('Cargo.toml')
+          tests_dir = exists('tests') or exists('test')
+          makefile = read_text('Makefile')
+          package_json = read_text('package.json')
+
+          setup = []
+          lint = []
+          tests = []
+
+          if 'test:' in makefile or '\ntest:' in makefile:
+              tests.append('make test 2>&1 | tee /tmp/pipeline/pytest.txt || true')
+          elif has_python:
+              setup.append('python3 -m pip install --upgrade pip')
+              if exists('requirements.txt'):
+                  setup.append('pip install -r requirements.txt')
+              setup.append('pip install ruff pytest pytest-json-report pytest-cov')
+              if 'ruff' in read_text('pyproject.toml') or exists('.ruff.toml'):
+                  lint.append('ruff check . --output-format=json --output-file=/tmp/pipeline/lint.json || true')
+              else:
+                  lint.append('printf "[]" > /tmp/pipeline/lint.json')
+              if tests_dir:
+                  tests.append('python3 -m pytest tests/ --tb=short --json-report --json-report-file=/tmp/pipeline/pytest.json -q 2>&1 | tee /tmp/pipeline/pytest.txt || true')
+          elif has_js:
+              setup.append('npm install')
+              if '"lint"' in package_json:
+                  lint.append('npm run lint > /tmp/pipeline/lint.json 2>&1 || true')
+              else:
+                  lint.append('printf "[]" > /tmp/pipeline/lint.json')
+              if '"test"' in package_json:
+                  tests.append('npm test > /tmp/pipeline/pytest.txt 2>&1 || true')
+              else:
+                  tests.append('printf "{}" > /tmp/pipeline/pytest.json && printf "No npm test script detected\n" > /tmp/pipeline/pytest.txt')
+          elif has_go:
+              lint.append('printf "[]" > /tmp/pipeline/lint.json')
+              tests.append('go test ./... 2>&1 | tee /tmp/pipeline/pytest.txt || true')
+          elif has_rust:
+              lint.append('printf "[]" > /tmp/pipeline/lint.json')
+              tests.append('cargo test 2>&1 | tee /tmp/pipeline/pytest.txt || true')
+
+          data = {
+              'has_python': has_python,
+              'setup': ' && '.join(setup) if setup else 'true',
+              'lint': lint[0] if lint else 'printf "[]" > /tmp/pipeline/lint.json',
+              'tests': tests[0] if tests else 'printf "{}" > /tmp/pipeline/pytest.json && printf "No standard test command detected\n" > /tmp/pipeline/pytest.txt',
+          }
+
+          with open('/tmp/pipeline/detect.json', 'w') as f:
+              json.dump(data, f)
+
+          out = os.environ['GITHUB_OUTPUT']
+          with open(out, 'a') as f:
+              for key, value in data.items():
+                  f.write(f"{key}={str(value).lower() if isinstance(value, bool) else value}\n")
+          EOF
+
+      - name: Install dependencies
+        shell: bash
+        run: ${{ steps.detect.outputs.setup }}
+
+      - name: Download aggregated diff
+        uses: actions/download-artifact@v4
+        with:
+          name: aggregated
+          path: /tmp/pipeline
+        continue-on-error: true
+
+      - name: Apply aggregated changes
+        run: |
+          if [ -f /tmp/pipeline/aggregated.diff ] && [ -s /tmp/pipeline/aggregated.diff ]; then
+            git apply --whitespace=fix /tmp/pipeline/aggregated.diff
+            echo "Applied aggregated diff"
+          else
+            echo "No diff to apply — validating base code"
+          fi
+
+      - name: Lint with ruff
+        id: lint
+        continue-on-error: true
+        shell: bash
+        run: |
+          ${{ steps.detect.outputs.lint }}
+          ISSUES=$(python3 -c "
+          import json
+          try:
+              d = json.load(open('/tmp/pipeline/lint.json'))
+              print(len(d))
+          except:
+              print(0)
+          ")
+          echo "lint_issues=$ISSUES" >> "$GITHUB_OUTPUT"
+          echo "Lint issues: $ISSUES"
+
+      - name: Run tests
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          ${{ steps.detect.outputs.tests }}
+          echo "test_exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Build validation report
+        id: report
+        run: |
+          python3 - <<'EOF'
+          import json, os
+
+          # Parse pytest report
+          passed = failed = 0
+          failures = []
+          try:
+              r = json.load(open('/tmp/pipeline/pytest.json'))
+              summary = r.get('summary', {}) if isinstance(r, dict) else {}
+              passed = summary.get('passed', 0)
+              failed = summary.get('failed', 0) + summary.get('error', 0)
+              for t in r.get('tests', []):
+                  if t['outcome'] in ('failed', 'error'):
+                      failures.append({
+                          'test': t['nodeid'],
+                          'message': t.get('call', {}).get('longrepr', '')[:2000],
+                      })
+          except Exception as e:
+              txt = ''
+              try:
+                  txt = open('/tmp/pipeline/pytest.txt').read()
+              except Exception:
+                  pass
+              if 'FAILED' in txt or 'error:' in txt.lower() or 'Error:' in txt:
+                  failed = 1
+              failures.append({'test': 'parse_error', 'message': str(e)})
+
+          # Parse lint report
+          lint_issues = []
+          try:
+              lints = json.load(open('/tmp/pipeline/lint.json'))
+              lint_issues = [
+                  {'file': l['filename'], 'line': l['location']['row'],
+                   'code': l['code'], 'message': l['message']}
+                  for l in lints[:20]  # cap at 20
+              ]
+          except Exception:
+              pass
+
+          all_passed = failed == 0 and len(lint_issues) == 0
+
+          report = {
+              'passed':      all_passed,
+              'test_passed': passed,
+              'test_failed': failed,
+              'lint_issues': len(lint_issues),
+              'failures':    failures,
+              'lint_details': lint_issues,
+          }
+          with open('/tmp/pipeline/validation.json', 'w') as f:
+              json.dump(report, f, indent=2)
+
+          out = os.environ['GITHUB_OUTPUT']
+          with open(out, 'a') as f:
+              f.write(f"passed={str(all_passed).lower()}\n")
+              f.write(f"test_count={passed + failed}\n")
+              f.write(f"fail_count={failed}\n")
+              f.write(f"lint_issues={len(lint_issues)}\n")
+
+          print(f"Validation: passed={all_passed} tests={passed}/{passed+failed} lint={len(lint_issues)}")
+          EOF
+
+      - name: Upload validation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation
+          path: |
+            /tmp/pipeline/validation.json
+            /tmp/pipeline/pytest.json
+            /tmp/pipeline/pytest.txt
+            /tmp/pipeline/lint.json
+          retention-days: 3
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 6 — FIX (feedback loop — only runs on validation failure)
+  # Agent: fixer  (.opencode/agents/fixer.md)
+  # ───────────────────────────────────────────────────────────────────────────
+  fix:
+    name: "6 · Fix"
+    needs: [gate, classify, aggregate, validate]
+    runs-on: ubuntu-latest
+    if: |
+      needs.validate.result == 'success' &&
+      needs.validate.outputs.passed == 'false'
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      fix_passed: ${{ steps.revalidate.outputs.passed }}
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Detect repository validation commands
+        id: detect
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import json, os, pathlib
+
+          root = pathlib.Path('.')
+
+          def exists(name: str) -> bool:
+              return (root / name).exists()
+
+          def read_text(name: str) -> str:
+              try:
+                  return (root / name).read_text()
+              except Exception:
+                  return ''
+
+          has_python = any(root.glob('**/*.py')) and (exists('pyproject.toml') or exists('requirements.txt') or exists('pytest.ini'))
+          has_js = exists('package.json')
+          has_go = exists('go.mod')
+          has_rust = exists('Cargo.toml')
+          tests_dir = exists('tests') or exists('test')
+          makefile = read_text('Makefile')
+          package_json = read_text('package.json')
+
+          setup = []
+          lint = []
+          tests = []
+
+          if 'test:' in makefile or '\ntest:' in makefile:
+              tests.append('make test 2>&1 | tee /tmp/pipeline/pytest2.txt || true')
+          elif has_python:
+              setup.append('python3 -m pip install --upgrade pip')
+              if exists('requirements.txt'):
+                  setup.append('pip install -r requirements.txt')
+              setup.append('pip install ruff pytest pytest-json-report pytest-cov')
+              if 'ruff' in read_text('pyproject.toml') or exists('.ruff.toml'):
+                  lint.append('ruff check . --output-format=json --output-file=/tmp/pipeline/lint2.json || true')
+              else:
+                  lint.append('printf "[]" > /tmp/pipeline/lint2.json')
+              if tests_dir:
+                  tests.append('python3 -m pytest tests/ --tb=short --json-report --json-report-file=/tmp/pipeline/pytest2.json -q 2>&1 | tee /tmp/pipeline/pytest2.txt || true')
+          elif has_js:
+              setup.append('npm install')
+              if '"test"' in package_json:
+                  tests.append('npm test > /tmp/pipeline/pytest2.txt 2>&1 || true')
+              else:
+                  tests.append('printf "{}" > /tmp/pipeline/pytest2.json && printf "No npm test script detected\n" > /tmp/pipeline/pytest2.txt')
+              if '"lint"' in package_json:
+                  lint.append('npm run lint > /tmp/pipeline/lint2.json 2>&1 || true')
+              else:
+                  lint.append('printf "[]" > /tmp/pipeline/lint2.json')
+          elif has_go:
+              lint.append('printf "[]" > /tmp/pipeline/lint2.json')
+              tests.append('go test ./... 2>&1 | tee /tmp/pipeline/pytest2.txt || true')
+          elif has_rust:
+              lint.append('printf "[]" > /tmp/pipeline/lint2.json')
+              tests.append('cargo test 2>&1 | tee /tmp/pipeline/pytest2.txt || true')
+
+          data = {
+              'setup': ' && '.join(setup) if setup else 'true',
+              'lint': lint[0] if lint else 'printf "[]" > /tmp/pipeline/lint2.json',
+              'tests': tests[0] if tests else 'printf "{}" > /tmp/pipeline/pytest2.json && printf "No standard test command detected\n" > /tmp/pipeline/pytest2.txt',
+          }
+
+          out = os.environ['GITHUB_OUTPUT']
+          with open(out, 'a') as f:
+              for key, value in data.items():
+                  f.write(f"{key}={value}\n")
+          EOF
+
+      - name: Install dependencies
+        shell: bash
+        run: ${{ steps.detect.outputs.setup }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "{aggregated,validation}"
+          path: /tmp/pipeline
+          merge-multiple: true
+
+      - name: Apply aggregated changes
+        run: |
+          if [ -f /tmp/pipeline/aggregated.diff ] && [ -s /tmp/pipeline/aggregated.diff ]; then
+            git apply --whitespace=fix /tmp/pipeline/aggregated.diff
+          fi
+
+      - name: Run fixer agent
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          model: openrouter/openai/o4-mini
+          agent: fixer
+          share: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are the FIX stage of a multi-stage AI pipeline.
+            Previous AI stages made code changes, but validation FAILED. Your job is to fix all failures.
+
+            ORIGINAL TASK:
+            ${{ needs.gate.outputs.task }}
+
+            VALIDATION REPORT (what failed):
+            $(cat /tmp/pipeline/validation.json)
+
+            PYTEST OUTPUT:
+            $(cat /tmp/pipeline/pytest.txt 2>/dev/null | head -200)
+
+            CURRENT CODE STATE (diff from original):
+            $(cat /tmp/pipeline/aggregated.diff | head -500)
+
+            Instructions:
+            1. Read the validation report carefully — understand WHY each test failed
+            2. Read the relevant source files and tests to understand the full context
+            3. Fix all failing tests and lint issues
+            4. After fixing, run the test suite and lint to verify:
+               python -m pytest tests/ -x -q 2>&1 | head -100
+               ruff check . 2>&1 | head -50
+            5. If issues remain, keep fixing until clean (or until you have exhausted reasonable approaches)
+            6. Do not revert the original intent of the changes — fix the implementation, not the goal
+
+      - name: Re-run validation after fix
+        id: revalidate
+        continue-on-error: true
+        shell: bash
+        run: |
+          ${{ steps.detect.outputs.lint }}
+          ${{ steps.detect.outputs.tests }}
+
+          python3 - <<'EOF'
+          import json, os
+          try:
+              r = json.load(open('/tmp/pipeline/pytest2.json'))
+              summary = r.get('summary', {}) if isinstance(r, dict) else {}
+              failed = summary.get('failed', 0) + summary.get('error', 0)
+          except:
+              failed = 0
+              try:
+                  txt = open('/tmp/pipeline/pytest2.txt').read()
+                  if 'FAILED' in txt or 'error:' in txt.lower() or 'Error:' in txt:
+                      failed = 1
+              except Exception:
+                  failed = 1
+          try:
+              l = json.load(open('/tmp/pipeline/lint2.json'))
+              lint = len(l)
+          except:
+              lint = 0
+          passed = failed == 0 and lint == 0
+          out = os.environ['GITHUB_OUTPUT']
+          with open(out, 'a') as f:
+              f.write(f"passed={str(passed).lower()}\n")
+              f.write(f"fail_count={failed}\n")
+              f.write(f"lint_issues={lint}\n")
+          print(f"Re-validation: passed={passed} failed={failed} lint={lint}")
+          EOF
+
+      - name: Capture fix patch
+        run: |
+          git diff HEAD > /tmp/pipeline/fix.diff
+
+      - name: Upload fix artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fix
+          path: |
+            /tmp/pipeline/fix.diff
+            /tmp/pipeline/pytest2.json
+            /tmp/pipeline/pytest2.txt
+            /tmp/pipeline/lint2.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # STAGE 7 — SUMMARY + PR
+  # No model — uses gh CLI.
+  # Posts structured comment on the triggering issue/PR.
+  # Opens a PR on a new branch (always, even on partial failure).
+  # ───────────────────────────────────────────────────────────────────────────
+  summary:
+    name: "7 · Summary & PR"
+    needs: [gate, classify, plan, aggregate, validate, fix]
+    runs-on: ubuntu-latest
+    if: always() && needs.gate.result == 'success' && needs.gate.outputs.task != ''
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/pipeline/all
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Apply final changes and create branch
+        id: branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="ai-pipeline/run-${{ github.run_id }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+          # Apply fix patch first (superset of aggregated), else fall back to aggregated
+          APPLIED=false
+          for diff in /tmp/pipeline/all/fix.diff /tmp/pipeline/all/aggregated.diff; do
+            if [ -f "$diff" ] && [ -s "$diff" ]; then
+              git apply --whitespace=fix "$diff" && APPLIED=true && echo "Applied $diff" && break
+            fi
+          done
+
+          if [ "$APPLIED" = "true" ]; then
+            if ! git diff --quiet; then
+              git add -A
+              git commit -m "ai-pipeline: ${{ needs.gate.outputs.task }}" \
+                -m "Run: ${{ github.run_id }} | Complexity: ${{ needs.classify.outputs.complexity }} | Domain: ${{ needs.classify.outputs.domain }}"
+              git push origin "$BRANCH"
+              echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+              echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open pull request
+        id: pr
+        if: steps.branch.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VALIDATE_STATUS="${{ needs.validate.outputs.passed }}"
+          FIX_STATUS="${{ needs.fix.outputs.fix_passed }}"
+
+          if [ "$VALIDATE_STATUS" = "true" ]; then
+            STATUS_BADGE="✅ Tests passing"
+          elif [ "$FIX_STATUS" = "true" ]; then
+            STATUS_BADGE="✅ Tests passing (after fix)"
+          else
+            STATUS_BADGE="⚠️ Tests failing — review required"
+          fi
+
+          # Closing keyword: only added when triggered from an issue (not a PR comment).
+          # GitHub auto-closes the issue when this PR is merged.
+          ISSUE_NUMBER="${{ needs.gate.outputs.issue_number }}"
+          if [ -n "$ISSUE_NUMBER" ]; then
+            CLOSES_LINE="Closes #${ISSUE_NUMBER}"
+          else
+            CLOSES_LINE=""
+          fi
+
+          PR_URL=$(gh pr create \
+            --title "ai-pipeline: ${{ needs.gate.outputs.task }}" \
+            --body "## AI Pipeline Output
+
+          **Triggered by:** ${{ needs.gate.outputs.thread_url }}
+          **Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          **Status:** $STATUS_BADGE
+
+          ### Pipeline stages
+          | Stage | Escalated |
+          |-------|-----------|
+          | Classify | — |
+          | Plan | — |
+          | Work | ${{ needs.classify.outputs.escalate == 'true' && 'yes' || 'no' }} |
+          | Review | — |
+          | Fix (if needed) | — |
+
+          ### Validation
+          - Tests: ${{ needs.validate.outputs.test_count }} run, ${{ needs.validate.outputs.fail_count }} failed
+          - Lint: ${{ needs.validate.outputs.lint_issues }} issue(s)
+
+          ${CLOSES_LINE}
+
+          ---
+          *Generated by the [AI Pipeline](${{ github.server_url }}/${{ github.repository }}/actions/workflows/ai-pipeline.yml)*" \
+            --head "${{ steps.branch.outputs.branch }}" \
+            --base "${{ github.event.repository.default_branch }}" 2>&1)
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "PR: $PR_URL"
+
+      - name: Post summary comment
+        uses: anomalyco/opencode/github@latest
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: openrouter/google/gemini-2.5-flash-lite
+          share: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Post a comment on the GitHub issue/PR that triggered this pipeline.
+            The issue/PR URL is: ${{ needs.gate.outputs.thread_url }}
+
+            Write a concise, well-formatted markdown comment summarising the pipeline run.
+            Use this data:
+
+            TASK: ${{ needs.gate.outputs.task }}
+            COMPLEXITY: ${{ needs.classify.outputs.complexity }}
+            DOMAIN: ${{ needs.classify.outputs.domain }}
+            ESCALATED: ${{ needs.classify.outputs.escalate }}
+            WORKERS: ${{ needs.classify.outputs.worker_count }}
+            TESTS: ${{ needs.validate.outputs.test_count }} run, ${{ needs.validate.outputs.fail_count }} failed
+            LINT ISSUES: ${{ needs.validate.outputs.lint_issues }}
+            VALIDATION PASSED: ${{ needs.validate.outputs.passed }}
+            FIX APPLIED: ${{ needs.fix.result == 'success' }}
+            FIX PASSED: ${{ needs.fix.outputs.fix_passed }}
+            PR URL: ${{ steps.pr.outputs.pr_url }}
+            ACTIONS RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            REVIEW NOTES (from aggregator):
+            $(cat /tmp/pipeline/all/review.json 2>/dev/null || echo "Not available")
+
+            Format:
+            - Lead with a one-line status (✅ complete / ⚠️ partial / ❌ failed)
+            - Short paragraph on what was done
+            - Pipeline stage table with stage outcomes only
+            - Validation results
+            - Link to PR (if created)
+            - Link to Actions run for full logs
+            - Keep it under 400 words — be direct, not verbose
