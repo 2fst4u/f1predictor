@@ -38,9 +38,13 @@ jobs:
     name: "Respond to Review"
     runs-on: ubuntu-latest
 
-    # Only fire when the comment begins with /review as a standalone slash command.
+    # For issue_comment events: only fire when the comment is on a PR (not a bare issue)
+    # and begins with /review. This prevents spurious runner spin-ups from /develop
+    # comments on plain issues, which also trigger the issue_comment event.
     if: |
-      startsWith(github.event.comment.body, '/review')
+      contains(github.event.comment.body, '/review') &&
+      (github.event_name == 'pull_request_review_comment' ||
+       github.event.issue.pull_request != null)
 
     permissions:
       contents: write

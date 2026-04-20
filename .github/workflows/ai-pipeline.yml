@@ -258,6 +258,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: write
       id-token: write
 
     outputs:
@@ -268,6 +269,26 @@ jobs:
       task_ids:      ${{ steps.read.outputs.task_ids }}
 
     steps:
+      - name: Update progress
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commentId = parseInt('${{ needs.gate.outputs.comment_id }}');
+            if (!commentId) return;
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const task   = `${{ needs.gate.outputs.task }}`.split('\n')[0].slice(0, 200);
+            const body = [
+              `⏳ **AI Pipeline — in progress**`,``,
+              `**Task:** ${task}`,``,
+              `⏳ Classify`,
+              `· Plan`,
+              `· Work`,
+              `· Review`,
+              `· Validate`,``,
+              `[View live progress](${runUrl})`,
+            ].join('\n');
+            try { await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: commentId, body }); } catch(_) {}
+
       - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 1
@@ -353,6 +374,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: write
       id-token: write
 
     outputs:
@@ -360,6 +382,26 @@ jobs:
       plan_json: ${{ steps.read.outputs.plan_json }}
 
     steps:
+      - name: Update progress
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commentId = parseInt('${{ needs.gate.outputs.comment_id }}');
+            if (!commentId) return;
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const task   = `${{ needs.gate.outputs.task }}`.split('\n')[0].slice(0, 200);
+            const body = [
+              `⏳ **AI Pipeline — in progress**`,``,
+              `**Task:** ${task}`,``,
+              `✅ Classify`,
+              `⏳ Plan`,
+              `· Work`,
+              `· Review`,
+              `· Validate`,``,
+              `[View live progress](${runUrl})`,
+            ].join('\n');
+            try { await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: commentId, body }); } catch(_) {}
+
       - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 1
@@ -461,6 +503,7 @@ jobs:
         task_id: ${{ fromJson(needs.plan.outputs.task_ids) }}
     permissions:
       contents: read
+      issues: write
       id-token: write
 
     outputs:
@@ -469,6 +512,29 @@ jobs:
       share_url: ${{ steps.worker.outputs.share_url }}
 
     steps:
+      - name: Update progress
+        # Only the first task in the matrix updates the comment to avoid races
+        if: matrix.task_id == fromJson(needs.plan.outputs.task_ids)[0]
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commentId = parseInt('${{ needs.gate.outputs.comment_id }}');
+            if (!commentId) return;
+            const runUrl  = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const task    = `${{ needs.gate.outputs.task }}`.split('\n')[0].slice(0, 200);
+            const workers = ${{ needs.classify.outputs.worker_count || 1 }};
+            const body = [
+              `⏳ **AI Pipeline — in progress**`,``,
+              `**Task:** ${task}`,``,
+              `✅ Classify`,
+              `✅ Plan`,
+              `⏳ Work (${workers} agent${workers > 1 ? 's' : ''} running in parallel)`,
+              `· Review`,
+              `· Validate`,``,
+              `[View live progress](${runUrl})`,
+            ].join('\n');
+            try { await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: commentId, body }); } catch(_) {}
+
       - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 1
@@ -579,12 +645,33 @@ jobs:
     if: always() && needs.plan.result == 'success'
     permissions:
       contents: read
+      issues: write
       id-token: write
 
     outputs:
       has_changes: ${{ steps.merge.outputs.has_changes }}
 
     steps:
+      - name: Update progress
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commentId = parseInt('${{ needs.gate.outputs.comment_id }}');
+            if (!commentId) return;
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const task   = `${{ needs.gate.outputs.task }}`.split('\n')[0].slice(0, 200);
+            const body = [
+              `⏳ **AI Pipeline — in progress**`,``,
+              `**Task:** ${task}`,``,
+              `✅ Classify`,
+              `✅ Plan`,
+              `✅ Work`,
+              `⏳ Review`,
+              `· Validate`,``,
+              `[View live progress](${runUrl})`,
+            ].join('\n');
+            try { await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: commentId, body }); } catch(_) {}
+
       - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 1
@@ -700,6 +787,7 @@ jobs:
     if: always() && needs.aggregate.result == 'success'
     permissions:
       contents: read
+      issues: write
 
     outputs:
       passed:      ${{ steps.report.outputs.passed }}
@@ -708,6 +796,26 @@ jobs:
       lint_issues: ${{ steps.report.outputs.lint_issues }}
 
     steps:
+      - name: Update progress
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commentId = parseInt('${{ needs.gate.outputs.comment_id }}');
+            if (!commentId) return;
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const task   = `${{ needs.gate.outputs.task }}`.split('\n')[0].slice(0, 200);
+            const body = [
+              `⏳ **AI Pipeline — in progress**`,``,
+              `**Task:** ${task}`,``,
+              `✅ Classify`,
+              `✅ Plan`,
+              `✅ Work`,
+              `✅ Review`,
+              `⏳ Validate`,``,
+              `[View live progress](${runUrl})`,
+            ].join('\n');
+            try { await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: commentId, body }); } catch(_) {}
+
       - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 1
@@ -923,12 +1031,34 @@ jobs:
       needs.validate.outputs.passed == 'false'
     permissions:
       contents: read
+      issues: write
       id-token: write
 
     outputs:
       fix_passed: ${{ steps.revalidate.outputs.passed }}
 
     steps:
+      - name: Update progress
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commentId = parseInt('${{ needs.gate.outputs.comment_id }}');
+            if (!commentId) return;
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const task   = `${{ needs.gate.outputs.task }}`.split('\n')[0].slice(0, 200);
+            const body = [
+              `⏳ **AI Pipeline — in progress**`,``,
+              `**Task:** ${task}`,``,
+              `✅ Classify`,
+              `✅ Plan`,
+              `✅ Work`,
+              `✅ Review`,
+              `⚠️ Validate (issues found — running fix)`,
+              `⏳ Fix`,``,
+              `[View live progress](${runUrl})`,
+            ].join('\n');
+            try { await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: commentId, body }); } catch(_) {}
+
       - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 1
