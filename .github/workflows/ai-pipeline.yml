@@ -310,44 +310,68 @@ jobs:
           persist-credentials: false
 
       - name: Run classifier
-        uses: anomalyco/opencode/github@latest
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          model: openrouter/google/gemini-2.5-flash-lite
-          agent: classifier
-          share: true
-          use_github_token: true
-          prompt: |
-            You are the CLASSIFY stage of a multi-stage AI pipeline.
+          TASK: ${{ needs.gate.outputs.task }}
+          CONTEXT_JSON: ${{ needs.gate.outputs.context_json }}
+        run: |
+          mkdir -p /tmp/pipeline
+          python3 - <<'EOF'
+          import json
+          import os
+          import sys
+          import urllib.request
 
-            TASK FROM USER:
-            ${{ needs.gate.outputs.task }}
+          task = os.environ['TASK']
+          context = os.environ['CONTEXT_JSON']
+          prompt = (
+              "You are the CLASSIFY stage of a multi-stage AI pipeline.\n\n"
+              f"TASK FROM USER:\n{task}\n\n"
+              f"ISSUE/PR CONTEXT:\n{context}\n\n"
+              "Return ONLY valid JSON with this exact schema:\n"
+              "{\n"
+              '  \"complexity\": \"low\" | \"medium\" | \"high\",\n'
+              '  \"escalate\": true | false,\n'
+              '  \"domain\": \"core\" | \"data\" | \"infra\" | \"test\" | \"mixed\",\n'
+              '  \"worker_count\": 1 | 2 | 3 | 4,\n'
+              '  \"task_ids\": [\"t1\", \"t2\", ...],\n'
+              '  \"rationale\": \"one sentence explanation\"\n'
+              "}\n\n"
+              "Rules:\n"
+              "- Do NOT explore the repository\n"
+              "- worker_count must equal length of task_ids array (max 4)\n"
+              "- task_ids are short identifiers like t1, t2, t3, t4\n"
+              "- escalate=true only when complexity=high and the task requires deep specialist expertise\n"
+              "- output JSON only, no markdown fences\n"
+          )
 
-            ISSUE/PR CONTEXT:
-            ${{ needs.gate.outputs.context_json }}
+          payload = {
+              "model": "google/gemini-2.5-flash-lite",
+              "messages": [{"role": "user", "content": prompt}],
+              "temperature": 0.1,
+              "response_format": {"type": "json_object"},
+          }
 
-            Based on the task and context above, write a JSON classification file to
-            `/tmp/pipeline/classification.json`. Create the directory first with: mkdir -p /tmp/pipeline
-            Do NOT explore the repository — the task text and context are sufficient.
+          req = urllib.request.Request(
+              "https://openrouter.ai/api/v1/chat/completions",
+              data=json.dumps(payload).encode(),
+              headers={
+                  "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
+                  "Content-Type": "application/json",
+                  "HTTP-Referer": "https://github.com/2fst4u/f1predictor",
+                  "X-Title": "f1predictor-ai-pipeline",
+              },
+          )
 
-            The JSON must follow this exact schema:
-            {
-              "complexity": "low" | "medium" | "high",
-              "escalate": true | false,
-              "domain": "core" | "data" | "infra" | "test" | "mixed",
-              "worker_count": 1 | 2 | 3 | 4,
-              "task_ids": ["t1", "t2", ...],
-              "rationale": "one sentence explanation"
-            }
+          with urllib.request.urlopen(req, timeout=120) as resp:
+              data = json.load(resp)
 
-            Rules:
-            - escalate=true only when complexity="high" AND the task requires deep specialist expertise
-            - worker_count must equal length of task_ids array (max 4)
-            - task_ids are short identifiers like "t1", "t2", "t3", "t4"
-            - domain="mixed" when task spans multiple areas
-            - Write ONLY the JSON file. Do not edit any source files.
+          content = data["choices"][0]["message"]["content"]
+          parsed = json.loads(content)
+          with open('/tmp/pipeline/classification.json', 'w') as f:
+              json.dump(parsed, f, indent=2)
+          print(json.dumps(parsed))
+          EOF
 
       - name: Read classification artifact
         id: read
