@@ -977,9 +977,13 @@ def compute_weather_sensitivity(
 
     races = races.dropna(subset=["driverId", "position", "season", "round", "date"])
     races["pos_inv"] = -races["position"].astype(float)
-    races["pos_inv_z"] = races.groupby("season")["pos_inv"].transform(
-        lambda s: (s - s.mean()) / (s.std() + 1e-6)
-    )
+
+    # ⚡ Bolt: Fast vectorized z-score calculation instead of groupby.transform(lambda)
+    # Using pandas built-in string aggregations ("mean", "std") with arithmetic is >10x
+    # faster than a lambda transform which evaluates in pure Python per group.
+    pos_inv_mean = races.groupby("season")["pos_inv"].transform("mean")
+    pos_inv_std = races.groupby("season")["pos_inv"].transform("std")
+    races["pos_inv_z"] = (races["pos_inv"] - pos_inv_mean) / (pos_inv_std + 1e-6)
 
     # Vectorized weather mapping
     weather_records = []
