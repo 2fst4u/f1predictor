@@ -35,6 +35,7 @@ jobs:
   gate:
     name: "Gate"
     runs-on: ubuntu-latest
+    timeout-minutes: 3
 
     # Trigger when the comment contains /develop as a command token.
     # Strict parsing (no substring match, no accidental trigger) happens inside
@@ -256,6 +257,7 @@ jobs:
     needs: gate
     if: needs.gate.result == 'success' && needs.gate.outputs.task != ''
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       issues: write
@@ -312,9 +314,9 @@ jobs:
             ISSUE/PR CONTEXT:
             ${{ needs.gate.outputs.context_json }}
 
-            First, briefly explore the repository structure (ls, find) to understand what kind
-            of project this is. Then analyse the task and write a JSON classification file to
+            Based on the task and context above, write a JSON classification file to
             `/tmp/pipeline/classification.json`. Create the directory first with: mkdir -p /tmp/pipeline
+            Do NOT explore the repository — the task text and context are sufficient.
 
             The JSON must follow this exact schema:
             {
@@ -372,6 +374,7 @@ jobs:
     name: "2 · Plan"
     needs: [gate, classify]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       issues: write
@@ -497,6 +500,7 @@ jobs:
     name: "3 · Work [${{ matrix.task_id }}]"
     needs: [gate, classify, plan]
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false   # all workers run; aggregator handles partial results
       matrix:
@@ -641,6 +645,7 @@ jobs:
     name: "4 · Aggregate & Review"
     needs: [gate, classify, plan, work]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Run even if some workers failed — review partial results
     if: always() && needs.plan.result == 'success'
     permissions:
@@ -784,6 +789,7 @@ jobs:
     name: "5 · Validate"
     needs: [gate, classify, plan, aggregate]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: always() && needs.aggregate.result == 'success'
     permissions:
       contents: read
@@ -1026,6 +1032,7 @@ jobs:
     name: "6 · Fix"
     needs: [gate, classify, aggregate, validate]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: |
       needs.validate.result == 'success' &&
       needs.validate.outputs.passed == 'false'
@@ -1250,6 +1257,7 @@ jobs:
     name: "7 · Summary & PR"
     needs: [gate, classify, plan, aggregate, validate, fix]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: always() && needs.gate.result == 'success' && needs.gate.outputs.task != ''
     permissions:
       contents: write
