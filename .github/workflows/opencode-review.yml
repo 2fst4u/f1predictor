@@ -27,4 +27,5 @@ jobs:
             - Check for code quality issues
             - Look for potential bugs
             - Suggest improvements
+            - Be concise, try to keep the review under 100 words.
             - If needed, instruct the author they can trigger further changes by commenting "/oc-easy <instructions>" or "/oc-hard <instructions>" on your review comments.
