@@ -58,6 +58,7 @@ jobs:
       is_pr:        ${{ steps.context.outputs.is_pr }}
       issue_number: ${{ steps.context.outputs.issue_number }}
       thread_url:   ${{ steps.context.outputs.thread_url }}
+      comment_id:   ${{ steps.ack.outputs.comment_id }}
 
     steps:
       # ── 1. Auth: only write/admin collaborators may trigger ────────────────
@@ -93,6 +94,8 @@ jobs:
           exit 1
 
       # ── 2 + 3. Extract task and assemble full context in one step ────────────
+      # (context step follows — acknowledgement comment is posted after it
+      #  so we can include the task text in the message)
       # Task resolution order:
       #   1. Text after /develop in the comment  (explicit override)
       #   2. Issue/PR title + body               (implicit — just comment /develop)
@@ -209,6 +212,39 @@ jobs:
             core.setOutput('is_pr',         String(isPR));
             core.setOutput('issue_number',  isPR ? '' : String(number));
             core.setOutput('thread_url',    url);
+
+      # ── 4. Post acknowledgement comment ───────────────────────────────────
+      # Posted immediately so the user knows the pipeline is running.
+      # The comment ID is stored as a job output so the summary job can
+      # edit this same comment with the final result rather than posting a
+      # second one.
+      - name: Post acknowledgement comment
+        id: ack
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue_number = context.payload.issue?.number ||
+                                 context.payload.pull_request?.number;
+            const task   = `${{ steps.context.outputs.task }}`.slice(0, 300);
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+
+            const body = [
+              `⏳ **AI Pipeline started**`,
+              ``,
+              `**Task:** ${task}${task.length >= 300 ? '…' : ''}`,
+              ``,
+              `The pipeline is now running — this comment will be updated with the result.`,
+              `[View live progress](${runUrl})`,
+            ].join('\n');
+
+            const resp = await github.rest.issues.createComment({
+              owner:        context.repo.owner,
+              repo:         context.repo.repo,
+              issue_number,
+              body,
+            });
+            core.setOutput('comment_id', String(resp.data.id));
+            core.notice(`Acknowledgement posted — comment ID ${resp.data.id}`);
 
   # ───────────────────────────────────────────────────────────────────────────
   # STAGE 1 — CLASSIFY
@@ -1199,43 +1235,105 @@ jobs:
           echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
           echo "PR: $PR_URL"
 
-      - name: Post summary comment
-        uses: anomalyco/opencode/github@latest
+      - name: Update acknowledgement comment with final result
+        uses: actions/github-script@v7
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_PASSED: ${{ needs.validate.outputs.passed }}
+          FIX_PASSED:      ${{ needs.fix.outputs.fix_passed }}
+          FIX_RESULT:      ${{ needs.fix.result }}
+          TEST_COUNT:      ${{ needs.validate.outputs.test_count }}
+          FAIL_COUNT:      ${{ needs.validate.outputs.fail_count }}
+          LINT_ISSUES:     ${{ needs.validate.outputs.lint_issues }}
+          COMPLEXITY:      ${{ needs.classify.outputs.complexity }}
+          DOMAIN:          ${{ needs.classify.outputs.domain }}
+          ESCALATED:       ${{ needs.classify.outputs.escalate }}
+          HAS_CHANGES:     ${{ steps.branch.outputs.has_changes }}
+          PR_URL:          ${{ steps.pr.outputs.pr_url }}
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          PLAN_RESULT:     ${{ needs.plan.result }}
+          AGG_RESULT:      ${{ needs.aggregate.result }}
         with:
-          model: openrouter/google/gemini-2.5-flash-lite
-          share: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: |
-            Post a comment on the GitHub issue/PR that triggered this pipeline.
-            The issue/PR URL is: ${{ needs.gate.outputs.thread_url }}
+          script: |
+            const issue_number = context.payload.issue?.number ||
+                                 context.payload.pull_request?.number;
+            const commentId  = '${{ needs.gate.outputs.comment_id }}';
+            const task        = `${{ needs.gate.outputs.task }}`.slice(0, 300);
+            const runUrl      = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const prUrl       = process.env.PR_URL || '';
+            const hasChanges  = process.env.HAS_CHANGES === 'true';
 
-            Write a concise, well-formatted markdown comment summarising the pipeline run.
-            Use this data:
+            const validatePassed = process.env.VALIDATE_PASSED === 'true';
+            const fixPassed      = process.env.FIX_PASSED      === 'true';
+            const fixRan         = process.env.FIX_RESULT       === 'success';
+            const classifyOk     = process.env.CLASSIFY_RESULT  === 'success';
+            const planOk         = process.env.PLAN_RESULT       === 'success';
+            const aggOk          = process.env.AGG_RESULT        === 'success';
 
-            TASK: ${{ needs.gate.outputs.task }}
-            COMPLEXITY: ${{ needs.classify.outputs.complexity }}
-            DOMAIN: ${{ needs.classify.outputs.domain }}
-            ESCALATED: ${{ needs.classify.outputs.escalate }}
-            WORKERS: ${{ needs.classify.outputs.worker_count }}
-            TESTS: ${{ needs.validate.outputs.test_count }} run, ${{ needs.validate.outputs.fail_count }} failed
-            LINT ISSUES: ${{ needs.validate.outputs.lint_issues }}
-            VALIDATION PASSED: ${{ needs.validate.outputs.passed }}
-            FIX APPLIED: ${{ needs.fix.result == 'success' }}
-            FIX PASSED: ${{ needs.fix.outputs.fix_passed }}
-            PR URL: ${{ steps.pr.outputs.pr_url }}
-            ACTIONS RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            const testCount  = process.env.TEST_COUNT  || '0';
+            const failCount  = process.env.FAIL_COUNT  || '0';
+            const lintIssues = process.env.LINT_ISSUES || '0';
+            const complexity = process.env.COMPLEXITY  || '—';
+            const domain     = process.env.DOMAIN      || '—';
+            const escalated  = process.env.ESCALATED   === 'true' ? 'yes' : 'no';
 
-            REVIEW NOTES (from aggregator):
-            $(cat /tmp/pipeline/all/review.json 2>/dev/null || echo "Not available")
+            // Determine overall status
+            let statusLine;
+            if (!classifyOk || !planOk) {
+              statusLine = '❌ **Pipeline failed** — could not classify or plan the task';
+            } else if (!aggOk) {
+              statusLine = '❌ **Pipeline failed** — worker or aggregation stage failed';
+            } else if (validatePassed) {
+              statusLine = '✅ **Complete** — all checks passing';
+            } else if (fixRan && fixPassed) {
+              statusLine = '✅ **Complete** — checks passing after fix';
+            } else if (hasChanges) {
+              statusLine = '⚠️ **Partial** — changes made but checks still failing';
+            } else {
+              statusLine = '❌ **Failed** — no changes produced';
+            }
 
-            Format:
-            - Lead with a one-line status (✅ complete / ⚠️ partial / ❌ failed)
-            - Short paragraph on what was done
-            - Pipeline stage table with stage outcomes only
-            - Validation results
-            - Link to PR (if created)
-            - Link to Actions run for full logs
-            - Keep it under 400 words — be direct, not verbose
+            const validationLine = validatePassed || (fixRan && fixPassed)
+              ? `✅ ${testCount} tests passing, lint clean`
+              : `⚠️ ${failCount} test failure(s), ${lintIssues} lint issue(s)`;
+
+            const lines = [
+              statusLine,
+              ``,
+              `**Task:** ${task}${task.length >= 300 ? '…' : ''}`,
+              ``,
+              `| Stage | Result |`,
+              `|-------|--------|`,
+              `| Classify | ${classifyOk ? `✅ ${complexity} / ${domain}` : '❌'} |`,
+              `| Plan | ${planOk ? '✅' : '❌'} |`,
+              `| Work | ${aggOk ? `✅${escalated === 'yes' ? ' (escalated)' : ''}` : '❌'} |`,
+              `| Review | ${aggOk ? '✅' : '—'} |`,
+              `| Validate | ${aggOk ? validationLine : '—'} |`,
+              fixRan ? `| Fix | ${fixPassed ? '✅' : '⚠️'} |` : '',
+              ``,
+              prUrl      ? `**Pull request:** ${prUrl}` : '_No pull request created._',
+              `**Run:** [View full logs](${runUrl})`,
+            ].filter(l => l !== '').join('\n');
+
+            // Edit the acknowledgement comment in place
+            if (commentId) {
+              try {
+                await github.rest.issues.updateComment({
+                  owner:      context.repo.owner,
+                  repo:       context.repo.repo,
+                  comment_id: parseInt(commentId),
+                  body:       lines,
+                });
+                core.notice('Acknowledgement comment updated with final result');
+                return;
+              } catch (e) {
+                core.warning(`Could not edit comment ${commentId}: ${e.message} — posting new comment`);
+              }
+            }
+
+            // Fallback: post a new comment if the original can't be edited
+            await github.rest.issues.createComment({
+              owner:        context.repo.owner,
+              repo:         context.repo.repo,
+              issue_number,
+              body:         lines,
+            });
