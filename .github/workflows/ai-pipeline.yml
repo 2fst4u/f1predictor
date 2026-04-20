@@ -1426,26 +1426,27 @@ jobs:
               `**Run:** [View full logs](${runUrl})`,
             ].filter(l => l !== '').join('\n');
 
-            // Edit the acknowledgement comment in place
-            if (commentId) {
-              try {
-                await github.rest.issues.updateComment({
-                  owner:      context.repo.owner,
-                  repo:       context.repo.repo,
-                  comment_id: parseInt(commentId),
-                  body:       lines,
-                });
-                core.notice('Acknowledgement comment updated with final result');
-                return;
-              } catch (e) {
-                core.warning(`Could not edit comment ${commentId}: ${e.message} — posting new comment`);
-              }
-            }
-
-            // Fallback: post a new comment if the original can't be edited
+            // Post a NEW comment so issue followers get notified of the outcome.
+            // The in-progress acknowledgement comment is then deleted — it has
+            // served its purpose and would otherwise clutter the thread.
             await github.rest.issues.createComment({
               owner:        context.repo.owner,
               repo:         context.repo.repo,
               issue_number,
               body:         lines,
             });
+            core.notice('Final result comment posted');
+
+            // Delete the in-progress acknowledgement comment
+            if (commentId) {
+              try {
+                await github.rest.issues.deleteComment({
+                  owner:      context.repo.owner,
+                  repo:       context.repo.repo,
+                  comment_id: parseInt(commentId),
+                });
+                core.notice(`Deleted in-progress acknowledgement comment ${commentId}`);
+              } catch (e) {
+                core.warning(`Could not delete acknowledgement comment: ${e.message}`);
+              }
+            }
