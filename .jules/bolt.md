@@ -8,3 +8,7 @@
 ## 2024-05-18 - Replacing pandas groupby aggregations with fast factorization and bincount
 **Learning:** pandas `groupby.agg` is surprisingly slow for basic aggregations like sum and count on small-to-medium DataFrames due to significant overhead. This becomes a bottleneck in hot paths, such as preprocessing for Monte Carlo simulation where DNF probability estimates and feature processing hit `groupby` logic repeatedly.
 **Action:** When performing simple `sum()` and `count()` operations on one or two columns, utilize a combination of `pd.factorize()` and `np.bincount(weights=...)` wrapped in a fast helper like `_fast_agg()`. This optimization is generally 2-3x faster and significantly cuts down inner-loop latency in repetitive pandas logic. Remember to safely manage `NaN`s by using `dropna` on the grouped columns, since `pd.factorize()` treats them as `-1` which crashes `np.bincount()`.
+
+## 2025-02-23 - Pandas transform(lambda) bottleneck for grouped normalisation
+**Learning:** Using a lambda function within `groupby().transform()` (e.g. `df.groupby('col').transform(lambda x: (x - x.mean()) / x.std())`) forces pandas to execute pure Python code for each group, which is extremely slow (often >10x slower).
+**Action:** Always replace `groupby.transform(lambda)` with mathematically equivalent vectorised operations using pandas built-in string aggregators, such as calculating `mean = transform('mean')` and `std = transform('std')` separately and applying the arithmetic across the whole series.
