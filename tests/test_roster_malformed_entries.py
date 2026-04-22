@@ -216,9 +216,13 @@ class TestRosterFromFastf1:
         ev.get_session.side_effect = _get_session
         return ev
 
-    def test_rejects_single_driver_fp1_when_no_other_source(self):
-        """A 1-driver FP1 session must NOT be returned as the roster when
-        there's no authoritative session data — too unreliable to trust."""
+    def test_rejects_fp1_with_any_reserve_present(self):
+        """An FP1 session containing a reserve driver must be rejected in
+        full when the entry list is available — even if the reserve would be
+        filterable out, the remaining drivers are not a faithful picture of
+        the race roster (they're just the subset of regulars who happened to
+        run in FP1). The reject is on presence of a reserve, not count.
+        """
         fp1 = _fastf1_df([{
             "Abbreviation": "CRA", "DriverNumber": "31",
             "FirstName": "Jak", "LastName": "Crawford",
@@ -226,16 +230,53 @@ class TestRosterFromFastf1:
         }])
         ev = self._make_event({"FP1": fp1})
         mapping = {
-            "drivers": {},
+            "drivers": {"CRA": "crawford", "ALO": "alonso"},
             "constructors": {},
-            # Non-empty race_driver_ids that does NOT include CRA triggers
-            # the reserve filter, which zeroes the practice roster.
+            # Non-empty race_driver_ids — enables reserve filter.
             "race_driver_ids": {"alonso", "stroll"},
         }
         with patch("f1pred.data.fastf1_backend.get_event", return_value=ev):
             roster = _roster_from_fastf1(2026, 4, mapping=mapping)
-        # Empty — the only thing FastF1 offered was filtered out as a reserve.
+        # Empty — Crawford is a reserve, so the whole session is rejected.
         assert roster == []
+
+    def test_authoritative_race_accepted_regardless_of_size(self):
+        """A 14-driver classified Race session (e.g. after mass DSQ/DNF at
+        Spa) must be returned as-is. Disqualified or not-classified drivers
+        are legitimately absent from the classification; demanding a minimum
+        count would wrongly reject real race data.
+        """
+        rows = [
+            {
+                "Abbreviation": f"D{i:02d}", "DriverNumber": str(i + 1),
+                "FirstName": f"Given{i}", "LastName": f"Family{i}",
+                "TeamName": "Team X",
+            } for i in range(14)
+        ]
+        ev = self._make_event({"Race": _fastf1_df(rows)})
+        with patch("f1pred.data.fastf1_backend.get_event", return_value=ev):
+            roster = _roster_from_fastf1(2024, 1, mapping=None)
+        assert len(roster) == 14, (
+            "14-driver classified race must be accepted verbatim; no "
+            "minimum-count gate is permitted in the authoritative path."
+        )
+
+    def test_authoritative_single_driver_session_still_wins(self):
+        """If the only data FastF1 has is a 1-driver authoritative session
+        (e.g. Qualifying has only produced one lap-time so far), it still
+        beats any practice session fallback. There is no minimum count —
+        incomplete authoritative data is still authoritative.
+        """
+        quali = _fastf1_df([{
+            "Abbreviation": "ALO", "DriverNumber": "14",
+            "FirstName": "Fernando", "LastName": "Alonso",
+            "TeamName": "Aston Martin",
+        }])
+        ev = self._make_event({"Qualifying": quali})
+        with patch("f1pred.data.fastf1_backend.get_event", return_value=ev):
+            roster = _roster_from_fastf1(2026, 4, mapping=None)
+        assert len(roster) == 1
+        assert roster[0]["driverId"] == "alo"
 
     def test_uses_full_authoritative_roster(self):
         """A 20-driver Race session IS the truth; use it unconditionally."""
@@ -252,9 +293,9 @@ class TestRosterFromFastf1:
         assert len(roster) == 20
 
     def test_authoritative_session_preferred_over_practice(self):
-        """When Qualifying (1 driver, authoritative) and FP1 (1 driver,
-        practice with reserve) both exist, the practice session must NEVER
-        be chosen — authoritative wins even if incomplete."""
+        """When Qualifying (authoritative) and FP1 (practice with reserve)
+        both exist, the practice session must NEVER be chosen — authoritative
+        wins irrespective of driver counts."""
         quali = _fastf1_df([{
             "Abbreviation": "ALO", "DriverNumber": "14",
             "FirstName": "Fernando", "LastName": "Alonso",
@@ -277,9 +318,11 @@ class TestRosterFromFastf1:
         assert ids == ["alonso"]
         assert "crawford" not in ids
 
-    def test_practice_accepted_when_complete_and_unfiltered(self):
-        """A full practice session (18+ drivers) with no reserves is a valid
-        fallback when authoritative sessions are empty."""
+    def test_practice_accepted_when_no_reserves_and_no_entry_list(self):
+        """When no entry list is available to check reserves against, the
+        practice session is accepted verbatim at whatever size — the pipeline
+        has no way to do better.
+        """
         rows = [
             {
                 "Abbreviation": f"D{i:02d}", "DriverNumber": str(i + 1),
@@ -291,6 +334,36 @@ class TestRosterFromFastf1:
         with patch("f1pred.data.fastf1_backend.get_event", return_value=ev):
             roster = _roster_from_fastf1(2024, 1, mapping=None)
         assert len(roster) == 20
+
+    def test_practice_accepted_when_all_drivers_are_registered(self):
+        """A practice session where every listed driver is in the season's
+        race-driver set is accepted. The gate is "zero reserves present",
+        not "≥ N drivers present".
+        """
+        # 3-driver FP3, but all three ARE registered race drivers. Unusual
+        # (most FP3 sessions have the full grid), but the pipeline must
+        # accept it when it's all we have.
+        rows = [
+            {"Abbreviation": "ALO", "DriverNumber": "14",
+             "FirstName": "Fernando", "LastName": "Alonso",
+             "TeamName": "Aston Martin"},
+            {"Abbreviation": "STR", "DriverNumber": "18",
+             "FirstName": "Lance", "LastName": "Stroll",
+             "TeamName": "Aston Martin"},
+            {"Abbreviation": "VER", "DriverNumber": "1",
+             "FirstName": "Max", "LastName": "Verstappen",
+             "TeamName": "Red Bull"},
+        ]
+        mapping = {
+            "drivers": {"ALO": "alonso", "STR": "stroll", "VER": "verstappen"},
+            "constructors": {},
+            "race_driver_ids": {"alonso", "stroll", "verstappen"},
+        }
+        ev = self._make_event({"FP3": _fastf1_df(rows)})
+        with patch("f1pred.data.fastf1_backend.get_event", return_value=ev):
+            roster = _roster_from_fastf1(2026, 4, mapping=mapping)
+        ids = {e["driverId"] for e in roster}
+        assert ids == {"alonso", "stroll", "verstappen"}
 
     def test_roster_entries_from_fastf1_synthesises_code(self):
         """Even rows with no Abbreviation should get a synthesised 3-letter
@@ -491,15 +564,19 @@ class TestDeriveRosterCascade:
 
 
 # ---------------------------------------------------------------------------
-# Grid-size independence: the roster must NEVER be capped at 20 drivers.
+# Grid-size independence: the roster must accept any size — no cap, no floor.
 # ---------------------------------------------------------------------------
 
-class TestGridSizeNotCapped:
-    """Regression tests for the hardcoded 20-driver assumption.
+class TestRosterSizeIsUnconstrained:
+    """Regression tests that assert the pipeline applies NEITHER a minimum
+    nor maximum driver count.
 
     F1 grids vary: 20 cars in 2017-2025, 22 from 2026 (Cadillac joins),
-    and historically anywhere from 20-26. The roster pipeline must faithfully
-    return whatever size the upstream data reports.
+    historically anywhere from 20-26. And within a single event, cars can
+    be disqualified, fail to start, or not be classified — so a legitimately
+    published classification can have 14 drivers (Spa 2021) or fewer. The
+    roster pipeline must faithfully return whatever size the upstream data
+    reports, with no caller silently truncating, padding, or rejecting.
     """
 
     def _mock_jolpica(self, *, entry_list=None, race_results=None):
@@ -577,32 +654,113 @@ class TestGridSizeNotCapped:
 
         assert len(roster) == n
 
-    def test_min_floor_does_not_cap_upper_bound(self):
-        """Sanity-check: the completeness floor is a lower bound only.
-        A 22-driver session is accepted just as readily as a 20-driver one.
+    # -- No minimum: DSQ / not-classified scenarios must be accepted --------
+
+    @pytest.mark.parametrize("n", [1, 5, 10, 14, 17])
+    def test_same_round_accepts_below_20_drivers(self, n):
+        """Jolpica returning a small classification (because of mass DSQ,
+        DNS, or not-classified) MUST be accepted at face value. The old
+        ``len(same) >= 20`` and ``len(same) >= _min_expected_roster`` gates
+        would have wrongly fallen through to the entry list / previous-event
+        cascade and replaced legitimate results with stale data.
         """
-        from f1pred.roster import _MIN_COMPLETE_ROSTER_MODERN, _min_expected_roster
+        results = _full_grid(n)
+        jc = self._mock_jolpica(race_results=results)
+        past = datetime(2024, 5, 5, tzinfo=timezone.utc)
+        now = datetime(2024, 6, 1, tzinfo=timezone.utc)
 
-        # The floor is a threshold for "enough data", not a ceiling.
-        assert _MIN_COMPLETE_ROSTER_MODERN <= 20
-        assert _min_expected_roster(2026) <= 22
-        assert _min_expected_roster(2030) <= 26
+        with patch("f1pred.data.fastf1_backend.get_event", return_value=None):
+            roster = derive_roster(jc, "2024", "6", event_dt=past, now_dt=now)
 
-    def test_same_round_floor_uses_season_aware_helper(self):
-        """The ``same_round_known_roster`` gate in derive_roster must consult
-        the same season-aware floor as the rest of the pipeline — not a
-        hardcoded 20.
+        assert len(roster) == n, (
+            f"Small classification of size {n} was replaced by fallback data "
+            "— roster must have no minimum-count gate."
+        )
+
+    @pytest.mark.parametrize("n", [1, 5, 10, 14, 17])
+    def test_fastf1_authoritative_accepts_below_20_drivers(self, n):
+        """A classified Race session with fewer than 20 drivers (after
+        widespread DSQ or mechanical carnage) must be returned as-is. There
+        is no minimum-driver gate in the authoritative path.
+        """
+        rows = [
+            {
+                "Abbreviation": f"D{i:02d}", "DriverNumber": str(i + 1),
+                "FirstName": f"Given{i}", "LastName": f"Family{i}",
+                "TeamName": "Team X",
+            } for i in range(n)
+        ]
+        jc = self._mock_jolpica()  # empty race_results -> cascade to FastF1
+
+        def _mk_sess(results):
+            s = MagicMock()
+            s.results = results
+            return s
+
+        ev = Mock()
+        ev.get_session.side_effect = lambda name: _mk_sess(
+            _fastf1_df(rows) if name == "Race" else pd.DataFrame()
+        )
+        past = datetime(2024, 5, 5, tzinfo=timezone.utc)
+        now = datetime(2024, 6, 1, tzinfo=timezone.utc)
+
+        with patch("f1pred.data.fastf1_backend.get_event", return_value=ev):
+            roster = derive_roster(jc, "2024", "6", event_dt=past, now_dt=now)
+
+        assert len(roster) == n
+
+    def test_no_minimum_roster_constants_remain(self):
+        """Anti-regression: neither the module-level floor constants nor
+        the ``_min_expected_roster`` helper should reappear. Any minimum
+        encoding is by definition a violation of the "cars may be disqualified
+        or not classified" invariant.
+        """
+        from f1pred import roster as roster_mod
+
+        for banned in (
+            "_MIN_COMPLETE_ROSTER_MODERN",
+            "_MIN_COMPLETE_ROSTER_LEGACY",
+            "_min_expected_roster",
+        ):
+            assert not hasattr(roster_mod, banned), (
+                f"{banned} must not exist — minimum-count gates reject "
+                "legitimately small rosters (DSQ / not classified)."
+            )
+
+    def test_no_minimum_gate_in_derive_roster_source(self):
+        """Source-level anti-regression: nobody reintroduces a numeric
+        minimum driver-count check in the cascade.
         """
         import inspect
+        import re
 
         from f1pred import roster as roster_mod
 
         src = inspect.getsource(roster_mod.derive_roster)
-        # Sanity: the helper is used.
-        assert "_min_expected_roster" in src, (
-            "derive_roster must use the season-aware floor helper, not hardcoded 20"
+        normalised = src.replace(" ", "")
+        # No `len(...) >= <number>` or `<number> <=` patterns on rosters.
+        # We just look for the giveaway shapes.
+        assert not re.search(r"len\([^)]+\)>=\d", normalised), (
+            "derive_roster must not gate on a minimum driver count."
         )
-        # Anti-regression: no raw `>= 20` comparison on roster length.
-        assert ">= 20" not in src.replace(" ", ""), (
-            "derive_roster must not hardcode `>= 20` — use _min_expected_roster"
+        assert "_min_expected_roster" not in src, (
+            "derive_roster must not use _min_expected_roster (removed)."
+        )
+
+    def test_no_minimum_gate_in_fastf1_roster_source(self):
+        """Same anti-regression but for the FastF1 path — no min-driver gate
+        on authoritative or practice results.
+        """
+        import inspect
+        import re
+
+        from f1pred import roster as roster_mod
+
+        src = inspect.getsource(roster_mod._roster_from_fastf1)
+        normalised = src.replace(" ", "")
+        assert not re.search(r"len\([^)]+\)>=\d", normalised), (
+            "_roster_from_fastf1 must not gate on a minimum driver count."
+        )
+        assert not re.search(r"min_expected", src), (
+            "min_expected variables must not return to _roster_from_fastf1."
         )

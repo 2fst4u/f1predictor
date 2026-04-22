@@ -14,19 +14,21 @@ logger = get_logger(__name__)
 # F1 live-timing servers are slow or sessions don't exist yet.
 _FASTF1_ROSTER_TIMEOUT = 15
 
-# Modern F1 grids vary in size: 20 cars in 2017-2025, 22 from 2026 with Cadillac
-# joining, historically anywhere from 20-26. The code MUST NOT hardcode a grid
-# size or truncate rosters. These thresholds are *floors* only — used to decide
-# whether a session returned "enough" data to be trusted as authoritative. They
-# never bound the upper end of the roster; a 22- or 26-driver session is still
-# returned in full.
+# F1 grid size is NEVER assumed or enforced. Grids vary widely — 20 cars in
+# 2017-2025, 22 from 2026 with Cadillac joining, historically 20-26 — and
+# legitimate end-of-session rosters can be smaller still because cars are
+# routinely disqualified, failed to start, or not classified (didn't complete
+# 90% of race distance). A 14-driver classified race at Spa-Francorchamps
+# after a chaotic wet race is just as real and authoritative as a 22-driver
+# dry race. The pipeline MUST NOT apply a minimum driver count anywhere:
+# doing so would reject legitimate results and trigger spurious fallbacks.
 #
-# Any session returning fewer than the floor is suspicious: Race/Sprint/Qual
-# sessions of healthy events should comfortably meet it. If they don't, the
-# session is likely incomplete (e.g. rain-cancelled, data partially published)
-# and we should not treat it as authoritative.
-_MIN_COMPLETE_ROSTER_MODERN = 18  # Floor for 2010+ seasons (buffer vs 20/22-car grids)
-_MIN_COMPLETE_ROSTER_LEGACY = 10  # Older seasons (<2010) had variable entries
+# The real question a roster pipeline must answer is "is this data source
+# authoritative?", not "does it have enough rows?". Authority is decided by
+# *which session* the data came from, and (for practice sessions) whether
+# every driver listed is actually registered as a race driver for the season.
+# Reserve/test drivers are rejected by name (via the entry list), not by
+# driver count.
 
 # Authoritative sessions — these determine the true race-weekend roster.
 # Drivers participating in these are the ones who will start the race.
@@ -40,10 +42,12 @@ _AUTHORITATIVE_SESSIONS = (
 
 # Practice sessions — these frequently feature reserve/test/rookie drivers
 # (e.g. Jak Crawford subbing for Alonso in FP1) who are NOT the race roster.
-# We only use these as a last-resort fallback when:
-#   1. No authoritative session has data, AND
-#   2. The practice roster passes the completeness threshold (so we're not
-#      picking up a 1-2 driver partial/rookie-only FP1 session).
+# We only trust them as a fallback when:
+#   1. No authoritative session has any data at all, AND
+#   2. Every driver in the session is a registered race driver (i.e. the
+#      reserve filter against the Jolpica entry list removes nobody, OR the
+#      entry list is unavailable so we can't distinguish).
+# Neither of those conditions is a driver-count threshold.
 _PRACTICE_SESSIONS = ("FP3", "FP2", "FP1")
 
 
@@ -319,11 +323,6 @@ def _get_canonical_mapping(jc: JolpicaClient, season: str) -> Dict[str, 'Any']: 
         return {}
 
 
-def _min_expected_roster(season: int) -> int:
-    """Return the minimum driver count that signals a "complete" roster."""
-    return _MIN_COMPLETE_ROSTER_MODERN if season >= 2010 else _MIN_COMPLETE_ROSTER_LEGACY
-
-
 def _roster_entries_from_fastf1_results(
     results, mapping: Optional[Dict]
 ) -> List[Dict]:
@@ -470,18 +469,23 @@ def _roster_from_fastf1(season: int, rnd: int, mapping: Optional[Dict] = None) -
 
     Strategy:
       1. Try *authoritative* sessions (Race → Sprint → Qualifying → SQ → SS)
-         first. Any one of these with enough drivers is treated as the truth.
-      2. Only if none of those yielded a complete roster, fall back to
+         in order. The first one with any drivers is the truth, regardless
+         of count — cars can legitimately be disqualified or not classified,
+         so a 14-driver classified race is just as authoritative as a
+         22-driver one.
+      2. Only if no authoritative session returned anything, fall back to
          *practice* sessions (FP3 → FP2 → FP1). Practice rosters are
-         aggressively filtered against the Jolpica race-driver list because
-         they routinely contain FP1 reservists (rookies, test drivers) who
-         are NOT the actual race roster.
+         filtered against the Jolpica race-driver list because they
+         routinely contain FP1 reservists (rookies, test drivers) who are
+         NOT the actual race roster. A practice session is only trusted
+         when, after reserve filtering, it still contains drivers and every
+         one of them is a registered race driver (i.e. nothing was dropped,
+         or the entry list was unavailable so filtering was skipped).
 
     Applies a wall-clock timeout (_FASTF1_ROSTER_TIMEOUT) so that unresponsive
     F1 live-timing servers cannot block the entire prediction pipeline.
     """
     t0 = time.monotonic()
-    min_expected = _min_expected_roster(season)
 
     def _budget_remaining() -> float:
         return _FASTF1_ROSTER_TIMEOUT - (time.monotonic() - t0)
@@ -495,7 +499,10 @@ def _roster_from_fastf1(season: int, rnd: int, mapping: Optional[Dict] = None) -
             return []
 
         # --- Pass 1: Authoritative sessions ---------------------------------
-        best_auth: List[Dict] = []
+        # Any authoritative session that produced any entries at all is truth:
+        # DSQ/DNS/DNF/not-classified drivers are legitimately absent from
+        # the classification, and we must not second-guess that by demanding
+        # a minimum count.
         for sname in _AUTHORITATIVE_SESSIONS:
             remaining = _budget_remaining()
             if remaining <= 0:
@@ -529,24 +536,24 @@ def _roster_from_fastf1(season: int, rnd: int, mapping: Optional[Dict] = None) -
                 continue
 
             logger.info(
-                "[roster] FastF1 %s returned %d drivers", sname, len(entries)
+                "[roster] Using FastF1 %s as authoritative roster (%d drivers)",
+                sname, len(entries),
             )
-            if len(entries) >= min_expected:
-                logger.info(
-                    "[roster] Using FastF1 %s as authoritative roster "
-                    "(%d drivers >= min %d)",
-                    sname, len(entries), min_expected,
-                )
-                return entries
-            # Remember the largest incomplete authoritative result as a
-            # tentative fallback in case nothing better materialises.
-            if len(entries) > len(best_auth):
-                best_auth = entries
+            return entries
 
-        # --- Pass 2: Practice sessions (guarded) ----------------------------
-        # Practice rosters are suspect: FP1 often has rookie/reserve stand-ins.
-        # Filter against the authoritative Jolpica entry list, then require
-        # the post-filter roster to meet the completeness bar.
+        # --- Pass 2: Practice sessions (reserve-filtered) -------------------
+        # Practice rosters can contain FP1 reservists. We trust a practice
+        # session only if EVERY driver in it is a registered race driver —
+        # i.e. the reserve filter drops nobody (or, when the entry list is
+        # unavailable, we have no way to tell reserves from real drivers and
+        # must accept the data as-is). Any session where reserves are present
+        # and the entry list is available is rejected outright, because we
+        # can't tell whether the remaining filtered roster faithfully
+        # represents the race grid or is just the subset of reservists who
+        # happened to have a Jolpica entry from a prior year.
+        race_ids: Set[str] = (mapping or {}).get("race_driver_ids") or set()
+        have_entry_list = bool(race_ids)
+
         for sname in _PRACTICE_SESSIONS:
             remaining = _budget_remaining()
             if remaining <= 0:
@@ -565,33 +572,33 @@ def _roster_from_fastf1(season: int, rnd: int, mapping: Optional[Dict] = None) -
                 continue
 
             raw_entries = _roster_entries_from_fastf1_results(results, mapping)
-            filtered = _filter_reserves(raw_entries, mapping)
+            if not raw_entries:
+                continue
 
-            if len(filtered) >= min_expected:
+            if have_entry_list:
+                filtered = _filter_reserves(raw_entries, mapping)
+                if len(filtered) != len(raw_entries):
+                    # At least one reserve was present — session is not a
+                    # faithful picture of the race roster, skip it.
+                    logger.info(
+                        "[roster] FastF1 %s contained %d reserve(s); not "
+                        "trusting this session for the race roster",
+                        sname, len(raw_entries) - len(filtered),
+                    )
+                    continue
                 logger.info(
-                    "[roster] Using FastF1 %s after reserve filter "
-                    "(%d -> %d drivers)",
-                    sname, len(raw_entries), len(filtered),
+                    "[roster] Using FastF1 %s — all %d drivers are registered "
+                    "race drivers", sname, len(filtered),
                 )
                 return filtered
 
+            # No entry list available; can't distinguish reserves, but also
+            # have nothing better to go on. Accept the session verbatim.
             logger.info(
-                "[roster] FastF1 %s roster not trusted "
-                "(%d raw, %d after reserve filter, need %d)",
-                sname, len(raw_entries), len(filtered), min_expected,
+                "[roster] Using FastF1 %s (no entry list for reserve check, "
+                "%d drivers)", sname, len(raw_entries),
             )
-
-        # --- Pass 3: Degraded authoritative ---------------------------------
-        # If an authoritative session produced entries but fewer than the
-        # threshold, it's still better than a practice session. Use it rather
-        # than silently returning nothing.
-        if best_auth:
-            logger.info(
-                "[roster] Falling back to incomplete authoritative roster "
-                "(%d drivers, below threshold %d)",
-                len(best_auth), min_expected,
-            )
-            return best_auth
+            return raw_entries
 
     except Exception as e:
         logger.warning(f"[roster] FastF1 fetch failed: {e}")
@@ -648,11 +655,13 @@ def derive_roster(
 
     # 1. Jolpica known results for this round — always first because if a
     #    session has actually run, its classification is the ground truth.
-    #    Completeness gate uses the same season-aware floor as the FastF1 path
-    #    (never a hard 20-driver assumption): a 22- or 26-car grid passes
-    #    trivially; a partial 5-driver Q1 snapshot does not.
+    #    Any non-empty result is accepted: cars can be disqualified or not
+    #    classified, so a 14-driver result set after a chaotic race is as
+    #    authoritative as a 22-driver one. We must not apply a minimum-count
+    #    gate here, or we'd reject legitimate results and cascade into stale
+    #    fallbacks.
     same = _same_round_known_roster(jc, season, rnd)
-    if same and len(same) >= _min_expected_roster(s_int):
+    if same:
         return same
 
     # Fetch season entry list exactly once; derive mapping from it and reuse
