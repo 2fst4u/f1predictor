@@ -9,7 +9,9 @@
         "anthropic/claude-opus-4.7": {},
         "openai/gpt-4.1": {},
         "openai/gpt-4o-mini": {},
-        "anthropic/claude-sonnet-4.6": {}
+        "anthropic/claude-sonnet-4.6": {},
+        "anthropic/claude-3.7-sonnet": {},
+        "openai/o4-mini": {}
       }
     }
   }
