@@ -29,5 +29,6 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          model: openrouter/google/gemini-2.5-flash
           agent: planner
           use_github_token: true
