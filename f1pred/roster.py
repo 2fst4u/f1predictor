@@ -289,9 +289,9 @@ def _roster_from_fastf1(season: int, rnd: int, mapping: Optional[Dict] = None) -
                 if name_key in d_map:
                     did = d_map[name_key]
 
-            # Fallback to abbreviation if not mapped
+            # If driverId is still None, we don't have enough info, so skip this driver.
             if not did:
-                did = abbr.lower() if abbr else None
+                continue # Skip this entry if driverId is not found
 
             # Try to canonicalize constructorId
             tname = r.get("TeamName")
