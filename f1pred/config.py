@@ -14,7 +14,6 @@ class AppSettings:
     random_seed: int
     timezone: str
     live_refresh_seconds: int
-    webhook_min_stable_cycles: int = 1
     log_level: str = "WARNING"
     auto_refresh_seconds: int = 3600
 
@@ -313,12 +312,6 @@ def load_config(path: str) -> AppConfig:
             if not isinstance(auto_refresh, int) or auto_refresh < 60:
                 errors.append("app.auto_refresh_seconds must be at least 60 seconds")
 
-        # Webhook Debounce
-        if "webhook_min_stable_cycles" in app_cfg:
-            cycles = app_cfg["webhook_min_stable_cycles"]
-            if not isinstance(cycles, int) or cycles < 0:
-                errors.append("app.webhook_min_stable_cycles must be a non-negative integer")
-
     except KeyError as e:
         errors.append(str(e))
 
@@ -326,7 +319,9 @@ def load_config(path: str) -> AppConfig:
         raise ValueError("Invalid config:\n- " + "\n- ".join(errors))
 
     # Construct dataclasses
-    app = AppSettings(**cfg["app"])
+    # Drop removed/deprecated keys so old config files keep working
+    app_kwargs = {k: v for k, v in cfg["app"].items() if k != "webhook_min_stable_cycles"}
+    app = AppSettings(**app_kwargs)
     paths = Paths(**paths_in)
     data_sources = DataSources(
         jolpica=Jolpica(**ds_in["jolpica"]),

@@ -316,13 +316,6 @@ class PredictionManager:
         self._previous_predictions: Dict[str, List[Dict[str, Any]]] = {}  # session -> predictions
         self._previous_weather: Dict[str, Dict[str, Any]] = {}  # session -> weather
 
-        # Webhook debounce state
-        self._last_sent_webhook_fps: Dict[str, str] = {}
-        self._pending_webhook_fps: Dict[str, str] = {}
-        self._pending_webhook_cycles: Dict[str, int] = {}
-        self._last_sent_predictions: Dict[str, List[Dict[str, Any]]] = {}
-        self._last_sent_weather: Dict[str, Dict[str, Any]] = {}
-
         self._last_update: Optional[str] = None
         self._status: str = "idle"  # idle, running, error
 
@@ -622,7 +615,8 @@ class PredictionManager:
             new_fp = _fingerprint_predictions(ranked_list)
             old_fp = self._previous_fingerprints.get(cache_key)
 
-            # --- SSE Diff Detection (Immediate) ---
+            # --- Diff Detection (Immediate, shared by SSE and webhooks) ---
+            diff = None
             if old_fp is not None and old_fp != new_fp:
                 old_preds = self._previous_predictions.get(cache_key, [])
                 old_weather = self._previous_weather.get(cache_key)
@@ -640,63 +634,11 @@ class PredictionManager:
             self._previous_predictions[cache_key] = ranked_list
             self._previous_weather[cache_key] = weather
 
-            # --- Webhook Debounce Logic ---
-            # Webhooks are excluded for qualifying sessions
-            if sess not in ("qualifying", "sprint_qualifying"):
-                last_sent_fp = self._last_sent_webhook_fps.get(cache_key)
-
-                if last_sent_fp is None:
-                    # First time seeing this session, establish baseline immediately
-                    self._last_sent_webhook_fps[cache_key] = new_fp
-                    self._last_sent_predictions[cache_key] = ranked_list
-                    self._last_sent_weather[cache_key] = weather
-                # If current state is same as last sent, clear any pending debounce
-                elif new_fp == last_sent_fp:
-                    self._pending_webhook_fps.pop(cache_key, None)
-                    self._pending_webhook_cycles.pop(cache_key, None)
-                else:
-                    pending_fp = self._pending_webhook_fps.get(cache_key)
-                    if new_fp != pending_fp:
-                        # State changed from what was pending, or no pending state
-                        self._pending_webhook_fps[cache_key] = new_fp
-                        self._pending_webhook_cycles[cache_key] = 0
-                    else:
-                        # State is stable (same as pending)
-                        self._pending_webhook_cycles[cache_key] = self._pending_webhook_cycles.get(cache_key, 0) + 1
-
-                    # Check if stable for enough cycles
-                    cycles = self._pending_webhook_cycles.get(cache_key, 0)
-
-                    # Fetch cycle limit from config, ensuring it's a number
-                    cycle_limit = 1
-                    if hasattr(self.cfg, 'app') and hasattr(self.cfg.app, 'webhook_min_stable_cycles'):
-                        val = self.cfg.app.webhook_min_stable_cycles
-                        if isinstance(val, int):
-                            cycle_limit = val
-
-                    if cycles >= cycle_limit:
-                        # Stable for long enough! Trigger update.
-                        last_preds = self._last_sent_predictions.get(cache_key, [])
-                        last_weather = self._last_sent_weather.get(cache_key)
-
-                        # Only compute diff if we have a previous state to compare against
-                        if last_preds:
-                            w_diff = compute_prediction_diff(
-                                session=f"R{round_i}_{sess}",
-                                old_predictions=last_preds,
-                                new_predictions=ranked_list,
-                                old_weather=last_weather,
-                                new_weather=weather,
-                            )
-                            if w_diff:
-                                webhook_updates[sess] = (w_diff, ranked_list, weather)
-
-                        # Even if no diff (e.g. first send), mark as sent to establish baseline
-                        self._last_sent_webhook_fps[cache_key] = new_fp
-                        self._last_sent_predictions[cache_key] = ranked_list
-                        self._last_sent_weather[cache_key] = weather
-                        self._pending_webhook_fps.pop(cache_key, None)
-                        self._pending_webhook_cycles.pop(cache_key, None)
+            # --- Webhook Update (Immediate) ---
+            # Webhooks are excluded for qualifying sessions.
+            # Send on every detected change, matching the SSE diff path.
+            if diff and sess not in ("qualifying", "sprint_qualifying"):
+                webhook_updates[sess] = (diff, ranked_list, weather)
 
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
@@ -710,7 +652,7 @@ class PredictionManager:
             self._last_update = now
             self._save_to_disk()
 
-        # Send consolidated Discord webhook if stable changes occurred
+        # Send consolidated Discord webhook if any changes occurred
         if webhook_updates and hasattr(self, '_send_discord_webhook'):
             self._send_discord_webhook(event_title, webhook_updates)
 

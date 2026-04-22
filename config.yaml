@@ -7,7 +7,6 @@ app:
   timezone: "UTC"
   live_refresh_seconds: 600
   auto_refresh_seconds: 3600  # Background prediction refresh interval (seconds)
-  webhook_min_stable_cycles: 1  # Number of stable cycles before sending webhook
   log_level: "WARNING"  # DEBUG, INFO, WARNING, ERROR - reduces default verbosity
 
 paths:
