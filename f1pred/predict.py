@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 import numpy as np
 from colorama import Fore, Style
 
-from .util import get_logger, ensure_dirs, StatusSpinner, sanitize_for_console, PredictionCache
+from .util import get_logger, ensure_dirs, StatusSpinner, sanitize_for_console, PredictionCache, logic_fingerprint
 from .data.jolpica import JolpicaClient
 from .data.open_meteo import OpenMeteoClient
 from .data.fastf1_backend import init_fastf1, get_session_classification, get_session_weather_status, patch_missing_positions
@@ -731,7 +731,14 @@ def run_predictions_for_event(
                 # 1.5 Optimization check: High-level cache for finished sessions
                 # We do this before heavy feature building to ensure near-instant results for finished sessions
                 # Skip when use_actuals=False (backtesting/calibration) to exercise the full prediction pipeline
-                sess_cache_key = f"{season_i}_{round_i}_{sess}_{cfg.app.model_version}"
+                # The logic_fingerprint() component ensures that any deploy, or any change to roster/feature
+                # logic, automatically invalidates cached predictions — operators should never need to wipe
+                # the cache directory by hand to pick up a bug fix.
+                sess_cache_key = (
+                    f"{season_i}_{round_i}_{sess}"
+                    f"_{cfg.app.model_version}"
+                    f"_{logic_fingerprint()}"
+                )
 
                 if use_actuals and roster is not None and not roster.empty:
                     actual_positions = _get_actual_positions_for_session(
@@ -901,6 +908,7 @@ def run_predictions_for_event(
                         "weights": calibrated_weights,
                         "modelling_cfg": cfg.modelling,
                         "_cache_breaker": "v10_aggressive_shap",
+                        "_logic_fingerprint": logic_fingerprint(),
                     })):
                         spinner.update(f"Predicting {event_title} - {sess}: Using cached result...")
                         ranked = cached_hit["ranked"]
@@ -1107,7 +1115,7 @@ def run_predictions_for_event(
                         # If this is a finished session and we missed the high-level cache,
                         # save it now so we don't need to rebuild it next time.
                         if sess_dt and sess_dt < datetime.now(timezone.utc):
-                            pred_cache.set_by_key(f"{season_i}_{round_i}_{sess}_{cfg.app.model_version}", {
+                            pred_cache.set_by_key(sess_cache_key, {
                                 "ranked": ranked,
                                 "prob_matrix": prob_matrix,
                                 "pairwise": pairwise,

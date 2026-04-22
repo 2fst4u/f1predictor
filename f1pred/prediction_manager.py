@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
-from .util import get_logger
+from .util import get_logger, logic_fingerprint
 
 logger = get_logger(__name__)
 
@@ -300,14 +300,38 @@ class PredictionManager:
         # Latest state
         self._latest_results: Optional[Dict[str, Any]] = None
         self._cache_file = os.path.join(cfg.paths.cache_dir, "latest_predictions.json")
+        self._logic_fp = logic_fingerprint()
 
-        # Load from disk cache if exists
+        # Load from disk cache if exists — but only if its logic fingerprint
+        # matches the currently running build. Otherwise the stored payload
+        # was produced by different roster/feature logic (or an older image)
+        # and must be discarded so we never broadcast stale results.
         if os.path.exists(self._cache_file):
             try:
                 with open(self._cache_file, "r") as f:
-                    self._latest_results = json.load(f)
-                logger.info("[PredictionManager] Loaded %d rounds from disk cache",
-                            len(self._latest_results.get("rounds", {})))
+                    stored = json.load(f)
+                stored_fp = stored.get("_logic_fingerprint") if isinstance(stored, dict) else None
+                if stored_fp == self._logic_fp:
+                    self._latest_results = stored
+                    logger.info(
+                        "[PredictionManager] Loaded %d rounds from disk cache (fp=%s)",
+                        len(self._latest_results.get("rounds", {}) if isinstance(self._latest_results, dict) else {}),
+                        self._logic_fp,
+                    )
+                else:
+                    logger.info(
+                        "[PredictionManager] Discarding stale disk cache "
+                        "(stored_fp=%s, current_fp=%s) — roster/feature logic "
+                        "or version changed since it was written",
+                        stored_fp, self._logic_fp,
+                    )
+                    try:
+                        os.remove(self._cache_file)
+                    except Exception as rm_err:
+                        logger.warning(
+                            "[PredictionManager] Could not remove stale cache file %s: %s",
+                            self._cache_file, rm_err,
+                        )
             except Exception as e:
                 logger.warning("[PredictionManager] Failed to load disk cache: %s", e)
 
@@ -499,12 +523,19 @@ class PredictionManager:
         self._broadcast({"type": "status", "status": "idle", "timestamp": now})
 
     def _save_to_disk(self) -> None:
-        """Persist current predictions to disk."""
+        """Persist current predictions to disk.
+
+        Tags the saved payload with the current logic fingerprint so a
+        later process can detect and discard stale state written by a
+        different build (or a pre-fix image).
+        """
         if not self._latest_results:
             return
         try:
             # Ensure directory exists
             os.makedirs(os.path.dirname(self._cache_file), exist_ok=True)
+            # Always record the fingerprint used to build this payload.
+            self._latest_results["_logic_fingerprint"] = self._logic_fp
             with open(self._cache_file, "w") as f:
                 json.dump(self._latest_results, f)
         except Exception as e:
