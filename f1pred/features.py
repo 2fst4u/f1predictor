@@ -182,7 +182,7 @@ def build_roster(jc: JolpicaClient, season: str, rnd: str, event_dt: Optional[da
     if not df.empty:
         # human-readable name
         # Vectorized string concatenation is faster than apply()
-        # For small DataFrames (roster ~20 rows), list comprehension is ~20x faster than pandas operations
+        # For small DataFrames (roster ~20-26 rows, depending on season), list comprehension is ~20x faster than pandas operations
         if "givenName" not in df.columns:
             df["givenName"] = ""
         if "familyName" not in df.columns:

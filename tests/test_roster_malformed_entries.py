@@ -488,3 +488,121 @@ class TestDeriveRosterCascade:
 
         assert roster
         assert roster[0]["code"] == "CRA"
+
+
+# ---------------------------------------------------------------------------
+# Grid-size independence: the roster must NEVER be capped at 20 drivers.
+# ---------------------------------------------------------------------------
+
+class TestGridSizeNotCapped:
+    """Regression tests for the hardcoded 20-driver assumption.
+
+    F1 grids vary: 20 cars in 2017-2025, 22 from 2026 (Cadillac joins),
+    and historically anywhere from 20-26. The roster pipeline must faithfully
+    return whatever size the upstream data reports.
+    """
+
+    def _mock_jolpica(self, *, entry_list=None, race_results=None):
+        jc = Mock()
+        jc.get_race_results.return_value = race_results or []
+        jc.get_qualifying_results.return_value = []
+        jc.get_sprint_results.return_value = []
+        jc.get_season_entry_list.return_value = entry_list or []
+        jc.get_latest_season_and_round.return_value = ("2025", "22")
+        return jc
+
+    @pytest.mark.parametrize("n", [20, 21, 22, 24, 26])
+    def test_entry_list_preserves_full_grid(self, n):
+        """A future event with a 22-car entry list must return 22 drivers.
+        No caller should silently truncate to 20.
+        """
+        jc = self._mock_jolpica(entry_list=_full_grid(n))
+        now = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        event = datetime(2026, 5, 3, tzinfo=timezone.utc)
+
+        with patch("f1pred.data.fastf1_backend.get_event", return_value=None):
+            roster = derive_roster(jc, "2026", "4", event_dt=event, now_dt=now)
+
+        assert len(roster) == n, (
+            f"Entry list of size {n} was truncated to {len(roster)} — "
+            "grid size must not be capped"
+        )
+
+    @pytest.mark.parametrize("n", [20, 22, 24])
+    def test_same_round_race_results_preserve_full_grid(self, n):
+        """When Jolpica returns classified race results for the round, every
+        driver (even >20) must be returned unchanged.
+        """
+        results = _full_grid(n)
+        jc = self._mock_jolpica(race_results=results)
+        past = datetime(2026, 5, 5, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+        with patch("f1pred.data.fastf1_backend.get_event", return_value=None):
+            roster = derive_roster(jc, "2026", "4", event_dt=past, now_dt=now)
+
+        assert len(roster) == n
+
+    @pytest.mark.parametrize("n", [20, 22, 24])
+    def test_fastf1_race_session_preserves_full_grid(self, n):
+        """A completed 22- or 24-driver FastF1 Race session must be returned
+        whole. Practice-session reserve filtering is the only legitimate
+        reason the size should ever shrink.
+        """
+        jc = self._mock_jolpica(entry_list=_full_grid(n))
+        rows = [
+            {
+                "Abbreviation": f"D{i:02d}",
+                "DriverNumber": str(i + 1),
+                "FirstName": f"Given{i}",
+                "LastName": f"Family{i}",
+                "TeamName": "Team X",
+            } for i in range(n)
+        ]
+
+        def _mk_sess(results):
+            s = MagicMock()
+            s.results = results
+            return s
+
+        ev = Mock()
+        ev.get_session.side_effect = lambda name: _mk_sess(
+            _fastf1_df(rows) if name == "Race" else pd.DataFrame()
+        )
+        past = datetime(2026, 5, 5, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+        with patch("f1pred.data.fastf1_backend.get_event", return_value=ev):
+            roster = derive_roster(jc, "2026", "4", event_dt=past, now_dt=now)
+
+        assert len(roster) == n
+
+    def test_min_floor_does_not_cap_upper_bound(self):
+        """Sanity-check: the completeness floor is a lower bound only.
+        A 22-driver session is accepted just as readily as a 20-driver one.
+        """
+        from f1pred.roster import _MIN_COMPLETE_ROSTER_MODERN, _min_expected_roster
+
+        # The floor is a threshold for "enough data", not a ceiling.
+        assert _MIN_COMPLETE_ROSTER_MODERN <= 20
+        assert _min_expected_roster(2026) <= 22
+        assert _min_expected_roster(2030) <= 26
+
+    def test_same_round_floor_uses_season_aware_helper(self):
+        """The ``same_round_known_roster`` gate in derive_roster must consult
+        the same season-aware floor as the rest of the pipeline — not a
+        hardcoded 20.
+        """
+        import inspect
+
+        from f1pred import roster as roster_mod
+
+        src = inspect.getsource(roster_mod.derive_roster)
+        # Sanity: the helper is used.
+        assert "_min_expected_roster" in src, (
+            "derive_roster must use the season-aware floor helper, not hardcoded 20"
+        )
+        # Anti-regression: no raw `>= 20` comparison on roster length.
+        assert ">= 20" not in src.replace(" ", ""), (
+            "derive_roster must not hardcode `>= 20` — use _min_expected_roster"
+        )

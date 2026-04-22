@@ -14,12 +14,18 @@ logger = get_logger(__name__)
 # F1 live-timing servers are slow or sessions don't exist yet.
 _FASTF1_ROSTER_TIMEOUT = 15
 
-# A modern F1 grid has 20 race drivers (historically 22-26). Any session roster
-# returning fewer than this is suspicious. Race/Sprint/Qualifying sessions of
-# healthy events should meet this threshold; if they don't, the session is
-# likely incomplete (e.g. rain-cancelled, data partially published) and we
-# should not treat it as authoritative.
-_MIN_COMPLETE_ROSTER_MODERN = 18  # Allow a small buffer for withdrawals/DNS
+# Modern F1 grids vary in size: 20 cars in 2017-2025, 22 from 2026 with Cadillac
+# joining, historically anywhere from 20-26. The code MUST NOT hardcode a grid
+# size or truncate rosters. These thresholds are *floors* only — used to decide
+# whether a session returned "enough" data to be trusted as authoritative. They
+# never bound the upper end of the roster; a 22- or 26-driver session is still
+# returned in full.
+#
+# Any session returning fewer than the floor is suspicious: Race/Sprint/Qual
+# sessions of healthy events should comfortably meet it. If they don't, the
+# session is likely incomplete (e.g. rain-cancelled, data partially published)
+# and we should not treat it as authoritative.
+_MIN_COMPLETE_ROSTER_MODERN = 18  # Floor for 2010+ seasons (buffer vs 20/22-car grids)
 _MIN_COMPLETE_ROSTER_LEGACY = 10  # Older seasons (<2010) had variable entries
 
 # Authoritative sessions — these determine the true race-weekend roster.
@@ -642,8 +648,11 @@ def derive_roster(
 
     # 1. Jolpica known results for this round — always first because if a
     #    session has actually run, its classification is the ground truth.
+    #    Completeness gate uses the same season-aware floor as the FastF1 path
+    #    (never a hard 20-driver assumption): a 22- or 26-car grid passes
+    #    trivially; a partial 5-driver Q1 snapshot does not.
     same = _same_round_known_roster(jc, season, rnd)
-    if same and (len(same) >= 20 or s_int < 2010):
+    if same and len(same) >= _min_expected_roster(s_int):
         return same
 
     # Fetch season entry list exactly once; derive mapping from it and reuse
