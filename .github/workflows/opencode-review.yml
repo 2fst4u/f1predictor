@@ -22,12 +22,13 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: openrouter/openai/gpt-4o-mini
+          model: openrouter/anthropic/claude-3.7-sonnet
           use_github_token: true
           prompt: |
-            Review this pull request:
-            - Check for code quality issues
-            - Look for potential bugs
-            - Suggest improvements
-            - Be concise, try to keep the review under 100 words.
+            Review this pull request as an expert software engineer:
+            - Identify critical security vulnerabilities or bugs.
+            - Highlight performance bottlenecks.
+            - Point out maintainability issues or violations of best practices.
+            - Be highly specific and provide actionable suggestions.
+            - Ensure feedback is constructive and concise.
             - If needed, instruct the author they can trigger further changes by commenting "/oc-easy <instructions>" or "/oc-hard <instructions>" on your review comments.
