@@ -8,7 +8,7 @@
         "google/gemini-2.5-flash": {},
         "anthropic/claude-opus-4.7": {},
         "openai/gpt-4.1": {},
-        "openai/o4-mini": {},
+        "openai/gpt-4o-mini": {},
         "anthropic/claude-sonnet-4.6": {}
       }
     }
