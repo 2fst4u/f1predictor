@@ -72,9 +72,9 @@ The model uses a variety of engineered features to capture driver talent, car pe
 ### Performance & Form
 - **Race Form (`form_index`)**: A recency-weighted score of a driver's finishing positions and points. Higher values indicate better current form.
 - **Qualifying Form (`qualifying_form_index`)**: A recency-weighted index of a driver's qualifying performance.
+- **Sprint Form (`sprint_form_index`)**: A recency-weighted score of a driver's sprint finishing positions and points.
+- **Sprint Quali Form (`sprint_qualifying_form_index`)**: A recency-weighted index of a driver's sprint qualifying performance.
 - **Team Strength (`team_form_index`)**: The recent performance level of the constructor, representing the car's competitive ceiling.
-- **Driver-Team Fit (`driver_team_form_index`)**: Measures how well a driver performs with their current team, accounting for "Team Tenure" (familiarity with the car).
-- **Team Tenure (`team_tenure_events`)**: The number of races the driver has completed with their current constructor.
 
 ### Comparative Metrics
 - **vs Teammate (`teammate_delta`)**: The average qualifying advantage over their teammate. A positive value means they consistently out-qualify their peer.
@@ -88,6 +88,9 @@ The model uses a variety of engineered features to capture driver talent, car pe
 - **Track DNF Rate (`global_circuit_dnf_rate`)**: The overall historical retirement rate for all drivers at this circuit.
 
 ### Session & Grid
+- **Race Session (`is_race`)**: A boolean flag indicating if the session is a race.
+- **Quali Session (`is_qualifying`)**: A boolean flag indicating if the session is qualifying.
+- **Sprint Session (`is_sprint`)**: A boolean flag indicating if the session is a sprint.
 - **Grid Position (`grid`)**: The starting position for the race. This acts as a mathematical "anchor" for race predictions.
 - **Quali Position (`current_quali_pos`)**: The actual qualifying result achieved during the current race weekend.
 
