@@ -33,6 +33,61 @@ except importlib.metadata.PackageNotFoundError:
 
 USER_AGENT = f"f1predictor/{__version__}"
 
+
+# --- Logic fingerprint ---------------------------------------------------
+# We tie the prediction cache and the broadcast-state file to a short hash
+# of the source files whose behaviour, if it changes, MUST invalidate any
+# cached prediction. This avoids the class of bug where a roster/feature
+# fix ships in a new image but stale predictions from a previous image
+# still render in the UI.
+#
+# Included modules:
+#   - f1pred.roster           : determines which drivers are in the grid.
+#                                A bug fix here (e.g. reserve-driver leaks)
+#                                must invalidate cached predictions that
+#                                were built against the buggy roster.
+#   - f1pred.features         : feature construction feeding the models.
+#
+# We also include the running package version so that any deploy, even if
+# the above files are unchanged, busts the cache deterministically.
+#
+# The fingerprint is short (12 hex chars) so it's readable in cache
+# filenames / logs, but wide enough to make accidental collisions absurdly
+# unlikely.
+
+_LOGIC_FINGERPRINT: Optional[str] = None
+
+
+def logic_fingerprint() -> str:
+    """Return a short, stable hash of the prediction-logic source + version.
+
+    Computed once per process and memoised. Used as a cache-key component
+    so any code change in roster/feature modules, or any version bump,
+    automatically invalidates cached predictions.
+    """
+    global _LOGIC_FINGERPRINT
+    if _LOGIC_FINGERPRINT is not None:
+        return _LOGIC_FINGERPRINT
+
+    parts: list[str] = [f"version={__version__}"]
+
+    # Resolve module source paths relative to this file so import-order
+    # quirks don't matter.
+    here = Path(__file__).resolve().parent
+    for rel in ("roster.py", "features.py"):
+        src = here / rel
+        try:
+            h = hashlib.sha256(src.read_bytes()).hexdigest()
+            parts.append(f"{rel}:{h}")
+        except Exception:
+            # If a module file is missing, fall back to its name only.
+            # The version component still busts caches across deploys.
+            parts.append(f"{rel}:missing")
+
+    digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+    _LOGIC_FINGERPRINT = digest[:12]
+    return _LOGIC_FINGERPRINT
+
 _UMASK_LOCK = threading.Lock()
 
 
