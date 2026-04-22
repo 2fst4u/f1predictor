@@ -1355,9 +1355,9 @@
 
                     // Trigger prediction if missing and not already being predicted
                     // In silent mode (e.g. startup), we DON'T trigger a new prediction pipeline
-                    if (!this.results && !this.loading && !silent && this.predictingRound !== roundStr) {
-                        await this.runPrediction();
-                    }
+                    // if (!this.results && !this.loading && !silent && this.predictingRound !== roundStr) {
+                    //     await this.runPrediction();
+                    // }
                     this.saveState();
                 },
 
