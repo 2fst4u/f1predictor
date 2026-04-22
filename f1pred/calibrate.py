@@ -783,7 +783,6 @@ class CalibrationManager:
                 wb_gbm = max(0, weights[0])
                 wb_form = max(0, weights[1])
                 wb_tm = max(0, weights[2])
-                wb_dt = max(0, weights[3])
                 wb_grid = np.clip(weights[4], 0.0, 1.0)
 
                 we_pace = max(0, weights[5])
