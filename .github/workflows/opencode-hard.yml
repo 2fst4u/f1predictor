@@ -14,8 +14,10 @@ jobs:
     permissions:
       id-token: write
       contents: write
+      actions: read
       pull-requests: write
       issues: write
+      workflows: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4.2.2
