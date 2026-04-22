@@ -664,52 +664,98 @@ def derive_roster(
     if same:
         return same
 
-    # Fetch season entry list exactly once; derive mapping from it and reuse
-    # for the entry-list fallback. Saves a round-trip on the hot path.
-    try:
-        raw_entries = jc.get_season_entry_list(season) or []
-    except Exception as exc:
-        logger.warning(f"[roster] Entry list fetch failed: {exc}")
-        raw_entries = []
-    mapping = _build_canonical_mapping_from_entries(raw_entries)
-
-    def _fastf1() -> List[Dict]:
-        return _roster_from_fastf1(s_int, r_int, mapping=mapping)
-
-    def _entry_list() -> List[Dict]:
-        if not raw_entries:
-            return []
-        logger.info(f"[roster] Using official entry list for Season {season}")
-        return _entries_from_results(raw_entries)
-
-    # 2/3. For upcoming events, entry list is strictly more reliable than
-    #      FastF1 practice data (it never contains reserves). For past events,
-    #      FastF1 is more reliable (it reflects the actual drivers who took
-    #      part, including mid-season substitutions the entry list may miss).
-    if future:
-        entry_first = _entry_list()
-        if entry_first:
-            return entry_first
-        ff1_roster = _fastf1()
-        if ff1_roster:
-            return ff1_roster
-    else:
-        ff1_roster = _fastf1()
-        if ff1_roster:
-            return ff1_roster
-        entry_roster = _entry_list()
-        if entry_roster:
-            return entry_roster
-
-    # 4. Previous completed event (final fallback).
+    # --- Previous completed event (this season first, then earlier seasons) --
+    # The roster for an upcoming round is, in practice, the roster of the
+    # previous completed round of the same season — the drivers who raced
+    # last weekend are the drivers who will race this weekend. Mid-season
+    # swaps only enter the picture once the new driver has actually been
+    # classified in a session; before that, nobody — including Jolpica —
+    # can know about them.
+    #
+    # NB: we deliberately DO NOT consult Jolpica's ``/{season}/drivers.json``
+    # endpoint here. That endpoint is a UNION of every driverId seen in
+    # *any* session this season, including practice. It contains FP1
+    # stand-ins (e.g. Jak Crawford subbing for Alonso) who are not race
+    # drivers, and treating it as an entry list produces 23-driver grids
+    # with reservists on them. There is no public Jolpica/Ergast endpoint
+    # for the true season entry list, so the correct answer is to ignore
+    # that superset entirely and fall back to the previous completed
+    # round, whose classification is by construction the real roster.
     try:
         prev = _previous_completed_event_global(jc, s_int, r_int)
     except Exception:
         prev = _previous_completed_event_global(jc, s_int, None)
 
+    prev_roster: List[Dict] = []
     if prev:
         ps, pr = prev
-        logger.info(f"[roster] Falling back to roster from {ps} R{pr}")
-        return _roster_from_round(jc, ps, pr)
+        prev_roster = _roster_from_round(jc, ps, pr)
+
+    # Build the canonical mapping from the previous roster so ``race_driver_ids``
+    # (used by _filter_reserves for FastF1 practice-session fallback) reflects
+    # the real race roster rather than the Jolpica-drivers.json superset.
+    def _to_mapping_rows(entries: List[Dict]) -> List[Dict]:
+        """Shape normalised entries back into the ``{"Driver": ..., "Constructor": ...}``
+        dicts that _build_canonical_mapping_from_entries expects."""
+        out: List[Dict] = []
+        for e in entries:
+            out.append({
+                "Driver": {
+                    "driverId": e.get("driverId"),
+                    "code": e.get("code"),
+                    "givenName": e.get("givenName"),
+                    "familyName": e.get("familyName"),
+                    "permanentNumber": e.get("permanentNumber"),
+                },
+                "Constructor": {
+                    "constructorId": e.get("constructorId"),
+                    "name": e.get("constructorName"),
+                },
+            })
+        return out
+
+    mapping = _build_canonical_mapping_from_entries(_to_mapping_rows(prev_roster))
+
+    def _fastf1() -> List[Dict]:
+        return _roster_from_fastf1(s_int, r_int, mapping=mapping)
+
+    # --- Future events --------------------------------------------------
+    # Preferred order:
+    #   1. Previous completed round in the same season (ground truth for
+    #      the current roster, reservists excluded by construction).
+    #   2. FastF1 live-timing session data (only useful very close to the
+    #      event; authoritative sessions haven't happened yet but FP1
+    #      reservists filtered via ``mapping.race_driver_ids``).
+    #   3. FastF1 without a mapping (in case we have nothing else — best
+    #      effort; the practice-session reserve filter degrades to a
+    #      pass-through but authoritative sessions still win).
+    if future:
+        if prev_roster:
+            logger.info(
+                f"[roster] Using previous completed round as roster for "
+                f"upcoming {season} R{rnd} ({prev[0]} R{prev[1]}, "
+                f"{len(prev_roster)} drivers)"
+            )
+            return prev_roster
+        ff1_roster = _fastf1()
+        if ff1_roster:
+            return ff1_roster
+        return []
+
+    # --- Past events ----------------------------------------------------
+    # For a past event whose same-round results we couldn't fetch, FastF1
+    # is more reliable than falling back to a neighbouring event, because
+    # FastF1 reflects who actually participated (including any mid-season
+    # substitutions that may not be present in another round).
+    ff1_roster = _fastf1()
+    if ff1_roster:
+        return ff1_roster
+
+    if prev_roster:
+        logger.info(
+            f"[roster] Falling back to roster from {prev[0]} R{prev[1]} "
+            f"({len(prev_roster)} drivers)"
+        )
+        return prev_roster
 
     return []

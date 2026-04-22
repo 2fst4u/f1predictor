@@ -400,15 +400,58 @@ class TestDeriveRosterCascade:
         jc.get_latest_season_and_round.return_value = ("2025", "22")
         return jc
 
-    def test_future_event_prefers_entry_list_over_partial_fastf1(self):
-        """This is the Miami 2026 bug: Jolpica had the entry list, FastF1 had
-        an FP1 session with Crawford. The old code picked FastF1 first and
-        returned Crawford. The new code returns the entry list.
+    def test_future_event_uses_previous_round_not_drivers_json(self):
+        """Regression for the Miami 2026 bug.
+
+        ``Jolpica.get_season_entry_list`` is implemented on top of
+        ``/{season}/drivers.json``, which is a cumulative UNION of every
+        driver seen in *any* session — including practice reservists like
+        Jak Crawford. Treating that as the authoritative entry list yields
+        23-driver grids with reservists on them.
+
+        The correct answer for an upcoming round is the roster of the most
+        recently classified round of the same season. This test asserts the
+        cascade ignores ``drivers.json`` and uses the previous round instead,
+        so a reserve who *only* appears in drivers.json never makes it into
+        the grid.
         """
-        jc = self._mock_jolpica(entry_list=_FULL_2026_ENTRY_LIST)
-        # Build a FastF1 event whose FP1 returns Crawford. If the cascade
-        # EVER consults FastF1 for this future event we'd get contaminated
-        # data — the test asserts we don't.
+        # 22-driver previous-round classification (the actual 2026 roster).
+        prev_results = [{
+            "Driver": {
+                "driverId": f"driver_{i}", "code": f"D{i:02d}",
+                "givenName": f"G{i}", "familyName": f"F{i}",
+                "permanentNumber": str(i + 1),
+            },
+            "Constructor": {"constructorId": "t", "name": "T"},
+        } for i in range(22)]
+
+        # Jolpica's drivers.json additionally contains Crawford (a reserve
+        # who did FP1 earlier in the season but has never raced / qualified).
+        drivers_json_superset = prev_results + [{
+            "Driver": {
+                "driverId": "crawford", "code": "CRA",
+                "givenName": "Jak", "familyName": "Crawford",
+                "permanentNumber": "31",
+            },
+            "Constructor": {"constructorId": "aston_martin", "name": "Aston Martin"},
+        }]
+
+        jc = self._mock_jolpica(entry_list=drivers_json_superset)
+        # Target round has no results yet.
+        def _race(season, rnd):
+            if season == "2026" and rnd == "3":
+                return prev_results
+            return []
+        jc.get_race_results.side_effect = _race
+        # Season schedule for _previous_completed_event_global lookup
+        jc.get_season_schedule.return_value = [
+            {"round": str(i)} for i in range(1, 5)
+        ]
+        jc.get_latest_season_and_round.return_value = ("2026", "3")
+
+        # Build a FastF1 event whose FP1 also returns Crawford. If the
+        # cascade ever consults FastF1 or drivers.json for this future
+        # event we'd get contaminated data — this asserts we don't.
         fp1 = _fastf1_df([{
             "Abbreviation": "CRA", "DriverNumber": "31",
             "FirstName": "Jak", "LastName": "Crawford",
@@ -431,11 +474,35 @@ class TestDeriveRosterCascade:
             roster = derive_roster(jc, "2026", "4", event_dt=event, now_dt=now)
 
         ids = [e["driverId"] for e in roster]
-        assert "alonso" in ids
-        assert "stroll" in ids
+        assert len(ids) == 22, f"Expected 22-driver grid, got {len(ids)}: {ids}"
         assert "crawford" not in ids, (
-            "Reserve driver leaked from FastF1 FP1 into future-event roster "
-            "despite a full Jolpica entry list being available."
+            "Reserve from drivers.json / FP1 leaked into upcoming-event roster. "
+            "derive_roster must use previous completed round, not drivers.json."
+        )
+
+    def test_future_event_ignores_drivers_json_even_when_it_is_the_only_source(self):
+        """If no previous round has been classified (e.g. round 1) and there's
+        no FastF1 data either, we return an empty roster rather than trusting
+        ``drivers.json``. An empty roster signals "unknown", which is the
+        truthful answer — the call site decides how to surface that.
+        """
+        # drivers.json contains someone, but no race/quali has been classified.
+        jc = self._mock_jolpica(entry_list=_FULL_2026_ENTRY_LIST)
+        jc.get_race_results.return_value = []
+        jc.get_qualifying_results.return_value = []
+        jc.get_season_schedule.return_value = [{"round": "1"}]
+        jc.get_latest_season_and_round.return_value = ("2026", "1")
+
+        now = datetime(2026, 3, 1, tzinfo=timezone.utc)
+        event = datetime(2026, 3, 15, tzinfo=timezone.utc)
+
+        with patch("f1pred.data.fastf1_backend.get_event", return_value=None), \
+             patch("f1pred.roster._previous_completed_event_global", return_value=None):
+            roster = derive_roster(jc, "2026", "1", event_dt=event, now_dt=now)
+
+        assert roster == [], (
+            "When no classified round exists yet, roster must not fall back to "
+            "drivers.json — that endpoint contains reservists."
         )
 
     def test_past_event_with_complete_results_uses_jolpica_results(self):
@@ -495,10 +562,38 @@ class TestDeriveRosterCascade:
         ids = {e["driverId"] for e in roster}
         assert any(i.startswith("r") for i in ids), roster
 
-    def test_entry_list_used_when_fastf1_unavailable_for_future(self):
-        """If FastF1 returns nothing, the entry list must still fill the
-        roster for a future event."""
-        jc = self._mock_jolpica(entry_list=_FULL_2026_ENTRY_LIST)
+    def test_previous_round_used_when_fastf1_unavailable_for_future(self):
+        """If FastF1 returns nothing, the roster for a future event must be
+        taken from the most recent completed round — NOT from Jolpica's
+        drivers.json superset.
+        """
+        prev_results = [{
+            "Driver": {
+                "driverId": "alonso", "code": "ALO",
+                "givenName": "Fernando", "familyName": "Alonso",
+                "permanentNumber": "14",
+            },
+            "Constructor": {"constructorId": "aston_martin", "name": "Aston Martin"},
+        }, {
+            "Driver": {
+                "driverId": "stroll", "code": "STR",
+                "givenName": "Lance", "familyName": "Stroll",
+                "permanentNumber": "18",
+            },
+            "Constructor": {"constructorId": "aston_martin", "name": "Aston Martin"},
+        }]
+
+        jc = self._mock_jolpica()
+        def _race(season, rnd):
+            if season == "2026" and rnd == "3":
+                return prev_results
+            return []
+        jc.get_race_results.side_effect = _race
+        jc.get_season_schedule.return_value = [
+            {"round": str(i)} for i in range(1, 5)
+        ]
+        jc.get_latest_season_and_round.return_value = ("2026", "3")
+
         ev = None  # get_event returns None -> no FastF1 data
         now = datetime(2026, 5, 1, tzinfo=timezone.utc)
         event = datetime(2026, 5, 3, tzinfo=timezone.utc)
@@ -589,11 +684,28 @@ class TestRosterSizeIsUnconstrained:
         return jc
 
     @pytest.mark.parametrize("n", [20, 21, 22, 24, 26])
-    def test_entry_list_preserves_full_grid(self, n):
-        """A future event with a 22-car entry list must return 22 drivers.
-        No caller should silently truncate to 20.
+    def test_previous_round_preserves_full_grid(self, n):
+        """A future event whose previous completed round had n drivers must
+        return exactly n drivers, for any grid size.
+
+        Historically this test asserted the same invariant for Jolpica's
+        "entry list" — but that endpoint is actually a cumulative union of
+        ``drivers.json`` that includes FP1 reservists, so we no longer use
+        it. The current invariant is that the previous completed round is
+        the ground truth for an upcoming round.
         """
-        jc = self._mock_jolpica(entry_list=_full_grid(n))
+        prev_results = _full_grid(n)  # shape matches race Results rows
+        jc = self._mock_jolpica()
+        def _race(season, rnd):
+            if season == "2026" and rnd == "3":
+                return prev_results
+            return []
+        jc.get_race_results.side_effect = _race
+        jc.get_season_schedule.return_value = [
+            {"round": str(i)} for i in range(1, 5)
+        ]
+        jc.get_latest_season_and_round.return_value = ("2026", "3")
+
         now = datetime(2026, 5, 1, tzinfo=timezone.utc)
         event = datetime(2026, 5, 3, tzinfo=timezone.utc)
 
@@ -601,7 +713,7 @@ class TestRosterSizeIsUnconstrained:
             roster = derive_roster(jc, "2026", "4", event_dt=event, now_dt=now)
 
         assert len(roster) == n, (
-            f"Entry list of size {n} was truncated to {len(roster)} — "
+            f"Previous-round roster of size {n} was truncated to {len(roster)} — "
             "grid size must not be capped"
         )
 
