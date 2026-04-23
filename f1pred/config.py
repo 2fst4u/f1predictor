@@ -124,7 +124,6 @@ class BlendingCfg:
     gbm_weight: float = 0.75
     baseline_weight: float = 0.25
     baseline_team_factor: float = 0.3
-    baseline_driver_team_factor: float = 0.2
     grid_factor: float = 0.8
     current_season_weight: float = 8.0
     current_season_qualifying_weight: float = 8.0
@@ -348,6 +347,8 @@ def load_config(path: str) -> AppConfig:
     sim_dc = SimulationCfg(**sim_in)
 
     blend_in = cfg["modelling"].get("blending", {})
+    if "baseline_driver_team_factor" in blend_in:
+        del blend_in["baseline_driver_team_factor"]
     blend_dc = BlendingCfg(**blend_in)
 
     dnf_in = cfg["modelling"].get("dnf", {})

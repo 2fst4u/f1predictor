@@ -47,39 +47,38 @@ PARAM_NAMES = [
     "gbm_weight",               # 0
     "baseline_weight",          # 1
     "baseline_team_factor",     # 2
-    "baseline_driver_team_factor",  # 3
-    "grid_factor",              # 4
+    "grid_factor",              # 3
     # -- ensemble race weights (5-8) --
-    "ens_pace",                 # 5
-    "ens_elo",                  # 6
-    "ens_bt",                   # 7
-    "ens_mixed",                # 8
+    "ens_pace",                 # 4
+    "ens_elo",                  # 5
+    "ens_bt",                   # 6
+    "ens_mixed",                # 7
     # -- season / quali (9-12) --
-    "current_season_weight",    # 9
-    "current_season_qualifying_weight",  # 10
-    "current_quali_factor",     # 11
-    "analytical_win_weight",    # 12
+    "current_season_weight",    # 8
+    "current_season_qualifying_weight",  # 9
+    "current_quali_factor",     # 10
+    "analytical_win_weight",    # 11
     # -- DNF (13-16) --
-    "dnf_alpha",                # 13
-    "dnf_beta",                 # 14
-    "dnf_driver_weight",        # 15
-    "dnf_team_weight",          # 16
+    "dnf_alpha",                # 12
+    "dnf_beta",                 # 13
+    "dnf_driver_weight",        # 14
+    "dnf_team_weight",          # 15
     # -- simulation (17-18) --
-    "noise_factor",             # 17
-    "min_noise",                # 18
+    "noise_factor",             # 16
+    "min_noise",                # 17
     # -- recency (19-20) --
-    "half_life_base",           # 19
-    "half_life_team",           # 20
+    "half_life_base",           # 18
+    "half_life_team",           # 19
     # -- elo (21) --
-    "elo_k",                    # 21
+    "elo_k",                    # 20
     # -- ensemble qualifying weights (22-25) --
     # Separate weight set for qualifying/sprint_qualifying sessions so that
     # race-only statistical models (Elo, BT, Mixed) can be down-weighted
     # without degrading race predictions.
-    "ens_pace_quali",           # 22
-    "ens_elo_quali",            # 23
-    "ens_bt_quali",             # 24
-    "ens_mixed_quali",          # 25
+    "ens_pace_quali",           # 21
+    "ens_elo_quali",            # 22
+    "ens_bt_quali",             # 23
+    "ens_mixed_quali",          # 24
 ]
 
 N_PARAMS = len(PARAM_NAMES)
@@ -89,38 +88,33 @@ PARAM_BOUNDS = [
     (0.05, 1.0),    # 0  gbm_weight
     (0.05, 1.0),    # 1  baseline_weight
     (0.2, 2.0),     # 2  baseline_team_factor
-    # TODO: baseline_driver_team_factor is deprecated and fixed at (0.0, 0.0) but still
-    # occupies a slot in the optimisation vector, adding minor overhead.  Removing it
-    # would require updating _pack/_unpack helpers and the parameter layout.  Requires
-    # further investigation and confirmation.
-    (0.0, 0.0),     # 3  baseline_driver_team_factor (DEPRECATED — kept for vector compat)
-    (0.1, 0.95),    # 4  grid_factor
-    (0.0, 1.0),     # 5  ens_pace
-    (0.0, 1.0),     # 6  ens_elo
-    (0.0, 1.0),     # 7  ens_bt
-    (0.0, 1.0),     # 8  ens_mixed
-    (3.0, 50.0),    # 9  current_season_weight
-    (3.0, 50.0),    # 10 current_season_qualifying_weight
-    (0.0, 1.0),     # 11 current_quali_factor
-    (0.0, 1.0),     # 12 analytical_win_weight
-    (0.1, 10.0),    # 13 dnf_alpha
-    (0.1, 30.0),    # 14 dnf_beta
+    (0.1, 0.95),    # 3  grid_factor
+    (0.0, 1.0),     # 4  ens_pace
+    (0.0, 1.0),     # 5  ens_elo
+    (0.0, 1.0),     # 6  ens_bt
+    (0.0, 1.0),     # 7  ens_mixed
+    (3.0, 50.0),    # 8  current_season_weight
+    (3.0, 50.0),    # 9 current_season_qualifying_weight
+    (0.0, 1.0),     # 10 current_quali_factor
+    (0.0, 1.0),     # 11 analytical_win_weight
+    (0.1, 10.0),    # 12 dnf_alpha
+    (0.1, 30.0),    # 13 dnf_beta
     # TODO: dnf_driver_weight and dnf_team_weight are independently bounded [0,1]
     # but not constrained to sum to 1.0 (or any fixed value).  If calibration sets
     # both to 1.0, effective DNF probability is doubled; if both are near 0, DNF
     # becomes negligible.  Adding a sum constraint or normalising these in _unpack_weights
     # could prevent degenerate solutions.  Requires further investigation and confirmation.
-    (0.0, 1.0),     # 15 dnf_driver_weight
-    (0.0, 1.0),     # 16 dnf_team_weight
-    (0.01, 0.5),    # 17 noise_factor
-    (0.01, 0.3),    # 18 min_noise
-    (30.0, 500.0),  # 19 half_life_base
-    (60.0, 800.0),  # 20 half_life_team
-    (5.0, 60.0),    # 21 elo_k
-    (0.0, 1.0),     # 22 ens_pace_quali
-    (0.0, 0.5),     # 23 ens_elo_quali   (capped lower — race-only model)
-    (0.0, 0.5),     # 24 ens_bt_quali    (capped lower — race-only model)
-    (0.0, 0.5),     # 25 ens_mixed_quali (capped lower — race-only model)
+    (0.0, 1.0),     # 14 dnf_driver_weight
+    (0.0, 1.0),     # 15 dnf_team_weight
+    (0.01, 0.5),    # 16 noise_factor
+    (0.01, 0.3),    # 17 min_noise
+    (30.0, 500.0),  # 18 half_life_base
+    (60.0, 800.0),  # 19 half_life_team
+    (5.0, 60.0),    # 20 elo_k
+    (0.0, 1.0),     # 21 ens_pace_quali
+    (0.0, 0.5),     # 22 ens_elo_quali   (capped lower — race-only model)
+    (0.0, 0.5),     # 23 ens_bt_quali    (capped lower — race-only model)
+    (0.0, 0.5),     # 24 ens_mixed_quali (capped lower — race-only model)
 ]
 
 # Default / initial guess (matches config.yaml defaults)
@@ -128,29 +122,28 @@ PARAM_DEFAULTS = [
     0.75,   # 0  gbm_weight
     0.25,   # 1  baseline_weight
     0.3,    # 2  baseline_team_factor
-    0.0,    # 3  baseline_driver_team_factor (DEPRECATED)
-    0.8,    # 4  grid_factor
-    0.4,    # 5  ens_pace
-    0.2,    # 6  ens_elo
-    0.2,    # 7  ens_bt
-    0.2,    # 8  ens_mixed
-    8.0,    # 9  current_season_weight
-    8.0,    # 10 current_season_qualifying_weight
-    0.5,    # 11 current_quali_factor
-    0.5,    # 12 analytical_win_weight
-    2.0,    # 13 dnf_alpha
-    8.0,    # 14 dnf_beta
-    0.6,    # 15 dnf_driver_weight
-    0.4,    # 16 dnf_team_weight
-    0.15,   # 17 noise_factor
-    0.05,   # 18 min_noise
-    120.0,  # 19 half_life_base
-    240.0,  # 20 half_life_team
-    20.0,   # 21 elo_k
-    0.7,    # 22 ens_pace_quali  — GBM carries most weight for qualifying
-    0.1,    # 23 ens_elo_quali
-    0.1,    # 24 ens_bt_quali
-    0.1,    # 25 ens_mixed_quali
+    0.8,    # 3  grid_factor
+    0.4,    # 4  ens_pace
+    0.2,    # 5  ens_elo
+    0.2,    # 6  ens_bt
+    0.2,    # 7  ens_mixed
+    8.0,    # 8  current_season_weight
+    8.0,    # 9 current_season_qualifying_weight
+    0.5,    # 10 current_quali_factor
+    0.5,    # 11 analytical_win_weight
+    2.0,    # 12 dnf_alpha
+    8.0,    # 13 dnf_beta
+    0.6,    # 14 dnf_driver_weight
+    0.4,    # 15 dnf_team_weight
+    0.15,   # 16 noise_factor
+    0.05,   # 17 min_noise
+    120.0,  # 18 half_life_base
+    240.0,  # 19 half_life_team
+    20.0,   # 20 elo_k
+    0.7,    # 21 ens_pace_quali  — GBM carries most weight for qualifying
+    0.1,    # 22 ens_elo_quali
+    0.1,    # 23 ens_bt_quali
+    0.1,    # 24 ens_mixed_quali
 ]
 
 
@@ -182,20 +175,20 @@ def _unpack_weights(w) -> Dict[str, Any]:
     w = np.asarray(w, dtype=float)
 
     # Normalise race ensemble weights to sum to 1
-    ens_raw = w[5:9].copy()
+    ens_raw = w[4:8].copy()
     ens_sum = ens_raw.sum()
     if ens_sum > 0:
         ens_raw /= ens_sum
     else:
         ens_raw[:] = 0.25
 
-    # Normalise qualifying ensemble weights to sum to 1 (params 22-25)
+    # Normalise qualifying ensemble weights to sum to 1 (params 21-24)
     # Fall back to defaults if the vector is shorter (old weight files)
-    if len(w) > 25:
-        ens_q_raw = w[22:26].copy()
+    if len(w) > 24:
+        ens_q_raw = w[21:25].copy()
     else:
-        ens_q_raw = np.array([PARAM_DEFAULTS[22], PARAM_DEFAULTS[23],
-                               PARAM_DEFAULTS[24], PARAM_DEFAULTS[25]])
+        ens_q_raw = np.array([PARAM_DEFAULTS[20], PARAM_DEFAULTS[21],
+                               PARAM_DEFAULTS[22], PARAM_DEFAULTS[23]])
     ens_q_sum = ens_q_raw.sum()
     if ens_q_sum > 0:
         ens_q_raw /= ens_q_sum
@@ -223,29 +216,28 @@ def _unpack_weights(w) -> Dict[str, Any]:
             "gbm_weight": float(gbm_raw / total_main),
             "baseline_weight": float(base_raw / total_main),
             "baseline_team_factor": float(w[2]),
-            "baseline_driver_team_factor": float(w[3]),
-            "grid_factor": float(np.clip(w[4], 0.0, 1.0)),
-            "current_season_weight": float(w[9]),
-            "current_season_qualifying_weight": float(w[10]),
-            "current_quali_factor": float(np.clip(w[11], 0.0, 1.0)),
-            "analytical_win_weight": float(np.clip(w[12], 0.0, 1.0)),
+            "grid_factor": float(np.clip(w[3], 0.0, 1.0)),
+            "current_season_weight": float(w[8]),
+            "current_season_qualifying_weight": float(w[9]),
+            "current_quali_factor": float(np.clip(w[10], 0.0, 1.0)),
+            "analytical_win_weight": float(np.clip(w[11], 0.0, 1.0)),
         },
         "dnf": {
-            "alpha": float(max(0.1, w[13])),
-            "beta": float(max(0.1, w[14])),
-            "driver_weight": float(np.clip(w[15], 0.0, 1.0)),
-            "team_weight": float(np.clip(w[16], 0.0, 1.0)),
+            "alpha": float(max(0.1, w[12])),
+            "beta": float(max(0.1, w[13])),
+            "driver_weight": float(np.clip(w[14], 0.0, 1.0)),
+            "team_weight": float(np.clip(w[15], 0.0, 1.0)),
         },
         "simulation": {
-            "noise_factor": float(max(0.01, w[17])),
-            "min_noise": float(max(0.01, w[18])),
+            "noise_factor": float(max(0.01, w[16])),
+            "min_noise": float(max(0.01, w[17])),
         },
         "recency": {
-            "half_life_base": float(max(30.0, w[19])),
-            "half_life_team": float(max(60.0, w[20])),
+            "half_life_base": float(max(30.0, w[18])),
+            "half_life_team": float(max(60.0, w[19])),
         },
         "elo": {
-            "k": float(np.clip(w[21], 5.0, 60.0)),
+            "k": float(np.clip(w[20], 5.0, 60.0)),
         },
     }
 
@@ -263,29 +255,28 @@ def _pack_weights(d: Dict[str, Any]) -> list:
         b.get("gbm_weight", PARAM_DEFAULTS[0]),
         b.get("baseline_weight", PARAM_DEFAULTS[1]),
         b.get("baseline_team_factor", PARAM_DEFAULTS[2]),
-        b.get("baseline_driver_team_factor", PARAM_DEFAULTS[3]),
-        b.get("grid_factor", PARAM_DEFAULTS[4]),
-        e.get("w_gbm", PARAM_DEFAULTS[5]),
-        e.get("w_elo", PARAM_DEFAULTS[6]),
-        e.get("w_bt", PARAM_DEFAULTS[7]),
-        e.get("w_mixed", PARAM_DEFAULTS[8]),
-        b.get("current_season_weight", PARAM_DEFAULTS[9]),
-        b.get("current_season_qualifying_weight", PARAM_DEFAULTS[10]),
-        b.get("current_quali_factor", PARAM_DEFAULTS[11]),
-        b.get("analytical_win_weight", PARAM_DEFAULTS[12]),
-        dn.get("alpha", PARAM_DEFAULTS[13]),
-        dn.get("beta", PARAM_DEFAULTS[14]),
-        dn.get("driver_weight", PARAM_DEFAULTS[15]),
-        dn.get("team_weight", PARAM_DEFAULTS[16]),
-        sim.get("noise_factor", PARAM_DEFAULTS[17]),
-        sim.get("min_noise", PARAM_DEFAULTS[18]),
-        rec.get("half_life_base", PARAM_DEFAULTS[19]),
-        rec.get("half_life_team", PARAM_DEFAULTS[20]),
-        elo.get("k", PARAM_DEFAULTS[21]),
-        e.get("w_gbm_quali", PARAM_DEFAULTS[22]),
-        e.get("w_elo_quali", PARAM_DEFAULTS[23]),
-        e.get("w_bt_quali", PARAM_DEFAULTS[24]),
-        e.get("w_mixed_quali", PARAM_DEFAULTS[25]),
+        b.get("grid_factor", PARAM_DEFAULTS[3]),
+        e.get("w_gbm", PARAM_DEFAULTS[4]),
+        e.get("w_elo", PARAM_DEFAULTS[5]),
+        e.get("w_bt", PARAM_DEFAULTS[6]),
+        e.get("w_mixed", PARAM_DEFAULTS[7]),
+        b.get("current_season_weight", PARAM_DEFAULTS[8]),
+        b.get("current_season_qualifying_weight", PARAM_DEFAULTS[9]),
+        b.get("current_quali_factor", PARAM_DEFAULTS[10]),
+        b.get("analytical_win_weight", PARAM_DEFAULTS[11]),
+        dn.get("alpha", PARAM_DEFAULTS[12]),
+        dn.get("beta", PARAM_DEFAULTS[13]),
+        dn.get("driver_weight", PARAM_DEFAULTS[14]),
+        dn.get("team_weight", PARAM_DEFAULTS[15]),
+        sim.get("noise_factor", PARAM_DEFAULTS[16]),
+        sim.get("min_noise", PARAM_DEFAULTS[17]),
+        rec.get("half_life_base", PARAM_DEFAULTS[18]),
+        rec.get("half_life_team", PARAM_DEFAULTS[19]),
+        elo.get("k", PARAM_DEFAULTS[20]),
+        e.get("w_gbm_quali", PARAM_DEFAULTS[21]),
+        e.get("w_elo_quali", PARAM_DEFAULTS[22]),
+        e.get("w_bt_quali", PARAM_DEFAULTS[23]),
+        e.get("w_mixed_quali", PARAM_DEFAULTS[24]),
     ]
 
 
@@ -482,7 +473,7 @@ class CalibrationManager:
                 calib_races = calib_races[calib_races["session"] == "race"]
                 events = calib_races[["season", "round", "date"]].drop_duplicates().sort_values("date")
 
-            # 4. Train GBM Baseline on pre-window data
+            # 3. Train GBM Baseline on pre-window data
             logger.info("[calibrate] Training baseline GBM on %d rows (pre-%s)...",
                         len(train_hist), train_cutoff.date())
 
@@ -527,11 +518,11 @@ class CalibrationManager:
             except Exception as e:
                 logger.warning("[calibrate] Qualifying GBM training failed: %s", e)
 
-            # 5. Collect calibration data from each event.
+            # 4. Collect calibration data from each event.
             #
             # We gather BOTH race and qualifying data so the objective function
-            # can simultaneously optimise race weights (params 5-8) and
-            # qualifying weights (params 22-25).
+            # can simultaneously optimise race weights (params 4-7) and
+            # qualifying weights (params 21-24).
             #
             # To allow the optimizer to learn current_season_weight, we store
             # BOTH the boosted form indices AND separate unboosted/current-season
@@ -713,7 +704,7 @@ class CalibrationManager:
                 len(df_calib), len(df_calib_q),
             )
 
-            # 6. Optimisation
+            # 5. Optimisation
             logger.info("[calibrate] Optimising %d parameters on %d race + %d qualifying samples...",
                         N_PARAMS, len(df_calib), len(df_calib_q))
 
@@ -783,21 +774,21 @@ class CalibrationManager:
                 wb_gbm = max(0, weights[0])
                 wb_form = max(0, weights[1])
                 wb_tm = max(0, weights[2])
-                wb_grid = np.clip(weights[4], 0.0, 1.0)
+                wb_grid = np.clip(weights[3], 0.0, 1.0)
 
-                we_pace = max(0, weights[5])
-                we_elo = max(0, weights[6])
-                we_bt = max(0, weights[7])
-                we_mixed = max(0, weights[8])
+                we_pace = max(0, weights[4])
+                we_elo = max(0, weights[5])
+                we_bt = max(0, weights[6])
+                we_mixed = max(0, weights[7])
 
-                # Qualifying ensemble weights (params 22-25)
-                we_q_pace = max(0, weights[22]) if len(weights) > 22 else PARAM_DEFAULTS[22]
-                we_q_elo = max(0, weights[23]) if len(weights) > 23 else PARAM_DEFAULTS[23]
-                we_q_bt = max(0, weights[24]) if len(weights) > 24 else PARAM_DEFAULTS[24]
-                we_q_mixed = max(0, weights[25]) if len(weights) > 25 else PARAM_DEFAULTS[25]
+                # Qualifying ensemble weights (params 21-24)
+                we_q_pace = max(0, weights[21]) if len(weights) > 21 else PARAM_DEFAULTS[21]
+                we_q_elo = max(0, weights[22]) if len(weights) > 22 else PARAM_DEFAULTS[22]
+                we_q_bt = max(0, weights[23]) if len(weights) > 23 else PARAM_DEFAULTS[23]
+                we_q_mixed = max(0, weights[24]) if len(weights) > 24 else PARAM_DEFAULTS[24]
 
-                # Current season weight from optimiser (param index 9)
-                w_season = max(1.0, weights[9])
+                # Current season weight from optimiser (param index 8)
+                w_season = max(1.0, weights[8])
 
                 # Recompute effective form as: unboosted_base + (boost - 1) * cur_season_component
                 effective_form = arr_form_unboosted + (w_season - 1.0) * arr_form_cur_season
@@ -926,7 +917,7 @@ class CalibrationManager:
                 # from diverging from defaults.  The bounds already constrain the
                 # search space, so regularisation should only act as a tiebreaker.
                 reg_weights = np.ones(N_PARAMS, dtype=float) * 1e-7
-                reg_weights[10:22] = 1e-5
+                reg_weights[9:21] = 1e-5
                 reg = float(np.sum(reg_weights * diffs))
 
                 return total_loss + reg
@@ -1002,8 +993,8 @@ class CalibrationManager:
             w_elo=ens.get("w_elo", 0.2),
             w_bt=ens.get("w_bt", 0.2),
             w_mixed=ens.get("w_mixed", 0.2),
-            w_gbm_quali=ens.get("w_gbm_quali", PARAM_DEFAULTS[22]),
-            w_elo_quali=ens.get("w_elo_quali", PARAM_DEFAULTS[23]),
-            w_bt_quali=ens.get("w_bt_quali", PARAM_DEFAULTS[24]),
-            w_mixed_quali=ens.get("w_mixed_quali", PARAM_DEFAULTS[25]),
+            w_gbm_quali=ens.get("w_gbm_quali", PARAM_DEFAULTS[21]),
+            w_elo_quali=ens.get("w_elo_quali", PARAM_DEFAULTS[22]),
+            w_bt_quali=ens.get("w_bt_quali", PARAM_DEFAULTS[23]),
+            w_mixed_quali=ens.get("w_mixed_quali", PARAM_DEFAULTS[24]),
         )

@@ -64,7 +64,7 @@ def full_valid_config():
             },
             "blending": {
                 "gbm_weight": 0.75, "baseline_weight": 0.25,
-                "baseline_team_factor": 0.3, "baseline_driver_team_factor": 0.2
+                "baseline_team_factor": 0.3
             },
             "dnf": {
                 "alpha": 2.0, "beta": 8.0, "driver_weight": 0.6,
