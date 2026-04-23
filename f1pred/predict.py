@@ -40,7 +40,7 @@ def _apply_calibrated_weights(cfg, calibrated_weights: Dict[str, Any]) -> None:
         b = calibrated_weights["blending"]
         bl = cfg.modelling.blending
         for key in ("gbm_weight", "baseline_weight", "baseline_team_factor",
-                     "baseline_driver_team_factor", "grid_factor",
+                     "grid_factor",
                      "current_season_weight", "current_season_qualifying_weight",
                      "current_quali_factor", "analytical_win_weight"):
             if key in b:
