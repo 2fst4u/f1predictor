@@ -430,10 +430,13 @@ def _run_single_prediction(
     ref_date: datetime,
     cfg,
     X_override: Optional['pd.DataFrame'] = None,
+    meta_override: Optional[Dict[str, Any]] = None,
 ) -> Optional['pd.DataFrame']:
     """Run prediction for a single session and return ranked DataFrame.
-    
+
     If X_override is provided, use it instead of building features.
+    In that case, meta_override can be supplied to pass session metadata
+    (e.g. weather) through to downstream estimators such as DNF probabilities.
     Returns None if prediction cannot be completed.
     """
     from .features import build_session_features, collect_historical_results
@@ -445,7 +448,7 @@ def _run_single_prediction(
     if X_override is not None:
         X = X_override.copy()
         roster = X_override.copy()
-        meta = {}
+        meta = meta_override or {}
     else:
         X, meta, roster = build_session_features(jc, om, season_i, round_i, sess, ref_date, cfg)
     
@@ -525,9 +528,6 @@ def _run_single_prediction(
         combined_pace = pace_hat
     
     # DNF probabilities (only for race/sprint)
-    # TODO: When X_override is provided, meta is an empty dict so event_weather is
-    # always None here, causing weather-aware DNF rates to fall back to overall rates.
-    # Requires further investigation and confirmation.
     dnf_prob = np.zeros(X.shape[0], dtype=float)
     if sess in ("race", "sprint"):
         try:
