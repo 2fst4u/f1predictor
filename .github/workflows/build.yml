@@ -3,6 +3,8 @@ name: "Build"
 on:
   push:
     branches: ["**"]
+  pull_request:
+    types: [opened, synchronize, reopened]
   release:
     types: [published]
   workflow_call:
@@ -17,6 +19,11 @@ on:
         type: string
         required: false
         default: ""
+
+# Prevent redundant builds: if push and PR exist for same commit, keep the PR run
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io

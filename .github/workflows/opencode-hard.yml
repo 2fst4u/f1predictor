@@ -29,6 +29,7 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: true
+          token: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Configure Git
         run: |
