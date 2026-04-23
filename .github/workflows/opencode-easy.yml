@@ -11,12 +11,18 @@ jobs:
     if: |
       contains(github.event.comment.body, '/oc-easy')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       id-token: write
       contents: write
       actions: read
       pull-requests: write
       issues: write
+    # OPENCODE_PAT requires the following repository permissions:
+    # - Contents: Read & Write
+    # - Issues: Read & Write
+    # - Pull Requests: Read & Write
+    # - Workflows: Read & Write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4.2.2
@@ -33,7 +39,7 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
         with:
-          model: openrouter/google/gemini-2.5-flash
+          agent: worker-easy
           use_github_token: true

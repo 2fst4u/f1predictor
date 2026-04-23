@@ -15,6 +15,11 @@ jobs:
       contents: read
       actions: read
       issues: write
+    # OPENCODE_PAT requires the following repository permissions:
+    # - Contents: Read & Write
+    # - Issues: Read & Write
+    # - Pull Requests: Read & Write
+    # - Workflows: Read & Write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4.2.2
@@ -25,21 +30,8 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
         with:
-          model: openrouter/google/gemini-2.5-flash
           agent: plan
           use_github_token: true
-          prompt: |
-            You are the Plan agent responding to a GitHub issue comment containing /oc-plan.
-
-            Goal: produce a creative yet grounded, file-specific implementation plan.
-            Do NOT modify any files in this run.
-
-            Steps:
-            - Explore the repository to understand current structure and relevant modules.
-            - Propose a concrete, actionable plan broken into clear steps.
-            - Feel free to suggest alternative approaches or unconventional ideas where useful.
-            - Cite real code locations as `path:line` references; do not invent files or APIs.
-            - Call out open questions, ambiguities, or tradeoffs for the issue author.
-            - Post the final plan as a single comment on this issue, then stop.
