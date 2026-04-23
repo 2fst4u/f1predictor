@@ -29,6 +29,7 @@ jobs:
         with:
           model: openrouter/anthropic/claude-3.7-sonnet
           use_github_token: true
+          mentions: '/oc-review'
           prompt: |
             Review this pull request as an expert software engineer:
             - Identify critical security vulnerabilities or bugs.

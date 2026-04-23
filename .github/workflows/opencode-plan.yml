@@ -35,3 +35,4 @@ jobs:
         with:
           agent: plan
           use_github_token: true
+          mentions: '/oc-plan'
