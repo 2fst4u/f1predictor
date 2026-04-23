@@ -43,3 +43,4 @@ jobs:
         with:
           agent: worker-hard
           use_github_token: true
+          mentions: '/oc-hard'
