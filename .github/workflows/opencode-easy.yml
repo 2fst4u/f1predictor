@@ -40,8 +40,8 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
-          MODEL: openrouter/moonshotai/kimi-k2.6
         with:
+          model: openrouter/moonshotai/kimi-k2.6
           agent: worker-easy
           use_github_token: true
           mentions: '/oc-easy'
