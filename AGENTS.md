@@ -14,7 +14,7 @@ Python ML application for Formula 1 race predictions. Uses `setuptools-scm` for 
 
 ### Prerelease Builds (automatic)
 
-Every push to **any branch** triggers the sequential CI/CD pipeline in `build.yml`. The process consists of two distinct jobs: `Tests` (reusing `tests.yml`) followed by `Build`. This ensures gated builds and clear visibility within PRs without redundancy. The job builds a Docker image tagged with:
+Every push to **any branch** triggers the sequential CI/CD pipeline in `build.yml`. The process consists of three jobs: `Tests` (reusing `tests.yml`) → `Code Review` (AI-powered, PR only) → `Build`. The review must pass as non-blocking before the Docker image is built. On non-PR pushes (direct to main, releases), the review is skipped. The job builds a Docker image tagged with:
 - `{next-patch}-pre.{run_number}` — numerically increasing (e.g. `0.1.1-pre.42`)
 - `prerelease` — static tag that always points to the latest dev build
 - Branch name (e.g. `main`, `feature-xyz`)
@@ -35,8 +35,9 @@ All stable releases are **manual** via GitHub Actions UI:
 | Workflow | File | Triggers | Purpose |
 |----------|------|----------|---------|
 | Tests | `tests.yml` | `workflow_call` | Reusable workflow to run pytest suite |
-| Build | `build.yml` | `push`, `workflow_call`, `release` | Sequential pipeline: Tests then Build |
+| Build | `build.yml` | `push`, `workflow_call`, `release` | Sequential pipeline: Tests → Review → Build |
 | Release | `release.yml` | Manual dispatch only | Creates semver tag + GitHub Release |
+| CI Fix | `opencode-ci-fix.yml` | `workflow_run` (Build failure) | Auto-posts `/oc-review` with failure logs on PR when CI fails |
 
 ### Docker Image Tags
 

@@ -9,7 +9,13 @@ on:
 jobs:
   opencode:
     if: |
-      contains(github.event.comment.body, '/oc-auto')
+      startsWith(github.event.comment.body, '/oc-auto') &&
+      (
+        github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR' ||
+        github.event.comment.user.type == 'Bot'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

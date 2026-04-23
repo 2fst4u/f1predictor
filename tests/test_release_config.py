@@ -50,7 +50,7 @@ class TestReleaseInfrastructure:
         """build.yml must trigger on push to ensure every commit is gated."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"
         assert workflow.exists(), "build.yml not found"
-        content = workflow.read_text()
+        content = workflow.read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
         triggers = parsed.get(True, {})
         assert "push" in triggers, (
@@ -60,7 +60,7 @@ class TestReleaseInfrastructure:
     def test_build_workflow_triggers_on_release(self):
         """build.yml must also trigger when a GitHub Release is published."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"
-        content = workflow.read_text()
+        content = workflow.read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
         triggers = parsed.get(True, {})
         assert "release" in triggers, (
@@ -74,7 +74,7 @@ class TestReleaseInfrastructure:
     def test_build_workflow_has_prerelease_versions(self):
         """build.yml must produce numerically increasing prerelease tags."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"
-        content = workflow.read_text()
+        content = workflow.read_text(encoding="utf-8")
         assert "-pre." in content, (
             "build.yml must produce prerelease versions with "
             "'-pre.' suffix for Flux auto-pull compatibility"
@@ -83,7 +83,7 @@ class TestReleaseInfrastructure:
     def test_build_workflow_has_semver_tags(self):
         """build.yml must produce semver-tagged Docker images for releases."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"
-        content = workflow.read_text()
+        content = workflow.read_text(encoding="utf-8")
         assert "type=semver" in content, (
             "build.yml must include type=semver tag patterns "
             "to produce versioned Docker images"

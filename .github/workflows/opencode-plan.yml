@@ -3,11 +3,33 @@ name: opencode-plan
 on:
   issue_comment:
     types: [created]
+  issues:
+    types: [opened, edited]
 
 jobs:
   plan:
     if: |
-      github.event.issue.pull_request == null && contains(github.event.comment.body, '/oc-plan')
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request == null &&
+        startsWith(github.event.comment.body, '/oc-plan') &&
+        (
+          github.event.comment.author_association == 'OWNER' ||
+          github.event.comment.author_association == 'MEMBER' ||
+          github.event.comment.author_association == 'COLLABORATOR' ||
+          github.event.comment.user.type == 'Bot'
+        )
+      ) ||
+      (
+        github.event_name == 'issues' &&
+        startsWith(github.event.issue.body, '/oc-plan') &&
+        (
+          github.event.issue.author_association == 'OWNER' ||
+          github.event.issue.author_association == 'MEMBER' ||
+          github.event.issue.author_association == 'COLLABORATOR' ||
+          github.event.issue.user.type == 'Bot'
+        )
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -43,9 +65,20 @@ jobs:
             Your job is to:
             1. Thoroughly explore and understand the codebase structure
             2. Analyze the issue requirements in detail
-            3. Determine if the task should be:
+            3. Determine the best course of action:
                a) Implemented directly in THIS issue (for cohesive, related changes)
                b) Split into separate sub-issues (ONLY when logically independent features/bugs)
+               c) Ask clarifying questions (when the issue is ambiguous, underspecified, or key decisions need human input)
+            
+            ## When to Ask Clarifying Questions
+            
+            **ASK QUESTIONS if:**
+            - The issue is ambiguous and could be interpreted in multiple valid ways
+            - Key technical decisions need human input (e.g. which approach, what scope)
+            - Requirements are missing or underspecified and guessing could lead to wasted work
+            - Trade-offs exist that the developers should weigh in on
+            
+            **If asking questions:** Post a comment listing your specific questions. Do NOT trigger a worker (`/oc-easy` or `/oc-hard`). Developers will discuss the answers in the issue thread and re-trigger `/oc-plan` once resolved. On re-trigger, review the full discussion to incorporate all answers before deciding to implement or split.
             
             ## Decision Criteria for Sub-Issues
             
@@ -63,6 +96,9 @@ jobs:
             
             ## Implementation Actions
             
+            **If asking clarifying questions:**
+            Post a comment with your questions. Do NOT trigger any worker.
+            
             **If implementing in THIS issue:**
             Post a detailed plan comment, then trigger implementation by commenting:
             `/oc-easy` (for straightforward changes) or `/oc-hard` (for complex changes)
@@ -73,6 +109,19 @@ jobs:
                - Post `/oc-easy` comment on the new issue for straightforward tasks
                - Post `/oc-hard` comment on the new issue for complex tasks
             3. Post a summary in the parent issue linking all sub-issues
+            
+            ## Example: Clarifying Questions
+            ```bash
+            gh issue comment 389 --body "## Clarifying Questions
+            
+            Before I plan the implementation, I'd like to clarify a few things:
+            
+            1. **Scope:** Should the new caching layer apply to all API endpoints or just the prediction routes?
+            2. **TTL:** What cache expiration makes sense — per-session, per-race-weekend, or configurable?
+            3. **Invalidation:** Should cache be invalidated automatically when new results are published, or is manual invalidation acceptable?
+            
+            Please discuss and re-trigger \`/oc-plan\` once these are resolved."
+            ```
             
             ## Example: Direct Implementation
             ```bash
@@ -114,4 +163,4 @@ jobs:
             gh issue comment "$issue_num" --body "/oc-hard"
             ```
             
-            REMEMBER: The goal is to get work DONE, not to over-organize. Prefer direct implementation unless there's a clear reason to split.
+            REMEMBER: The goal is to get work DONE, not to over-organize. Prefer direct implementation unless there's a clear reason to split. But if the issue is genuinely unclear, asking questions first saves everyone time versus building the wrong thing.
