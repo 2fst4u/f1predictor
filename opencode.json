@@ -11,7 +11,8 @@
         "openai/gpt-4o-mini": {},
         "anthropic/claude-sonnet-4.6": {},
         "anthropic/claude-3.7-sonnet": {},
-        "moonshotai/kimi-k2.6": {}
+        "moonshotai/kimi-k2.6": {},
+        "pareto-code": {}
       }
     }
   }
