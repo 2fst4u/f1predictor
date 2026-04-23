@@ -11,12 +11,18 @@ jobs:
     if: |
       contains(github.event.comment.body, '/oc-hard')
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       id-token: write
       contents: write
       actions: read
       pull-requests: write
       issues: write
+    # OPENCODE_PAT requires the following repository permissions:
+    # - Contents: Read & Write
+    # - Issues: Read & Write
+    # - Pull Requests: Read & Write
+    # - Workflows: Read & Write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4.2.2
