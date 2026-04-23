@@ -466,11 +466,10 @@ def _run_single_prediction(
         logger.warning("[predict._run_single] Pace standardization failed: %s", e)
     
     # Historical results for ensemble models
-    # TODO: lookback_years=75 fetches data back to 1950.  While exponential decay
-    # down-weights ancient data, the data collection pipeline pays the fetch/parse
-    # cost for decades of irrelevant results.  A shorter lookback (e.g. 10-20 years)
-    # may be sufficient given the half-life settings.  Requires further investigation
-    # and confirmation.
+    # lookback_years=75 sets the maximum scan range, but
+    # collect_historical_results stops early once a season is found with no
+    # current-roster drivers.  The effective lookback is therefore typically
+    # much shorter than 75 years.
     roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
     hist = collect_historical_results(
         jc,
