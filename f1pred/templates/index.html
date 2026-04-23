@@ -135,7 +135,7 @@
             <div class="max-w-[1400px] w-full mx-auto flex justify-between items-center flex-wrap gap-2 border-b border-red-700 pb-3">
                 <h1 class="text-xl md:text-2xl font-black tracking-tighter italic whitespace-nowrap">F1 OUTCOME
                     PREDICTOR</h1>
-                <div class="flex items-center space-x-2 min-w-0">
+                <div class="flex items-center space-x-3 min-w-0">
                     <!-- Live indicator -->
                     <template x-if="liveConnected">
                         <span class="flex items-center space-x-1 bg-black bg-opacity-20 px-2 py-1 rounded"
@@ -173,7 +173,7 @@
 
         <!-- Navigation Tabs -->
         <div class="max-w-[1400px] mx-auto px-2 sm:px-4 mb-4 mt-4">
-            <div class="flex space-x-4 border-b border-gray-700">
+            <div class="flex space-x-6 border-b border-gray-700">
                 <button @click="activeTab = 'predictions'"
                     :class="activeTab === 'predictions' ? 'border-red-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'"
                     class="py-2 px-1 border-b-2 font-medium text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded">
@@ -187,9 +187,9 @@
             </div>
         </div>
 
-        <main class="max-w-[1400px] w-full mx-auto px-2 py-4 md:p-8" x-show="activeTab === 'predictions'">
+        <main class="max-w-[1400px] w-full mx-auto px-4 py-6 md:px-8 md:py-8" x-show="activeTab === 'predictions'">
             <!-- Controls -->
-            <div class="card p-4 md:p-6 mb-4 md:mb-8 shadow-xl">
+            <div class="card p-5 md:p-8 mb-6 md:mb-8 shadow-xl">
                 <div class="flex flex-col gap-4">
                     <div class="flex justify-between items-end gap-4">
                         <div class="flex items-center gap-2">
@@ -201,7 +201,7 @@
 
                     <div>
                         <div id="round-label" class="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Round (Auto-Predicted)</div>
-                        <div role="group" aria-labelledby="round-label" tabindex="0" class="flex space-x-2 overflow-x-auto no-scrollbar pb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded" :class="{'opacity-50 pointer-events-none': scheduleLoading}">
+                        <div role="group" aria-labelledby="round-label" tabindex="0" class="flex space-x-3 overflow-x-auto no-scrollbar pb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded" :class="{'opacity-50 pointer-events-none': scheduleLoading}">
                             <template x-if="scheduleLoading">
                                 <span class="flex items-center text-xs text-gray-500 italic mt-1.5 pt-1">
                                     <i class="fas fa-circle-notch fa-spin mr-1.5" aria-hidden="true"></i>Loading schedule...
@@ -223,7 +223,7 @@
             </div>
 
             <!-- Error Message -->
-            <div x-show="error" x-transition x-cloak class="bg-red-900 border-l-4 border-red-500 text-red-100 p-4 mb-8"
+            <div x-show="error" x-transition x-cloak class="bg-red-900 border-l-4 border-red-500 text-red-100 p-5 mb-8"
                 role="alert">
                 <div class="flex justify-between items-start">
                     <div>
@@ -238,7 +238,7 @@
             </div>
 
             <!-- Progress Logs -->
-            <div x-show="loading" x-transition x-cloak class="card p-4 mb-8 border-l-4 border-blue-500">
+            <div x-show="loading" x-transition x-cloak class="card p-5 mb-8 border-l-4 border-blue-500">
                 <details>
                     <summary class="flex items-center cursor-pointer mb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
                         <i class="fas fa-terminal mr-2 text-blue-400" aria-hidden="true"></i>
@@ -265,7 +265,7 @@
             <!-- Recent Changes Panel -->
             <template x-if="filteredRecentChanges().length > 0">
                 <div x-show="!loading" x-transition x-cloak
-                    class="card p-4 mb-4 md:mb-8 border-l-4 border-green-500 shadow-xl">
+                    class="card p-5 mb-6 md:mb-8 border-l-4 border-green-500 shadow-xl">
                     <details open>
                         <summary
                             class="flex items-center cursor-pointer mb-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 rounded">
@@ -275,9 +275,9 @@
                             <span class="ml-2 text-xs bg-green-600 text-white px-1.5 py-0.5 rounded-full"
                                 x-text="filteredRecentChanges().length"></span>
                         </summary>
-                        <div class="space-y-2 max-h-48 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 rounded p-1" tabindex="0" role="region" aria-label="Recent Position Changes">
+                        <div class="space-y-3 max-h-48 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 rounded p-1" tabindex="0" role="region" aria-label="Recent Position Changes">
                             <template x-for="(change, ci) in filteredRecentChanges()" :key="ci">
-                                <div class="bg-black bg-opacity-30 rounded p-2 text-sm flex items-center gap-3">
+                                <div class="bg-black bg-opacity-30 rounded p-3 text-sm flex items-center gap-3">
                                     <span class="text-xs text-gray-500 font-mono w-14 flex-shrink-0"
                                         x-text="new Date(change.timestamp).toLocaleTimeString()"></span>
                                     <span
@@ -384,21 +384,21 @@
                                     <thead>
                                         <tr
                                             class="bg-gray-800 text-xs font-bold text-gray-400 uppercase tracking-wider">
-                                            <th scope="col" class="py-2 sm:p-4 w-7 sm:w-12 text-center"><abbr
+                                            <th scope="col" class="py-3 sm:p-5 w-7 sm:w-12 text-center"><abbr
                                                     title="Predicted Position"
                                                     class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">Pos</abbr>
                                             </th>
-                                            <th scope="col" class="py-2 sm:p-4">Driver</th>
-                                            <th scope="col" class="py-2 sm:p-4 hidden md:table-cell">Team</th>
-                                            <th scope="col" class="py-2 sm:p-4 text-center"
+                                            <th scope="col" class="py-3 sm:p-5">Driver</th>
+                                            <th scope="col" class="py-3 sm:p-5 hidden md:table-cell">Team</th>
+                                            <th scope="col" class="py-3 sm:p-5 text-center"
                                                 x-show="hasGrid(sess) && !data.frozen"><abbr title="Predicted finish compared to starting grid"
                                                     class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">Grid & Exp Delta</abbr>
                                             </th>
-                                            <th scope="col" class="py-2 sm:p-4 text-center text-blue-300"
+                                            <th scope="col" class="py-3 sm:p-5 text-center text-blue-300"
                                                 x-show="data.frozen"><abbr title="Actual finish compared to predicted finish"
                                                     class="cursor-help underline decoration-dotted decoration-blue-500 underline-offset-4 hover:text-blue-200 transition-colors">Real Pos & Acc.</abbr>
                                             </th>
-                                            <th scope="col" class="py-2 sm:p-4">
+                                            <th scope="col" class="py-3 sm:p-5">
                                                 <span class="hidden sm:inline"
                                                     x-text="['qualifying', 'sprint_qualifying'].includes(sess) ? 'Pole Prob' : 'Win Prob'">Win
                                                     Prob</span>
@@ -406,11 +406,11 @@
                                                     x-text="['qualifying', 'sprint_qualifying'].includes(sess) ? 'Pole %' : 'Win %'">Win
                                                     %</span>
                                             </th>
-                                            <th scope="col" class="py-2 sm:p-4">
+                                            <th scope="col" class="py-3 sm:p-5">
                                                 <span class="hidden sm:inline">Podium</span>
                                                 <span class="sm:hidden">Top 3</span>
                                             </th>
-                                            <th scope="col" class="py-2 sm:p-4 text-right"
+                                            <th scope="col" class="py-3 sm:p-5 text-right"
                                                 x-show="['race', 'sprint'].includes(sess)"><abbr
                                                     title="Did Not Finish Probability"
                                                     class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">DNF</abbr>
@@ -422,11 +422,11 @@
                                             <tr :class="[getTeamClass(p.constructorName), getMovementClass(p.driverId, sess)]"
                                                 class="text-sm sm:text-base transition-colors">
                                                 <!-- Position -->
-                                                <td class="pt-2 sm:p-4 text-center font-black italic text-base sm:text-lg align-top"
+                                                <td class="pt-3 sm:p-5 text-center font-black italic text-base sm:text-lg align-top"
                                                     :class="index === 0 ? 'text-yellow-400' : index === 1 ? 'text-gray-300' : index === 2 ? 'text-amber-600' : 'text-gray-500'"
                                                     x-text="p.predicted_position"></td>
                                                 <!-- Driver -->
-                                                <td class="pt-2 sm:p-4 align-top">
+                                                <td class="pt-3 sm:p-5 align-top">
                                                     <div class="flex items-center space-x-1 sm:space-x-3 mb-0.5">
                                                         <!-- Movement arrow -->
                                                         <template x-if="getDriverMovement(p.driverId, sess)">
@@ -449,12 +449,12 @@
                                                 </td>
                                                 <!-- Team -->
                                                 <td
-                                                    class="pt-2 sm:p-4 hidden md:table-cell align-top">
+                                                    class="pt-3 sm:p-5 hidden md:table-cell align-top">
                                                     <span class="text-sm text-gray-400"
                                                         x-text="p.constructorName">Team</span>
                                                 </td>
                                                 <!-- Grid & Pred Delta (Unfrozen) -->
-                                                <td class="pt-2 sm:p-4 text-center align-top"
+                                                <td class="pt-3 sm:p-5 text-center align-top"
                                                     x-show="hasGrid(sess) && !data.frozen">
                                                     <div class="flex flex-col items-center mt-1">
                                                         <span class="text-[10px] text-gray-500 mb-0.5">Start P<span x-text="p.grid || '--'"></span></span>
@@ -471,7 +471,7 @@
                                                 </td>
 
                                                 <!-- Actual & Accuracy (Frozen) -->
-                                                <td class="pt-2 sm:p-4 text-center align-top"
+                                                <td class="pt-3 sm:p-5 text-center align-top"
                                                     x-show="data.frozen">
                                                     <div class="flex flex-col items-center">
                                                         <span class="font-black text-xl text-blue-400">P<span x-text="p.actual_position || '?'"></span></span>
@@ -486,7 +486,7 @@
                                                     </div>
                                                 </td>
                                                 <!-- Win % -->
-                                                <td class="pt-2 sm:p-4 align-top">
+                                                <td class="pt-3 sm:p-5 align-top">
                                                     <div class="w-10 sm:w-24">
                                                         <div class="text-xs mb-0.5 sm:mb-1"
                                                             x-text="(p.p_win * 100).toFixed(1) + '%'"></div>
@@ -498,7 +498,7 @@
                                                     </div>
                                                 </td>
                                                 <!-- Top 3 % -->
-                                                <td class="pt-2 sm:p-4 align-top">
+                                                <td class="pt-3 sm:p-5 align-top">
                                                     <div class="w-10 sm:w-24">
                                                         <div class="text-xs mb-0.5 sm:mb-1"
                                                             x-text="(p.p_top3 * 100).toFixed(1) + '%'"></div>
@@ -510,7 +510,7 @@
                                                     </div>
                                                 </td>
                                                 <!-- DNF % -->
-                                                <td class="pt-2 sm:p-4 text-right align-top"
+                                                <td class="pt-3 sm:p-5 text-right align-top"
                                                     x-show="['race', 'sprint'].includes(sess)">
                                                     <div class="w-10 sm:w-24 ml-auto">
                                                         <div class="text-xs mb-0.5 sm:mb-1"
@@ -529,19 +529,19 @@
                                                 <td :colspan="getColspan(sess)"
                                                     class="px-1.5 md:px-8 lg:px-12 pb-3 border-t border-gray-800/50">
                                                     <div
-                                                        class="flex flex-wrap md:flex-nowrap gap-x-4 gap-y-4 items-start md:justify-start w-full">
+                                                        class="flex flex-wrap md:flex-nowrap gap-x-6 gap-y-5 items-start md:justify-start w-full">
                                                         <!-- Model Mix bar removed per user request -->
                                                         <!-- SHAP factors -->
                                                         <template x-if="hasShapFactors(p.shap_values)">
                                                             <div class="min-w-0 w-full flex-1">
                                                                 <div
-                                                                    class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-0.5 text-center md:text-left w-full">
+                                                                    class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 text-center md:text-left w-full">
                                                                     Factors <span
                                                                         class="normal-case font-normal text-gray-600">(green
                                                                         = helps, red = hurts)</span>
                                                                 </div>
                                                                 <div
-                                                                    class="flex flex-nowrap md:gap-x-4 gap-y-0.5 overflow-hidden no-scrollbar justify-around md:justify-start w-full">
+                                                                    class="flex flex-nowrap md:gap-x-5 gap-y-1 overflow-hidden no-scrollbar justify-around md:justify-start w-full">
                                                                     <template
                                                                         x-for="feat in getSortedShap(p.shap_values, windowWidth)"
                                                                         :key="feat.key + '_' + windowWidth">
@@ -602,10 +602,10 @@
                                             class="cursor-pointer text-xs font-bold uppercase tracking-widest text-gray-400 hover:text-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 rounded transition">
                                             Input Variable Glossary</summary>
                                         <div
-                                            class="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1 text-xs">
+                                            class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs">
                                             <template x-for="entry in getFeatureLegendEntries()" :key="entry.key">
                                                 <div
-                                                    class="flex justify-between gap-2 text-gray-300 border-b border-gray-800/60 pb-0.5">
+                                                    class="flex justify-between gap-2 text-gray-300 border-b border-gray-800/60 pb-1">
                                                     <span class="truncate" x-text="entry.label"></span>
                                                     <span class="text-gray-500 font-mono" x-text="entry.key"></span>
                                                 </div>
@@ -628,7 +628,7 @@
         </main>
 
         <!-- Settings View -->
-        <main class="max-w-[1400px] w-full mx-auto px-2 py-4 md:p-8" x-show="activeTab === 'settings'" style="display: none;">
+        <main class="max-w-[1400px] w-full mx-auto px-4 py-6 md:px-8 md:py-8" x-show="activeTab === 'settings'" style="display: none;">
             <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 max-w-2xl">
                 <h2 class="text-xl font-bold mb-6 text-white border-b border-gray-700 pb-2">Application Settings</h2>
 
@@ -638,7 +638,7 @@
 
                         <div x-show="authError" class="mb-4 bg-red-900/50 border-l-4 border-red-500 p-4 text-red-200" x-text="authError"></div>
 
-                        <form @submit.prevent="login" class="space-y-4">
+                        <form @submit.prevent="login" class="space-y-5">
                             <div>
                                 <label for="login-username" class="block text-sm font-medium text-gray-300">Username</label>
                                 <input id="login-username" type="text" x-model="authUsername" required
@@ -666,8 +666,8 @@
 
                         <div class="mb-8 border-b border-gray-700 pb-8">
                             <h3 class="text-sm font-medium text-gray-200 mb-3">Account Security</h3>
-                            <div class="bg-gray-900/50 p-4 rounded border border-gray-700">
-                                <form @submit.prevent="changePassword" class="space-y-4">
+                            <div class="bg-gray-900/50 p-5 rounded border border-gray-700">
+                                <form @submit.prevent="changePassword" class="space-y-5">
                                     <div x-show="passwordChangeError" class="text-xs text-red-400" x-text="passwordChangeError"></div>
                                     <div x-show="passwordChangeSuccess" class="text-xs text-green-400">Password changed successfully!</div>
 
@@ -694,8 +694,8 @@
                         <form @submit.prevent="saveSettings" class="space-y-6">
                             <div>
                                 <h3 class="text-sm font-medium text-gray-200 mb-3">Notifications</h3>
-                                <div class="bg-gray-900/50 p-4 rounded border border-gray-700">
-                                    <label for="discord-webhook-url" class="block text-sm font-medium text-gray-400 mb-1">Discord Webhook URL</label>
+                                <div class="bg-gray-900/50 p-5 rounded border border-gray-700">
+                                    <label for="discord-webhook-url" class="block text-sm font-medium text-gray-400 mb-2">Discord Webhook URL</label>
                                     <div class="flex gap-2">
                                         <input id="discord-webhook-url" type="text" x-model="settings.discord_webhook_url" placeholder="https://discord.com/api/webhooks/..."
                                             class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
@@ -713,7 +713,7 @@
 
                             <div>
                                 <h3 class="text-sm font-medium text-gray-200 mb-3">Integrations (Coming Soon)</h3>
-                                <div class="bg-gray-900/50 p-4 rounded border border-gray-700 space-y-4 opacity-50 pointer-events-none">
+                                <div class="bg-gray-900/50 p-5 rounded border border-gray-700 space-y-5 opacity-50 pointer-events-none">
                                     <div>
                                         <label class="block text-sm font-medium text-gray-400 mb-1">LLM Server URL</label>
                                         <input type="text" x-model="settings.llm_server_url" disabled
