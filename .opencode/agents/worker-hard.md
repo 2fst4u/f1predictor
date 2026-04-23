@@ -1,7 +1,7 @@
 ---
 description: Handles highly complex, cross-cutting tasks requiring deep domain expertise, novel algorithms, or intricate refactoring. Modifies files directly and ensures tests pass.
 mode: subagent
-model: openrouter/anthropic/claude-opus-4.7
+model: openrouter/google/gemini-3.1-pro-preview
 temperature: 0.1
 permission:
   edit: allow
