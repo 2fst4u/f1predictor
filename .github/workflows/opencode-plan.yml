@@ -32,6 +32,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
+          MODEL: openrouter/google/gemini-2.5-pro
         with:
           agent: plan
           use_github_token: true
