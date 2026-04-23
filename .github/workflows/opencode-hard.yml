@@ -42,7 +42,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
         with:
-          model: openrouter/anthropic/claude-opus-4.7
+          model: openrouter/google/gemini-3.1-pro-preview
           agent: worker-hard
           use_github_token: true
           mentions: '/oc-hard'
