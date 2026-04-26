@@ -55,7 +55,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
         with:
-          model: openrouter/anthropic/claude-opus-4.7
+          model: openrouter/google/gemini-2.5-pro
           agent: plan
           use_github_token: true
           mentions: '/oc-plan'
