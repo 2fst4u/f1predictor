@@ -706,6 +706,12 @@ class PredictionManager:
         if not webhook_url:
             return
 
+        # 🛡️ Sentinel: Prevent SSRF by validating against known safe webhook prefixes
+        valid_prefixes = ("https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/")
+        if not webhook_url.startswith(valid_prefixes):
+            logger.warning("[PredictionManager] Invalid Discord webhook URL prefix: %s", webhook_url)
+            return
+
         try:
             embeds = []
             for sess_name, (diff, predictions, weather) in session_updates.items():
