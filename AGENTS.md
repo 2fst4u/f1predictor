@@ -14,7 +14,9 @@ Python ML application for Formula 1 race predictions. Uses `setuptools-scm` for 
 
 ### Prerelease Builds (automatic)
 
-Every push to **any branch** triggers the sequential CI/CD pipeline in `build.yml`. The process consists of three jobs: `Tests` (reusing `tests.yml`) → `Code Review` (AI-powered, PR only) → `Build`. The review must pass as non-blocking before the Docker image is built. On non-PR pushes (direct to main, releases), the review is skipped. The job builds a Docker image tagged with:
+Every push to **any branch** triggers `build.yml`, which runs `Tests` (reusing `tests.yml`) → `Build`. Code review is **not** part of CI — it is invoked manually by commenting `/oc-review` on a PR or issue (handled by `opencode-review.yml`). This keeps CI fast and inexpensive; reviewers ask for a review only when wanted.
+
+The build job produces a Docker image tagged with:
 - `{next-patch}-pre.{run_number}` — numerically increasing (e.g. `0.1.1-pre.42`)
 - `prerelease` — static tag that always points to the latest dev build
 - Branch name (e.g. `main`, `feature-xyz`)
@@ -35,9 +37,9 @@ All stable releases are **manual** via GitHub Actions UI:
 | Workflow | File | Triggers | Purpose |
 |----------|------|----------|---------|
 | Tests | `tests.yml` | `workflow_call` | Reusable workflow to run pytest suite |
-| Build | `build.yml` | `push`, `workflow_call`, `release` | Sequential pipeline: Tests → Review → Build |
+| Build | `build.yml` | `push`, `workflow_call`, `release` | Tests → Build Docker image |
+| Manual Review | `opencode-review.yml` | `issue_comment`, `pull_request_review_comment` | AI code review on demand via `/oc-review` |
 | Release | `release.yml` | Manual dispatch only | Creates semver tag + GitHub Release |
-| CI Fix | `opencode-ci-fix.yml` | `workflow_run` (Build failure) | Auto-posts `/oc-review` with failure logs on PR when CI fails |
 
 ### Docker Image Tags
 
@@ -67,6 +69,9 @@ python -m pytest tests/test_release_config.py -v  # Validate release infrastruct
 - Dockerfile copies `.git/` directory
 - Tests workflow runs as a reusable component via `workflow_call`
 - Build workflow triggers on push (running tests first) and on release publication
+- Build workflow does NOT trigger on `pull_request` and contains no `review` job
+- `opencode-review.yml` exists and handles `/oc-review` comments via the OpenCode action
+- No automatic review workflow runs on push or pull_request (reviews are strictly manual)
 - Build workflow produces prerelease and semver Docker tags
 - Release workflow is manual-only
 - Old `docker-publish.yml` does not exist

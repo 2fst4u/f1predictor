@@ -564,6 +564,42 @@ class TestPredictionManagerPredictRoundSessions:
 
 
 class TestPredictionManagerDiscord:
+    def test_discord_webhook_url_validation(self, caplog):
+        from unittest.mock import MagicMock, patch
+        from f1pred.prediction_manager import PredictionManager
+
+        cfg = MagicMock()
+        manager = PredictionManager(cfg)
+        
+        valid_urls = [
+            "https://discord.com/api/webhooks/123/abc",
+            "https://discordapp.com/api/webhooks/456/def",
+        ]
+        
+        invalid_urls = [
+            "http://discord.com/api/webhooks/123/abc",  # Not https
+            "https://discord.com/api/webhooks%0Ainternal", # Malformed/tricky path
+            "https://discord.com.evil.com/api/webhooks/123", # Bad host
+            "https://evil.com/api/webhooks/", # Bad host
+            "https://discord.com/other/path", # Bad path
+            "https://discordapp.com/api/webhooks", # Missing trailing slash in prefix
+            "https://discord.com:80/api/webhooks/123", # Host with port gets rejected or parsed hostname gets tested, but httpx uses port 80? Well urlsplit handles it, but discord doesn't use ports.
+        ]
+        
+        # Test valid URLs
+        for url in valid_urls:
+            with patch.object(manager, '_get_setting', return_value=url):
+                with patch('httpx.post') as mock_post:
+                    manager._send_discord_webhook("Test Event", {"race": (MagicMock(), [], {})})
+                    assert mock_post.called
+
+        # Test invalid URLs
+        for url in invalid_urls:
+            with patch.object(manager, '_get_setting', return_value=url):
+                with patch('httpx.post') as mock_post:
+                    manager._send_discord_webhook("Test Event", {"race": (MagicMock(), [], {})})
+                    assert not mock_post.called
+
     def test_consolidated_discord_webhook(self):
         import pandas as pd
         from unittest.mock import MagicMock, patch

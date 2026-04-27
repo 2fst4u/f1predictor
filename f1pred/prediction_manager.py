@@ -12,6 +12,7 @@ import json
 import os
 import threading
 import time
+from urllib.parse import urlsplit
 import httpx
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -704,6 +705,22 @@ class PredictionManager:
         """Send a consolidated notification to Discord for all changed sessions in a round."""
         webhook_url = self._get_setting("discord_webhook_url")
         if not webhook_url:
+            return
+
+        # 🛡️ Sentinel: Prevent SSRF by parsing and validating the URL explicitly
+        try:
+            parsed = urlsplit(webhook_url)
+        except ValueError:
+            logger.warning("[PredictionManager] Malformed Discord webhook URL: %s", webhook_url)
+            return
+
+        valid_hosts = {"discord.com", "discordapp.com"}
+        if (
+            parsed.scheme != "https"
+            or parsed.netloc not in valid_hosts
+            or not parsed.path.startswith("/api/webhooks/")
+        ):
+            logger.warning("[PredictionManager] Invalid Discord webhook URL: %s", webhook_url)
             return
 
         try:
