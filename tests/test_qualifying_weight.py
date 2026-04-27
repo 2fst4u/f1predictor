@@ -70,11 +70,11 @@ def test_build_hist_training_X_sprint_boost():
     hist = pd.DataFrame(hist_data)
     X_current = pd.DataFrame([{"driverId": "max", "form_index": 0.0}])
 
-    # With high qual_boost_factor, the sprint result should be boosted (lowering form_index)
-    res1 = build_hist_training_X(hist, X_current, base_date + timedelta(days=1), boost_factor=1.0, qual_boost_factor=1.0)
+    # With high sprint_boost_factor, the sprint result should be boosted (lowering form_index)
+    res1 = build_hist_training_X(hist, X_current, base_date + timedelta(days=1), boost_factor=1.0, qual_boost_factor=1.0, sprint_boost_factor=1.0)
     fi1 = res1[res1["grid"] == 5]["form_index"].iloc[0]
 
-    res2 = build_hist_training_X(hist, X_current, base_date + timedelta(days=1), boost_factor=1.0, qual_boost_factor=100.0)
+    res2 = build_hist_training_X(hist, X_current, base_date + timedelta(days=1), boost_factor=1.0, qual_boost_factor=100.0, sprint_boost_factor=100.0)
     fi2 = res2[res2["grid"] == 5]["form_index"].iloc[0]
 
     print(f"FI1: {fi1}, FI2: {fi2}")

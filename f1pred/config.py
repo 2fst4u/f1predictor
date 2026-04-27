@@ -126,6 +126,7 @@ class BlendingCfg:
     baseline_team_factor: float = 0.3
     grid_factor: float = 0.8
     current_season_weight: float = 8.0
+    current_season_sprint_weight: float = 8.0
     current_season_qualifying_weight: float = 8.0
     current_quali_factor: float = 0.5
     analytical_win_weight: float = 0.5

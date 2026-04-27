@@ -30,7 +30,8 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                           ref_date: 'datetime', half_life_days: int = 120,
                           max_events: int = 200,
                           boost_factor: float = 1.0,
-                          qual_boost_factor: float = 1.0) -> Optional['pd.DataFrame']:
+                          qual_boost_factor: float = 1.0,
+                          sprint_boost_factor: float = 1.0) -> Optional['pd.DataFrame']:
     """Build a lightweight training DataFrame from historical race results.
 
     Uses only columns that overlap with the current event feature matrix ``X_current``
@@ -189,14 +190,10 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         if np.any(is_p_cur_race):
             w[is_p_cur_race] *= boost_factor
 
-        # Boost current season sprints (use qual boost for sprints to match features.py)
-        # TODO: Sprint sessions are boosted with qual_boost_factor (current_season_
-        # qualifying_weight), but sprints are race-like sessions, not qualifying-like.
-        # A distinct sprint boost factor or using the race boost_factor may be more
-        # appropriate.  Requires further investigation and confirmation.
+        # Boost current season sprints
         is_p_cur_sprint = (p_season == s) & (p_sess == "sprint")
         if np.any(is_p_cur_sprint):
-            w[is_p_cur_sprint] *= qual_boost_factor
+            w[is_p_cur_sprint] *= sprint_boost_factor
 
         wval = p_val * w
         w_sum = np.bincount(p_dcodes, weights=w, minlength=n_drivers)
