@@ -79,6 +79,7 @@ PARAM_NAMES = [
     "ens_elo_quali",            # 22
     "ens_bt_quali",             # 23
     "ens_mixed_quali",          # 24
+    "current_season_sprint_weight", # 25
 ]
 
 N_PARAMS = len(PARAM_NAMES)
@@ -115,6 +116,7 @@ PARAM_BOUNDS = [
     (0.0, 0.5),     # 22 ens_elo_quali   (capped lower — race-only model)
     (0.0, 0.5),     # 23 ens_bt_quali    (capped lower — race-only model)
     (0.0, 0.5),     # 24 ens_mixed_quali (capped lower — race-only model)
+    (3.0, 50.0),    # 25 current_season_sprint_weight
 ]
 
 # Default / initial guess (matches config.yaml defaults)
@@ -144,6 +146,7 @@ PARAM_DEFAULTS = [
     0.1,    # 22 ens_elo_quali
     0.1,    # 23 ens_bt_quali
     0.1,    # 24 ens_mixed_quali
+    8.0,    # 25 current_season_sprint_weight
 ]
 
 
@@ -221,6 +224,7 @@ def _unpack_weights(w) -> Dict[str, Any]:
             "current_season_qualifying_weight": float(w[9]),
             "current_quali_factor": float(np.clip(w[10], 0.0, 1.0)),
             "analytical_win_weight": float(np.clip(w[11], 0.0, 1.0)),
+            "current_season_sprint_weight": float(w[25]) if len(w) > 25 else 8.0,
         },
         "dnf": {
             "alpha": float(max(0.1, w[12])),
@@ -277,6 +281,7 @@ def _pack_weights(d: Dict[str, Any]) -> list:
         e.get("w_elo_quali", PARAM_DEFAULTS[22]),
         e.get("w_bt_quali", PARAM_DEFAULTS[23]),
         e.get("w_mixed_quali", PARAM_DEFAULTS[24]),
+        b.get("current_season_sprint_weight", PARAM_DEFAULTS[25]),
     ]
 
 
