@@ -27,15 +27,20 @@ env:
 jobs:
   tests:
     name: "Tests"
+    # Tests run on push (every branch), release, and workflow_call. They do
+    # NOT run on pull_request — the corresponding push event already runs
+    # tests for the same commit, so running them again on pull_request would
+    # duplicate every test run.
+    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/tests.yml
 
   review:
     name: "Code Review"
-    needs: tests
     runs-on: ubuntu-latest
-    # Only review on pull_request events. The OpenCode GitHub action does not
-    # support 'push' events, so we rely on PR events (which fire on every push
-    # to a PR branch via 'synchronize') to drive reviews.
+    # Review runs only on pull_request events. The OpenCode GitHub action
+    # does not support 'push' events, so we rely on PR events (which fire on
+    # every push to a PR branch via 'synchronize') to drive reviews. Review
+    # is independent of tests — tests run on the parallel push-triggered run.
     if: github.event_name == 'pull_request'
     concurrency:
       group: oc-review-${{ github.event.pull_request.number }}

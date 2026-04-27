@@ -76,6 +76,19 @@ class TestReleaseInfrastructure:
                 f"to ensure reviews run on PR open and on every push to the PR branch"
             )
 
+    def test_tests_job_skips_pull_request(self):
+        """The tests job must skip on pull_request to avoid running tests
+        twice (push and pull_request both fire on a PR-branch push)."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
+        content = workflow.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(content)
+        tests_job = parsed["jobs"]["tests"]
+        tests_if = tests_job.get("if", "")
+        assert "pull_request" in tests_if and "!=" in tests_if, (
+            "tests job must skip pull_request events to avoid duplicate runs "
+            "(e.g. github.event_name != 'pull_request')"
+        )
+
     def test_review_job_runs_on_pull_request(self):
         """The review job must be gated on pull_request events, not push.
         The OpenCode GitHub action exits with 'Unsupported event type: push'
