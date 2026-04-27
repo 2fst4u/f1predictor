@@ -121,3 +121,63 @@ def test_cache_rolling_deletion_unlink_fails(tmp_path):
 
     # Assert that exception was caught and ignored (files won't actually be deleted)
     assert len(list(cache.cache_dir.glob("*.json"))) == 3
+
+def test_cache_get_by_key_set_by_key_success(tmp_path):
+    cache = PredictionCache(cache_dir=str(tmp_path), max_entries=2)
+    key = "explicit_key_123"
+    df = pd.DataFrame({"a": [1, 2]})
+    results = {
+        "ranked": df,
+        "prob_matrix": np.array([[0.5, 0.5]]),
+        "pairwise": np.array([[1.0, 0.0], [0.0, 1.0]]),
+        "extra": "value"
+    }
+
+    cache.set_by_key(key, results)
+
+    data = cache.get_by_key(key)
+    assert data is not None
+    assert isinstance(data["ranked"], pd.DataFrame)
+    assert data["ranked"].equals(df)
+    assert np.array_equal(data["prob_matrix"], results["prob_matrix"])
+    assert np.array_equal(data["pairwise"], results["pairwise"])
+    assert data["extra"] == "value"
+
+def test_cache_get_by_key_miss(tmp_path):
+    cache = PredictionCache(cache_dir=str(tmp_path), max_entries=2)
+    data = cache.get_by_key("nonexistent_key")
+    assert data is None
+
+def test_cache_get_by_key_error_handling(tmp_path, caplog):
+    cache = PredictionCache(cache_dir=str(tmp_path), max_entries=2)
+    key = "error_key"
+    results = {"val": 42}
+    cache.set_by_key(key, results)
+
+    import hashlib
+    safe_key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    cache_file = cache.cache_dir / f"{safe_key}.json"
+
+    # Corrupt the JSON file to trigger Exception during load
+    with open(cache_file, "w") as f:
+        f.write("{invalid_json:")
+
+    with caplog.at_level(logging.WARNING):
+        data = cache.get_by_key(key)
+
+    assert data is None
+    assert "Failed to load prediction cache" in caplog.text
+
+def test_cache_set_by_key_error_handling(tmp_path, caplog):
+    cache = PredictionCache(cache_dir=str(tmp_path), max_entries=2)
+    key = "error_key"
+    results = {"val": 42}
+
+    with patch("hashlib.sha256") as mock_sha256:
+        # Create a mock object that returns a problematic string
+        mock_hexdigest = mock_sha256.return_value
+        mock_hexdigest.hexdigest.return_value = "nonexistent_dir/file"
+
+        with caplog.at_level(logging.WARNING):
+            cache.set_by_key(key, results)
+        assert "Failed to save prediction cache" in caplog.text
