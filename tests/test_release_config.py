@@ -57,87 +57,68 @@ class TestReleaseInfrastructure:
             "build.yml must trigger on push to ensure every commit is gated and build Docker images after tests pass"
         )
 
-    def test_build_workflow_triggers_on_pull_request(self):
-        """build.yml must trigger on pull_request so the OpenCode review action
-        (which does not support 'push' events) can run on every push to a PR
-        branch via 'synchronize'."""
+    def test_build_workflow_does_not_trigger_on_pull_request(self):
+        """build.yml must NOT trigger on pull_request. Reviews live in
+        pr-review.yml so build runs (push/release) and review runs
+        (pull_request) don't shadow each other with skipped jobs."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"
         content = workflow.read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
         triggers = parsed.get(True, {})
+        assert "pull_request" not in triggers, (
+            "build.yml must not trigger on pull_request — review is handled "
+            "by pr-review.yml. A pull_request trigger here would create "
+            "duplicate test runs and cluttered skipped jobs."
+        )
+
+    def test_build_workflow_has_no_review_job(self):
+        """build.yml must not define a review job. Code review is handled
+        by the dedicated pr-review.yml workflow."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
+        content = workflow.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(content)
+        jobs = parsed.get("jobs", {})
+        assert "review" not in jobs, (
+            "build.yml must not contain a 'review' job — code review lives "
+            "in pr-review.yml so build/review concerns stay separated"
+        )
+
+    def test_pr_review_workflow_exists_and_triggers_on_pull_request(self):
+        """pr-review.yml must exist and trigger only on pull_request events,
+        which fire on every push to a PR branch via 'synchronize'."""
+        workflow = ROOT / ".github" / "workflows" / "pr-review.yml"
+        assert workflow.exists(), (
+            "pr-review.yml must exist to run automatic code review on PRs. "
+            "The OpenCode GitHub action does not support 'push' events, so "
+            "review must run from a pull_request context."
+        )
+        parsed = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        triggers = parsed.get(True, {})
         assert "pull_request" in triggers, (
-            "build.yml must trigger on pull_request so reviews run via the "
-            "OpenCode action (which does not support push events)"
+            "pr-review.yml must trigger on pull_request"
+        )
+        # Must NOT trigger on push (the action would fail with
+        # 'Unsupported event type: push')
+        assert "push" not in triggers, (
+            "pr-review.yml must NOT trigger on push — the OpenCode action "
+            "exits with 'Unsupported event type: push' on push events"
         )
         pr_types = triggers["pull_request"].get("types", []) or []
         for required in ("opened", "synchronize"):
             assert required in pr_types, (
-                f"build.yml pull_request trigger must include '{required}' "
-                f"to ensure reviews run on PR open and on every push to the PR branch"
+                f"pr-review.yml pull_request trigger must include "
+                f"'{required}' to cover PR open and every push to a PR branch"
             )
 
-    def test_tests_job_skips_pull_request(self):
-        """The tests job must skip on pull_request to avoid running tests
-        twice (push and pull_request both fire on a PR-branch push)."""
-        workflow = ROOT / ".github" / "workflows" / "build.yml"
+    def test_pr_review_workflow_uses_opencode_action(self):
+        """pr-review.yml must invoke the OpenCode GitHub action so reviews
+        post structured comments back to the PR."""
+        workflow = ROOT / ".github" / "workflows" / "pr-review.yml"
         content = workflow.read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)
-        tests_job = parsed["jobs"]["tests"]
-        tests_if = tests_job.get("if", "")
-        # Assert exact behaviour rather than substrings
-        assert tests_if == "github.event_name != 'pull_request'", (
-            "tests job must exactly skip pull_request events"
+        assert "anomalyco/opencode/github" in content, (
+            "pr-review.yml must invoke anomalyco/opencode/github to run "
+            "the automated review"
         )
-
-    def test_review_job_runs_on_pull_request(self):
-        """The review job must be gated on pull_request events, not push.
-        The OpenCode GitHub action exits with 'Unsupported event type: push'
-        when invoked from a push context."""
-        workflow = ROOT / ".github" / "workflows" / "build.yml"
-        content = workflow.read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)
-        review_job = parsed["jobs"]["review"]
-        review_if = review_job.get("if", "")
-        # Assert exact behaviour rather than substrings
-        assert review_if == "github.event_name == 'pull_request'", (
-            "review job must exactly gate on pull_request events"
-        )
-
-    def test_build_job_dependencies(self):
-        """The build job must depend ONLY on tests, not review, to ensure
-        non-pull_request runs (like release or workflow_call) can execute
-        without waiting for a PR-only review job."""
-        workflow = ROOT / ".github" / "workflows" / "build.yml"
-        content = workflow.read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)
-        build_job = parsed["jobs"]["build"]
-        
-        needs = build_job.get("needs", [])
-        if isinstance(needs, str):
-            needs = [needs]
-            
-        assert "tests" in needs, "build job must depend on tests"
-        assert "review" not in needs, (
-            "build job must NOT depend on review. Since review only runs on "
-            "pull_request events and build only runs on push events, adding "
-            "review to needs breaks the workflow on release/workflow_call events."
-        )
-
-    def test_build_job_skips_pull_request(self):
-        """The build job must skip on pull_request events to avoid duplicate
-        Docker builds (a push to a PR branch fires both push and pull_request)."""
-        workflow = ROOT / ".github" / "workflows" / "build.yml"
-        content = workflow.read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)
-        build_job = parsed["jobs"]["build"]
-        build_if = build_job.get("if", "")
-        
-        # We need to verify that always() and != 'pull_request' is present
-        # and that no other job result checks exist (especially needs.review)
-        assert "always()" in build_if, "build job must run even if previous skipped"
-        assert "github.event_name != 'pull_request'" in build_if, "build job must explicitly exclude pull_request events"
-        assert "needs.tests.result == 'success'" in build_if, "build job must wait for tests success"
-        assert "needs.review" not in build_if, "build job must NOT check review job status"
 
     def test_build_workflow_triggers_on_release(self):
         """build.yml must also trigger when a GitHub Release is published."""
