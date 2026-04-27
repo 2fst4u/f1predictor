@@ -14,7 +14,7 @@ Python ML application for Formula 1 race predictions. Uses `setuptools-scm` for 
 
 ### Prerelease Builds (automatic)
 
-Every push to **any branch** triggers `build.yml`, which runs `Tests` (reusing `tests.yml`) → `Build`. AI-powered code review is handled by a separate `pr-review.yml` workflow that triggers on `pull_request` events (since the OpenCode GitHub action does not support `push` events). A blocking review verdict fails the PR Review check, which can be enforced via branch protection.
+Every push to **any branch** triggers `build.yml`, which runs `Tests` (reusing `tests.yml`) → `Build`. Code review is **not** part of CI — it is invoked manually by commenting `/oc-review` on a PR or issue (handled by `opencode-review.yml`). This keeps CI fast and inexpensive; reviewers ask for a review only when wanted.
 
 The build job produces a Docker image tagged with:
 - `{next-patch}-pre.{run_number}` — numerically increasing (e.g. `0.1.1-pre.42`)
@@ -38,9 +38,8 @@ All stable releases are **manual** via GitHub Actions UI:
 |----------|------|----------|---------|
 | Tests | `tests.yml` | `workflow_call` | Reusable workflow to run pytest suite |
 | Build | `build.yml` | `push`, `workflow_call`, `release` | Tests → Build Docker image |
-| PR Review | `pr-review.yml` | `pull_request` | AI-powered code review on every push to a PR branch |
+| Manual Review | `opencode-review.yml` | `issue_comment`, `pull_request_review_comment` | AI code review on demand via `/oc-review` |
 | Release | `release.yml` | Manual dispatch only | Creates semver tag + GitHub Release |
-| CI Fix | `opencode-ci-fix.yml` | `workflow_run` (Build failure) | Auto-posts `/oc-review` with failure logs on PR when CI fails |
 
 ### Docker Image Tags
 
@@ -71,7 +70,8 @@ python -m pytest tests/test_release_config.py -v  # Validate release infrastruct
 - Tests workflow runs as a reusable component via `workflow_call`
 - Build workflow triggers on push (running tests first) and on release publication
 - Build workflow does NOT trigger on `pull_request` and contains no `review` job
-- `pr-review.yml` exists, triggers on `pull_request` only, and invokes the OpenCode action
+- `opencode-review.yml` exists and handles `/oc-review` comments via the OpenCode action
+- No automatic review workflow runs on push or pull_request (reviews are strictly manual)
 - Build workflow produces prerelease and semver Docker tags
 - Release workflow is manual-only
 - Old `docker-publish.yml` does not exist

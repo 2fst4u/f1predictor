@@ -57,67 +57,71 @@ class TestReleaseInfrastructure:
             "build.yml must trigger on push to ensure every commit is gated and build Docker images after tests pass"
         )
 
-    def test_build_workflow_does_not_trigger_on_pull_request(self):
-        """build.yml must NOT trigger on pull_request. Reviews live in
-        pr-review.yml so build runs (push/release) and review runs
-        (pull_request) don't shadow each other with skipped jobs."""
-        workflow = ROOT / ".github" / "workflows" / "build.yml"
-        content = workflow.read_text(encoding="utf-8")
-        parsed = yaml.safe_load(content)
-        triggers = parsed.get(True, {})
-        assert "pull_request" not in triggers, (
-            "build.yml must not trigger on pull_request — review is handled "
-            "by pr-review.yml. A pull_request trigger here would create "
-            "duplicate test runs and cluttered skipped jobs."
-        )
-
     def test_build_workflow_has_no_review_job(self):
-        """build.yml must not define a review job. Code review is handled
-        by the dedicated pr-review.yml workflow."""
+        """build.yml must not define a review job. Code review is invoked
+        manually via /oc-review (handled by opencode-review.yml), not as
+        part of the CI pipeline."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"
         content = workflow.read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
         jobs = parsed.get("jobs", {})
         assert "review" not in jobs, (
-            "build.yml must not contain a 'review' job — code review lives "
-            "in pr-review.yml so build/review concerns stay separated"
+            "build.yml must not contain a 'review' job — reviews are "
+            "manual via /oc-review"
         )
 
-    def test_pr_review_workflow_exists_and_triggers_on_pull_request(self):
-        """pr-review.yml must exist and trigger only on pull_request events,
-        which fire on every push to a PR branch via 'synchronize'."""
-        workflow = ROOT / ".github" / "workflows" / "pr-review.yml"
-        assert workflow.exists(), (
-            "pr-review.yml must exist to run automatic code review on PRs. "
-            "The OpenCode GitHub action does not support 'push' events, so "
-            "review must run from a pull_request context."
-        )
-        parsed = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-        triggers = parsed.get(True, {})
-        assert "pull_request" in triggers, (
-            "pr-review.yml must trigger on pull_request"
-        )
-        # Must NOT trigger on push (the action would fail with
-        # 'Unsupported event type: push')
-        assert "push" not in triggers, (
-            "pr-review.yml must NOT trigger on push — the OpenCode action "
-            "exits with 'Unsupported event type: push' on push events"
-        )
-        pr_types = triggers["pull_request"].get("types", []) or []
-        for required in ("opened", "synchronize"):
-            assert required in pr_types, (
-                f"pr-review.yml pull_request trigger must include "
-                f"'{required}' to cover PR open and every push to a PR branch"
-            )
-
-    def test_pr_review_workflow_uses_opencode_action(self):
-        """pr-review.yml must invoke the OpenCode GitHub action so reviews
-        post structured comments back to the PR."""
-        workflow = ROOT / ".github" / "workflows" / "pr-review.yml"
+    def test_build_workflow_does_not_trigger_on_pull_request(self):
+        """build.yml must NOT trigger on pull_request. The CI pipeline only
+        runs tests and builds Docker images on push/release/workflow_call.
+        Pull-request reviews are manual via /oc-review."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
         content = workflow.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(content)
+        triggers = parsed.get(True, {})
+        assert "pull_request" not in triggers, (
+            "build.yml must not trigger on pull_request — reviews are "
+            "manual via /oc-review and CI only runs on push/release"
+        )
+
+    def test_manual_review_workflow_exists(self):
+        """opencode-review.yml must exist and respond to /oc-review
+        comments on PRs/issues so reviews can be requested manually."""
+        workflow = ROOT / ".github" / "workflows" / "opencode-review.yml"
+        assert workflow.exists(), (
+            "opencode-review.yml must exist to handle manual /oc-review "
+            "requests"
+        )
+        content = workflow.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(content)
+        triggers = parsed.get(True, {})
+        # Must trigger on comment events (issue_comment for PR/issue
+        # threads, pull_request_review_comment for inline code comments)
+        assert "issue_comment" in triggers or "pull_request_review_comment" in triggers, (
+            "opencode-review.yml must trigger on comment events to "
+            "handle /oc-review slash commands"
+        )
+        assert "/oc-review" in content, (
+            "opencode-review.yml must filter comments for the "
+            "/oc-review slash command"
+        )
         assert "anomalyco/opencode/github" in content, (
-            "pr-review.yml must invoke anomalyco/opencode/github to run "
-            "the automated review"
+            "opencode-review.yml must invoke the OpenCode GitHub action"
+        )
+
+    def test_no_automatic_review_workflow(self):
+        """There must be no workflow that runs the OpenCode review action
+        automatically on push/pull_request. Reviews are strictly manual
+        via /oc-review to keep CI fast and inexpensive."""
+        pr_review = ROOT / ".github" / "workflows" / "pr-review.yml"
+        assert not pr_review.exists(), (
+            "pr-review.yml must not exist — automatic reviews were "
+            "removed in favour of manual /oc-review only"
+        )
+        ci_fix = ROOT / ".github" / "workflows" / "opencode-ci-fix.yml"
+        assert not ci_fix.exists(), (
+            "opencode-ci-fix.yml must not exist — automatic /oc-review "
+            "posting on CI failure was removed in favour of fully manual "
+            "review invocation"
         )
 
     def test_build_workflow_triggers_on_release(self):
