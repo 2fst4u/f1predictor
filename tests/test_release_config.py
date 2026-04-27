@@ -57,6 +57,61 @@ class TestReleaseInfrastructure:
             "build.yml must trigger on push to ensure every commit is gated and build Docker images after tests pass"
         )
 
+    def test_build_workflow_triggers_on_pull_request(self):
+        """build.yml must trigger on pull_request so the OpenCode review action
+        (which does not support 'push' events) can run on every push to a PR
+        branch via 'synchronize'."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
+        content = workflow.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(content)
+        triggers = parsed.get(True, {})
+        assert "pull_request" in triggers, (
+            "build.yml must trigger on pull_request so reviews run via the "
+            "OpenCode action (which does not support push events)"
+        )
+        pr_types = triggers["pull_request"].get("types", []) or []
+        for required in ("opened", "synchronize"):
+            assert required in pr_types, (
+                f"build.yml pull_request trigger must include '{required}' "
+                f"to ensure reviews run on PR open and on every push to the PR branch"
+            )
+
+    def test_review_job_runs_on_pull_request(self):
+        """The review job must be gated on pull_request events, not push.
+        The OpenCode GitHub action exits with 'Unsupported event type: push'
+        when invoked from a push context."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
+        content = workflow.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(content)
+        review_job = parsed["jobs"]["review"]
+        review_if = review_job.get("if", "")
+        assert "pull_request" in review_if, (
+            "review job's 'if' condition must reference pull_request "
+            "since the OpenCode action does not support push events"
+        )
+        assert "'push'" not in review_if and '"push"' not in review_if, (
+            "review job must not gate on push events — the OpenCode action "
+            "fails with 'Unsupported event type: push'"
+        )
+
+    def test_build_job_skips_pull_request(self):
+        """The build job must skip on pull_request events to avoid duplicate
+        Docker builds (a push to a PR branch fires both push and pull_request)."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
+        content = workflow.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(content)
+        build_job = parsed["jobs"]["build"]
+        build_if = build_job.get("if", "")
+        assert "pull_request" in build_if, (
+            "build job's 'if' must reference pull_request to avoid duplicate "
+            "Docker builds when a push to a PR branch fires both events"
+        )
+        # Must explicitly exclude pull_request
+        assert "!=" in build_if and "pull_request" in build_if, (
+            "build job must explicitly exclude pull_request events "
+            "(e.g. github.event_name != 'pull_request')"
+        )
+
     def test_build_workflow_triggers_on_release(self):
         """build.yml must also trigger when a GitHub Release is published."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"

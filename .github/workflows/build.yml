@@ -3,6 +3,8 @@ name: "Build"
 on:
   push:
     branches: ["**"]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   release:
     types: [published]
   workflow_call:
@@ -31,10 +33,12 @@ jobs:
     name: "Code Review"
     needs: tests
     runs-on: ubuntu-latest
-    # Only review on regular pushes, not releases or workflow_call
-    if: github.event_name == 'push'
+    # Only review on pull_request events. The OpenCode GitHub action does not
+    # support 'push' events, so we rely on PR events (which fire on every push
+    # to a PR branch via 'synchronize') to drive reviews.
+    if: github.event_name == 'pull_request'
     concurrency:
-      group: oc-review-${{ github.ref_name }}
+      group: oc-review-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     permissions:
       id-token: write
@@ -43,31 +47,13 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - name: Find associated PR
-        id: pr
-        env:
-          GH_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
-        run: |
-          PR_NUMBER=$(gh pr list \
-            --repo "${{ github.repository }}" \
-            --head "${{ github.ref_name }}" \
-            --state open \
-            --json number \
-            --jq '.[0].number // empty')
-          echo "number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
-          if [ -z "$PR_NUMBER" ]; then
-            echo "No open PR for branch ${{ github.ref_name }}, skipping review"
-          fi
-
       - name: Checkout repository
-        if: steps.pr.outputs.number != ''
         uses: actions/checkout@v4.2.2
         with:
           persist-credentials: true
           token: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Run review
-        if: steps.pr.outputs.number != ''
         uses: anomalyco/opencode/github@latest
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -159,13 +145,12 @@ jobs:
               not for style preferences.
 
       - name: Check review verdict
-        if: steps.pr.outputs.number != ''
         env:
           GH_TOKEN: ${{ secrets.OPENCODE_PAT || secrets.GITHUB_TOKEN }}
         run: |
           # Find the most recent comment containing a verdict
           VERDICT=$(gh api \
-            "repos/${{ github.repository }}/issues/${{ steps.pr.outputs.number }}/comments" \
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             --jq '[.[] | select(.body | test("Verdict:"))] | last | .body' \
             | grep -oP "Verdict: \K[A-Za-z-]+" | tail -1)
 
@@ -182,8 +167,13 @@ jobs:
     name: "Build & Push Docker Image"
     runs-on: ubuntu-latest
     needs: [tests, review]
+    # Skip on pull_request events to avoid duplicate builds — pushes to a PR
+    # branch fire both 'push' and 'pull_request', and we only want one Docker
+    # build per commit. The 'push' run handles the build; the 'pull_request'
+    # run handles the review.
     if: |
       always() &&
+      github.event_name != 'pull_request' &&
       needs.tests.result == 'success' &&
       (needs.review.result == 'success' || needs.review.result == 'skipped')
     permissions:
