@@ -84,9 +84,9 @@ class TestReleaseInfrastructure:
         parsed = yaml.safe_load(content)
         tests_job = parsed["jobs"]["tests"]
         tests_if = tests_job.get("if", "")
-        assert "pull_request" in tests_if and "!=" in tests_if, (
-            "tests job must skip pull_request events to avoid duplicate runs "
-            "(e.g. github.event_name != 'pull_request')"
+        # Assert exact behaviour rather than substrings
+        assert tests_if == "github.event_name != 'pull_request'", (
+            "tests job must exactly skip pull_request events"
         )
 
     def test_review_job_runs_on_pull_request(self):
@@ -98,13 +98,29 @@ class TestReleaseInfrastructure:
         parsed = yaml.safe_load(content)
         review_job = parsed["jobs"]["review"]
         review_if = review_job.get("if", "")
-        assert "pull_request" in review_if, (
-            "review job's 'if' condition must reference pull_request "
-            "since the OpenCode action does not support push events"
+        # Assert exact behaviour rather than substrings
+        assert review_if == "github.event_name == 'pull_request'", (
+            "review job must exactly gate on pull_request events"
         )
-        assert "'push'" not in review_if and '"push"' not in review_if, (
-            "review job must not gate on push events — the OpenCode action "
-            "fails with 'Unsupported event type: push'"
+
+    def test_build_job_dependencies(self):
+        """The build job must depend ONLY on tests, not review, to ensure
+        non-pull_request runs (like release or workflow_call) can execute
+        without waiting for a PR-only review job."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
+        content = workflow.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(content)
+        build_job = parsed["jobs"]["build"]
+        
+        needs = build_job.get("needs", [])
+        if isinstance(needs, str):
+            needs = [needs]
+            
+        assert "tests" in needs, "build job must depend on tests"
+        assert "review" not in needs, (
+            "build job must NOT depend on review. Since review only runs on "
+            "pull_request events and build only runs on push events, adding "
+            "review to needs breaks the workflow on release/workflow_call events."
         )
 
     def test_build_job_skips_pull_request(self):
@@ -115,15 +131,13 @@ class TestReleaseInfrastructure:
         parsed = yaml.safe_load(content)
         build_job = parsed["jobs"]["build"]
         build_if = build_job.get("if", "")
-        assert "pull_request" in build_if, (
-            "build job's 'if' must reference pull_request to avoid duplicate "
-            "Docker builds when a push to a PR branch fires both events"
-        )
-        # Must explicitly exclude pull_request
-        assert "!=" in build_if and "pull_request" in build_if, (
-            "build job must explicitly exclude pull_request events "
-            "(e.g. github.event_name != 'pull_request')"
-        )
+        
+        # We need to verify that always() and != 'pull_request' is present
+        # and that no other job result checks exist (especially needs.review)
+        assert "always()" in build_if, "build job must run even if previous skipped"
+        assert "github.event_name != 'pull_request'" in build_if, "build job must explicitly exclude pull_request events"
+        assert "needs.tests.result == 'success'" in build_if, "build job must wait for tests success"
+        assert "needs.review" not in build_if, "build job must NOT check review job status"
 
     def test_build_workflow_triggers_on_release(self):
         """build.yml must also trigger when a GitHub Release is published."""
