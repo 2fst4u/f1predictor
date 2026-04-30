@@ -28,13 +28,3 @@ def init_db(engine):
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables initialized.")
 
-# Dependency to use in FastAPI routes
-def get_db(session_factory):
-    """Dependency that yields a database session."""
-    def _get_db():
-        db = session_factory()
-        try:
-            yield db
-        finally:
-            db.close()
-    return _get_db

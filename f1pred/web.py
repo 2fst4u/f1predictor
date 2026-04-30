@@ -23,7 +23,7 @@ from .data.jolpica import JolpicaClient
 from .data.fastf1_backend import init_fastf1
 from .prediction_manager import PredictionManager
 
-from .database import get_engine, get_session_local, init_db, get_db
+from .database import get_engine, get_session_local, init_db
 from .models_db import User, Setting
 from .auth import verify_password, create_access_token, get_current_user_dependency, get_password_hash
 
