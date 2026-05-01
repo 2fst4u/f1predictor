@@ -1264,11 +1264,12 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
     # Current season weight boost
     boost = getattr(cfg.modelling.blending, "current_season_weight", 8.0)
     qual_boost = getattr(cfg.modelling.blending, "current_season_qualifying_weight", boost)
+    sprint_boost = getattr(cfg.modelling.blending, "current_season_sprint_weight", qual_boost)
     s_int = int(season)
 
     # Form indices
     form = compute_form_indices(hist, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.base,
-                                current_season=s_int, boost_factor=boost, sprint_boost_factor=qual_boost)
+                               current_season=s_int, boost_factor=boost, sprint_boost_factor=sprint_boost)
 
     # Ensure 'session' column exists
     if 'session' not in hist.columns:
@@ -1378,7 +1379,7 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         qual_form = pd.DataFrame(columns=["driverId", "qualifying_form_index"])
     try:
         sprint_form = compute_sprint_form(hist, ref_date=ref_date, half_life_days=cfg.modelling.recency_half_life_days.base,
-                                            current_season=s_int, sprint_boost_factor=qual_boost)
+                                           current_season=s_int, sprint_boost_factor=sprint_boost)
         logger.info(f"[features] Sprint form computed for {len(sprint_form)} drivers")
     except Exception as e:
         logger.info(f"[features] Sprint form failed: {e}")

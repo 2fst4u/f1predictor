@@ -69,6 +69,7 @@ class TestCalibrationManager(unittest.TestCase):
         for key in ("gbm_weight", "baseline_weight", "baseline_team_factor",
                      "grid_factor",
                      "current_season_weight", "current_season_qualifying_weight",
+                     "current_season_sprint_weight",
                      "current_quali_factor", "analytical_win_weight"):
             self.assertIn(key, b, f"Missing blending key: {key}")
 
