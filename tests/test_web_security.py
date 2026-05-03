@@ -51,3 +51,7 @@ def test_webhook_ssrf_protection_invalid_scheme(client_with_auth):
 def test_webhook_ssrf_protection_non_discord(client_with_auth):
     response = client_with_auth.post("/api/settings/test-webhook", json={"url": "https://example.com"})
     assert response.status_code == 400
+
+def test_webhook_ssrf_protection_startswith_bypass(client_with_auth):
+    response = client_with_auth.post("/api/settings/test-webhook", json={"url": "https://discord.com@127.0.0.1:80/api/webhooks/"})
+    assert response.status_code == 400

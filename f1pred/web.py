@@ -3,6 +3,7 @@ from typing import Any, List, Optional
 import os
 import asyncio
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import json
 import math
@@ -546,8 +547,17 @@ async def test_webhook(
 ):
     """Send a test notification to the provided Discord webhook URL."""
     # 🛡️ Sentinel: Defense in depth - Validate webhook URL to prevent SSRF
-    valid_prefixes = ("https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/")
-    if not request.url.startswith(valid_prefixes):
+    try:
+        parsed = urlsplit(request.url)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Malformed Discord webhook URL")
+
+    valid_hosts = {"discord.com", "discordapp.com"}
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc not in valid_hosts
+        or not parsed.path.startswith("/api/webhooks/")
+    ):
         raise HTTPException(status_code=400, detail="URL must be a valid Discord webhook URL")
 
     try:
