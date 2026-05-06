@@ -93,6 +93,7 @@ The model uses a variety of engineered features to capture driver talent, car pe
 - **Sprint Session (`is_sprint`)**: A boolean flag indicating if the session is a sprint.
 - **Grid Position (`grid`)**: The starting position for the race. This acts as a mathematical "anchor" for race predictions.
 - **Quali Position (`current_quali_pos`)**: The actual qualifying result achieved during the current race weekend.
+- **Constructor (`constructorId`)**: The constructor (team) identifier for the given entry.
 
 ### Weather & Conditions
 - **Weather Impact (`weather_effect`)**: The total predicted influence of atmospheric conditions on a driver's performance.
