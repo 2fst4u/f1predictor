@@ -13,7 +13,6 @@ from .models_db import User
 
 SECRET_KEY = os.environ.get("F1PRED_SECRET_KEY", secrets.token_urlsafe(32))
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
 
 # Configure CryptContext for password hashing using bcrypt.
 # Disable truncate_error (which raises ValueError for passwords > 72 bytes)

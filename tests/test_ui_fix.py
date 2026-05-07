@@ -3,7 +3,7 @@ import json
 import pytest
 
 try:
-    from playwright.sync_api import Page, expect
+    from playwright.sync_api import Page
     HAS_PLAYWRIGHT = True
 except ImportError:
     HAS_PLAYWRIGHT = False

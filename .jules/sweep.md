@@ -9,3 +9,7 @@
 ## 2025-03-24 - Remove leftover visual verification and UI test runner scripts
 **Learning:** Playwright UI test runner scripts (e.g., `verify_settings.py`) used for manual verification of settings screens and screenshots left behind from visual layout testing (e.g., `mobile_optimized_verified.png`) are sometimes accidentally tracked or left in the repository root. These are not used in the application.
 **Action:** Always scan the root directory for `*.png` visual verification images or ad-hoc `verify_*.py` debug scripts, ensure they are unreferenced via `git grep`, and remove them to prevent workspace bloat.
+
+## 2025-04-12 - Using static analysis tools for unused variables and imports
+**Learning:** Tools like vulture can find many unused variables and imports that are left behind after refactoring, however you must be careful to verify that the tool's suggestions are actually correct and not false positives.
+**Action:** Always run tools like vulture to search for orphaned or unused code across the entire codebase to quickly find cleanup opportunities, then manually verify using `grep` before removing anything.
