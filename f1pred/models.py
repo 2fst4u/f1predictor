@@ -92,7 +92,7 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         races_cons_full = np.array([None] * len(races_full))
 
     team_ids_full = races_cons_full
-    t_codes_full, t_uniques = pd.factorize(team_ids_full)
+    _, t_uniques = pd.factorize(team_ids_full)
     n_teams = len(t_uniques)
 
     # Map races finishes back to team codes
@@ -306,7 +306,7 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
 
 
                 valid_q = wq_sum > 0
-                q_form_index[valid_q] = wval_sum_val = wqval_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
+                q_form_index[valid_q] = wqval_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
                 tm_delta_index[valid_q] = wqdelta_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
 
                 # --- Calculate sprint_qualifying_form_index ---
