@@ -12,3 +12,6 @@
 ## 2025-02-23 - Pandas transform(lambda) bottleneck for grouped normalisation
 **Learning:** Using a lambda function within `groupby().transform()` (e.g. `df.groupby('col').transform(lambda x: (x - x.mean()) / x.std())`) forces pandas to execute pure Python code for each group, which is extremely slow (often >10x slower).
 **Action:** Always replace `groupby.transform(lambda)` with mathematically equivalent vectorised operations using pandas built-in string aggregators, such as calculating `mean = transform('mean')` and `std = transform('std')` separately and applying the arithmetic across the whole series.
+## 2025-02-24 - Groupby iteration optimization with numpy split
+**Learning:** Iterating over sequential groups in pandas using `df.groupby(...):` is surprisingly slow in pure Python because pandas constructs a full sub-dataframe object for each group. When the goal is just to extract lists of sorted primitives (e.g. `driverId` strings), this overhead is massive.
+**Action:** When iterating through sequentially grouped rows (where sorting perfectly orders the groups and their contents), sort the dataframe first, extract the native `.values` arrays, use `np.where` on boundary conditions to find split indices, and use `np.split` to generate the groups. This entirely bypasses the pandas iteration object creation overhead, yielding a ~10x speedup.

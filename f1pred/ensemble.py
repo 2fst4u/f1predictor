@@ -115,20 +115,37 @@ class EloModel:
         # --- Race Elo ---
         race_updates = 0
         if not race_rows.empty:
-            for (_, _), g in race_rows.sort_values("date").groupby(
-                ["season", "round"], sort=False
-            ):
-                ids = g.sort_values("position")["driverId"].astype(str).tolist()
+            # ⚡ Bolt: Fast vectorized group iteration instead of pandas groupby logic.
+            # Sorting by date, season, round guarantees event grouping, then position ensures correct order.
+            sorted_race = race_rows.sort_values(["date", "season", "round", "position"])
+            driver_ids = sorted_race["driverId"].astype(str).values
+            seasons = sorted_race["season"].values
+            rounds = sorted_race["round"].values
+
+            import numpy as np
+            changes = (seasons[1:] != seasons[:-1]) | (rounds[1:] != rounds[:-1])
+            split_indices = np.where(changes)[0] + 1
+
+            for g in np.split(driver_ids, split_indices):
+                ids = g.tolist()
                 self._update_ratings(self.race_ratings_, ids)
                 race_updates += len(ids) * (len(ids) - 1) // 2
 
         # --- Qualifying Elo ---
         quali_updates = 0
         if not quali_rows.empty:
-            for (_, _), g in quali_rows.sort_values("date").groupby(
-                ["season", "round"], sort=False
-            ):
-                ids = g.sort_values("qpos")["driverId"].astype(str).tolist()
+            # ⚡ Bolt: Fast vectorized group iteration instead of pandas groupby logic.
+            sorted_quali = quali_rows.sort_values(["date", "season", "round", "qpos"])
+            driver_ids = sorted_quali["driverId"].astype(str).values
+            seasons = sorted_quali["season"].values
+            rounds = sorted_quali["round"].values
+
+            import numpy as np
+            changes = (seasons[1:] != seasons[:-1]) | (rounds[1:] != rounds[:-1])
+            split_indices = np.where(changes)[0] + 1
+
+            for g in np.split(driver_ids, split_indices):
+                ids = g.tolist()
                 self._update_ratings(self.quali_ratings_, ids)
                 quali_updates += len(ids) * (len(ids) - 1) // 2
 
