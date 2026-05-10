@@ -206,7 +206,14 @@ def _require(d: Dict, key: str, ctx: str):
 
 
 def _is_http_url(s: str) -> bool:
-    return isinstance(s, str) and (s.startswith("http://") or s.startswith("https://"))
+    if not isinstance(s, str):
+        return False
+    try:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(s)
+        return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+    except ValueError:
+        return False
 
 
 def load_config(path: str) -> AppConfig:
