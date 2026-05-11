@@ -684,8 +684,9 @@
                                         </div>
                                     </div>
                                     <button type="submit" :disabled="passChangeLoading"
-                                         class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-xs py-1.5 px-4 rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white hover:scale-[1.02] active:scale-[0.98]">
-                                        Update Password
+                                         class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-xs py-1.5 px-4 rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white hover:scale-[1.02] active:scale-[0.98] flex justify-center items-center">
+                                        <span x-show="!passChangeLoading">Update Password</span>
+                                        <span x-show="passChangeLoading" x-cloak><i class="fas fa-circle-notch fa-spin mr-2"></i>Updating...</span>
                                     </button>
                                 </form>
                             </div>

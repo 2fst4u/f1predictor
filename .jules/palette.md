@@ -1,3 +1,3 @@
-## 2026-05-04 - Found unlinked form labels
-**Learning:** Found an accessibility issue pattern in the app's components where some form labels were not explicitly linked to their corresponding inputs using `for` and `id` attributes. This decreases screen reader support and general accessibility.
-**Action:** Applied `for` and `id` attributes to explicitly link labels with their inputs in `index.html`. Look for this pattern in future UI reviews.
+## 2024-05-11 - "Settings" Navigation Tab Role
+**Learning:** The navigation tabs in `index.html` (e.g., "Predictions" and "Settings" buttons around line 180) currently lack ARIA `role="tab"` attributes. When writing automated Playwright tests, `page.get_by_role("tab", name="Settings")` will fail to find the button.
+**Action:** When testing these tabs, use text-based locators like `page.locator("button:has-text('Settings')")` instead, or propose a separate UX improvement to add proper ARIA tablist/tab roles to this navigation structure.
