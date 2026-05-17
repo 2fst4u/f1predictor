@@ -717,7 +717,7 @@ class PredictionManager:
         valid_hosts = {"discord.com", "discordapp.com"}
         if (
             parsed.scheme != "https"
-            or parsed.netloc not in valid_hosts
+            or parsed.hostname not in valid_hosts
             or not parsed.path.startswith("/api/webhooks/")
         ):
             logger.warning("[PredictionManager] Invalid Discord webhook URL: %s", webhook_url)
