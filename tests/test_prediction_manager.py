@@ -583,7 +583,7 @@ class TestPredictionManagerDiscord:
             "https://evil.com/api/webhooks/", # Bad host
             "https://discord.com/other/path", # Bad path
             "https://discordapp.com/api/webhooks", # Missing trailing slash in prefix
-            "https://discord.com:80/api/webhooks/123", # Host with port gets rejected or parsed hostname gets tested, but httpx uses port 80? Well urlsplit handles it, but discord doesn't use ports.
+            "https://discord.com@127.0.0.1:80/api/webhooks/123", # SSRF basic auth bypass
         ]
         
         # Test valid URLs

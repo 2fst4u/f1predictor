@@ -555,7 +555,7 @@ async def test_webhook(
     valid_hosts = {"discord.com", "discordapp.com"}
     if (
         parsed.scheme != "https"
-        or parsed.netloc not in valid_hosts
+        or parsed.hostname not in valid_hosts
         or not parsed.path.startswith("/api/webhooks/")
     ):
         raise HTTPException(status_code=400, detail="URL must be a valid Discord webhook URL")
