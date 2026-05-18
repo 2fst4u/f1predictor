@@ -46,3 +46,23 @@ def sample_features():
         'weather_beta_rain': np.random.randn(n_drivers) * 0.1,
         'session_type': ['race'] * n_drivers,
     })
+
+@pytest.fixture(autouse=True)
+def clean_fastf1_cache():
+    import os
+    import shutil
+    import requests_cache
+
+    # FastF1 uses requests_cache under the hood. Let's make sure it's cleared if present.
+    try:
+        requests_cache.clear()
+    except Exception:
+        pass
+
+    cache_dir = "cache"
+    if os.path.exists(cache_dir):
+        try:
+            shutil.rmtree(cache_dir)
+        except Exception:
+            pass
+    yield
