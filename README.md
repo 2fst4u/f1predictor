@@ -97,6 +97,7 @@ The model uses a variety of engineered features to capture driver talent, car pe
 
 ### Weather & Conditions
 - **Weather Impact (`weather_effect`)**: The total predicted influence of atmospheric conditions on a driver's performance.
+- **Condition Sensitivities (`weather_beta_temp`, `weather_beta_pressure`, `weather_beta_wind`, `weather_beta_rain`)**: Driver-specific sensitivity coefficients used to calculate the overall weather impact.
 - **Condition Skills (`temp_skill`, `rain_skill`, `wind_skill`, `pressure_skill`)**: Driver-specific proficiency scores for various weather conditions, derived from historical performance correlations.
 - **Atmospheric Data (`weather_temp_mean`, `weather_rain_sum`, etc.)**: Raw metrics (temperature, rain, wind, pressure, humidity) for the session window.
 
