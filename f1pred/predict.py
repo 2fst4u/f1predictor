@@ -1525,38 +1525,6 @@ def _get_pos_color(pos: int) -> str:
     return Fore.RESET + Style.DIM          # Others
 
 
-def _render_actual_pos(predicted: int, actual: int, width: int = 6) -> str:
-    """Render actual position with accuracy-based color coding and alignment."""
-    diff = abs(predicted - actual)
-
-    # NOTE: We strictly avoid extended Unicode (like '✓' or '≈') for these symbols
-    # to prevent UnicodeEncodeError crashes on standard Windows charmap terminals.
-    # Determine color and symbol
-    if diff == 0:
-        color = Fore.GREEN
-        symbol = "*"
-    elif diff <= 2:
-        color = Fore.CYAN
-        symbol = "~"
-    elif diff <= 5:
-        color = Fore.YELLOW
-        symbol = ""
-    else:
-        # For very poor predictions, use Red to highlight the discrepancy
-        color = Fore.RED
-        symbol = ""
-
-    num_str = str(actual)
-
-    # Calculate padding for right alignment
-    # Note: We assume '*' takes 1 char width in the terminal.
-    content_len = len(num_str) + len(symbol)
-    padding = max(0, width - content_len)
-    pad_str = " " * padding
-
-    return f"{pad_str}{color}{Style.BRIGHT}{symbol}{num_str}{Style.RESET_ALL}"
-
-
 def print_session_console(
     df: 'pd.DataFrame',
     sess: str,
