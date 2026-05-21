@@ -13,3 +13,7 @@
 ## 2024-04-22 - Feature Label Documentation Drift
 **Learning:** Model features in `_FEATURE_LABELS` (like `sprint_form_index`, `is_sprint`) and deprecated features (like `team_tenure_events`) frequently drift between `f1pred/predict.py` and `README.md`.
 **Action:** When adding or removing features from the backend or UI templates, ensure the 'Input Variables' section in `README.md` is explicitly synchronized to prevent documentation drift and orphaned UI labels.
+
+## 2024-05-24 - Documenting Weather Features
+**Learning:** Weather condition sensitivity features (`weather_beta_temp`, `weather_beta_pressure`, `weather_beta_wind`, `weather_beta_rain`) were added to the codebase but left undocumented in the README.md's "Input Variables" section, creating drift between the feature list and the actual implementation.
+**Action:** When adding new features or sensitivity parameters to `f1pred/predict.py`, always ensure they are fully documented in the `README.md` to keep the model's inputs fully transparent.
