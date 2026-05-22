@@ -135,7 +135,18 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
 
     qual = hist[hist["session"].isin(["qualifying", "sprint_qualifying"])].dropna(subset=["driverId", "qpos", "date"]).copy()
     if not qual.empty and "constructorId" in qual.columns:
-        qual["team_avg"] = qual.groupby(["season", "round", "constructorId"])["qpos"].transform("mean")
+        # ⚡ Bolt: Fast factorization and bincount instead of groupby.transform()
+        # Explicitly mask rows with valid constructorId to safely use np.bincount, matching groupby behavior.
+        mask = qual["constructorId"].notna()
+        qual["team_avg"] = np.nan
+        if mask.any():
+            valid_qual = qual[mask]
+            codes, _ = pd.factorize(pd.MultiIndex.from_arrays([valid_qual["season"], valid_qual["round"], valid_qual["constructorId"]]))
+            counts = np.bincount(codes)
+            sums = np.bincount(codes, weights=valid_qual["qpos"])
+            means = sums / np.maximum(counts, 1) # Avoid div by zero
+            qual.loc[mask, "team_avg"] = means[codes]
+
         qual["q_delta"] = qual["team_avg"] - qual["qpos"]
     else:
         qual["q_delta"] = 0.0
