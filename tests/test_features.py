@@ -169,3 +169,33 @@ def test_compute_weather_sensitivity_uses_cache(mock_om, temp_cache_dir):
 
         compute_weather_sensitivity(mock_om, hist, roster, ref_date, cache_dir=temp_cache_dir)
         assert mock_agg.call_count == 0
+
+from f1pred.features import compute_teammate_delta
+
+def test_compute_teammate_delta_with_nan_round():
+    """Test that teammate delta calculation handles NaN in grouping columns correctly."""
+    ref_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    # DataFrame with some NaNs in 'round' and 'constructorId'
+    hist = pd.DataFrame({
+        "session": ["qualifying", "qualifying", "qualifying", "qualifying"],
+        "season": [2023, 2023, 2023, 2023],
+        "round": [1, 1, np.nan, 2],
+        "constructorId": ["c1", "c1", "c1", np.nan],
+        "driverId": ["d1", "d2", "d3", "d4"],
+        "qpos": [1, 3, 2, 4],
+        "date": [ref_date, ref_date, ref_date, ref_date]
+    })
+
+    # compute teammate delta shouldn't crash when using fast factorization and bincount
+    res = compute_teammate_delta(hist, ref_date, half_life_days=365)
+
+    # Only d1 and d2 had valid round+constructorId and a teammate
+    # their team_avg = (1+3)/2 = 2.0
+    # d1 delta = 2.0 - 1 = 1.0
+    # d2 delta = 2.0 - 3 = -1.0
+    assert len(res) == 2
+    res_d1 = res[res["driverId"] == "d1"].iloc[0]
+    res_d2 = res[res["driverId"] == "d2"].iloc[0]
+
+    assert res_d1["teammate_delta"] > 0 # better than avg
+    assert res_d2["teammate_delta"] < 0 # worse than avg

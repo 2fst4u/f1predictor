@@ -771,7 +771,7 @@ def compute_teammate_delta(
     if q.empty:
         return pd.DataFrame(columns=["driverId", "teammate_delta"])
 
-    q = q.dropna(subset=["constructorId", "driverId", "qpos", "date"])
+    q = q.dropna(subset=["constructorId", "driverId", "qpos", "date", "round"])
     if q.empty:
         return pd.DataFrame(columns=["driverId", "teammate_delta"])
 

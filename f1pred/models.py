@@ -136,8 +136,8 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     qual = hist[hist["session"].isin(["qualifying", "sprint_qualifying"])].dropna(subset=["driverId", "qpos", "date"]).copy()
     if not qual.empty and "constructorId" in qual.columns:
         # ⚡ Bolt: Fast factorization and bincount instead of groupby.transform()
-        # Explicitly mask rows with valid constructorId to safely use np.bincount, matching groupby behavior.
-        mask = qual["constructorId"].notna()
+        # Explicitly mask rows with valid constructorId and round to safely use np.bincount, matching groupby behavior.
+        mask = qual["constructorId"].notna() & qual["round"].notna()
         qual["team_avg"] = np.nan
         if mask.any():
             valid_qual = qual[mask]

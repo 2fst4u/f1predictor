@@ -130,3 +130,36 @@ def test_train_pace_model_with_hist_X(sample_features):
     assert model is not None
     assert len(pace_hat) == len(sample_features)
     assert np.all(np.isfinite(pace_hat))
+
+
+def test_models_qual_team_avg_nan_handling():
+    """Test that qualifying team average logic handles NaNs in round and constructorId."""
+    from f1pred.models import build_hist_training_X
+    import pandas as pd
+    import numpy as np
+    from datetime import datetime, timezone
+
+    ref_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    hist = pd.DataFrame({
+        "session": ["qualifying", "qualifying", "qualifying", "race", "race", "race"],
+        "season": [2023, 2023, 2023, 2023, 2023, 2023],
+        "round": [1, np.nan, 2, 1, 1, 2],
+        "constructorId": ["c1", "c1", np.nan, "c1", "c1", "c2"],
+        "driverId": ["d1", "d2", "d3", "d1", "d2", "d3"],
+        "qpos": [2, 4, 6, 2, 4, 6],
+        "position": [1, 2, 3, 1, 2, 3],
+        "grid": [2, 4, 6, 2, 4, 6],
+        "date": [ref_date, ref_date, ref_date, ref_date, ref_date, ref_date],
+        "circuitId": ["circ1", "circ1", "circ2", "circ1", "circ1", "circ2"],
+        "weather_rain": [0,0,0,0,0,0],
+        "points": [1, 2, 3, 1, 2, 3]
+    })
+
+    X_current = pd.DataFrame({"driverId": ["d1", "d2", "d3"], "form_index": [0.0, 1.0, 2.0]})
+
+    # Should not crash on np.bincount
+    res = build_hist_training_X(hist, X_current, ref_date)
+
+    # We might not get enough history to build an X matrix so it returns None,
+    # but the point is we didn't raise a ValueError due to bincount negative index.
+    pass
