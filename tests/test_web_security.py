@@ -55,3 +55,16 @@ def test_webhook_ssrf_protection_non_discord(client_with_auth):
 def test_webhook_ssrf_protection_startswith_bypass(client_with_auth):
     response = client_with_auth.post("/api/settings/test-webhook", json={"url": "https://discord.com@127.0.0.1:80/api/webhooks/"})
     assert response.status_code == 400
+
+def test_login_rate_limiting(client):
+    # Send 10 failed login attempts
+    for _ in range(10):
+        response = client.post("/api/auth/token", data={"username": "admin", "password": "wrongpassword"})
+        if response.status_code == 429:
+            break # Stop if rate limit already hit from other tests
+        assert response.status_code == 401
+
+    # The next attempt should be rate limited
+    response = client.post("/api/auth/token", data={"username": "admin", "password": "wrongpassword"})
+    assert response.status_code == 429
+    assert "Too many login attempts" in response.json()["detail"]

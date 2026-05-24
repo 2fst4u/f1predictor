@@ -10,6 +10,8 @@ import math
 import threading
 import queue
 import httpx
+from collections import defaultdict
+import time
 from fastapi import FastAPI, Request, Query, Path, HTTPException, Depends
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -78,6 +80,7 @@ def _sanitize_for_json(v: Any, _math: Any = math) -> Any:
 app = FastAPI(title="F1 Prediction Web UI")
 _config: AppConfig = None
 _prediction_manager: Optional[PredictionManager] = None
+_login_attempts = defaultdict(list)
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
@@ -487,9 +490,25 @@ async def predictions_latest():
 
 @app.post("/api/auth/token")
 async def login_for_access_token(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db_session)
 ):
+    # 🛡️ Sentinel: Add rate limiting to prevent brute-force attacks
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+
+    # Clean up old attempts (60 second window)
+    _login_attempts[client_ip] = [t for t in _login_attempts[client_ip] if now - t < 60]
+
+    if len(_login_attempts[client_ip]) >= 10:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later."
+        )
+
+    _login_attempts[client_ip].append(now)
+
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
