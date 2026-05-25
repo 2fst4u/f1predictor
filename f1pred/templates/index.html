@@ -644,7 +644,7 @@
                     <div>
                         <p class="text-sm text-gray-400 mb-4">Please log in to manage application settings.</p>
 
-                        <div x-show="authError" class="mb-4 bg-red-900/50 border-l-4 border-red-500 p-4 text-red-200" x-text="authError"></div>
+                        <div x-show="authError" role="alert" class="mb-4 bg-red-900/50 border-l-4 border-red-500 p-4 text-red-200" x-text="authError"></div>
 
                         <form @submit.prevent="login" class="space-y-5">
                             <div>
@@ -676,8 +676,8 @@
                             <h3 class="text-sm font-medium text-gray-200 mb-3">Account Security</h3>
                             <div class="bg-gray-900/50 p-5 rounded border border-gray-700">
                                 <form @submit.prevent="changePassword" class="space-y-5">
-                                    <div x-show="passwordChangeError" class="text-xs text-red-400" x-text="passwordChangeError"></div>
-                                    <div x-show="passwordChangeSuccess" class="text-xs text-green-400">Password changed successfully!</div>
+                                    <div x-show="passwordChangeError" role="alert" class="text-xs text-red-400" x-text="passwordChangeError"></div>
+                                    <div x-show="passwordChangeSuccess" role="status" class="text-xs text-green-400">Password changed successfully!</div>
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div>
@@ -715,8 +715,8 @@
                                         </button>
                                     </div>
                                     <p class="mt-1 text-xs text-gray-500">Used to send alerts when prediction diffs occur.</p>
-                                    <div x-show="webhookTestError" x-transition class="mt-2 text-xs text-red-400" x-text="webhookTestError"></div>
-                                    <div x-show="webhookTestSuccess" x-transition class="mt-2 text-xs text-green-400">Test notification sent successfully! Check your Discord channel.</div>
+                                    <div x-show="webhookTestError" x-transition role="alert" class="mt-2 text-xs text-red-400" x-text="webhookTestError"></div>
+                                    <div x-show="webhookTestSuccess" x-transition role="status" class="mt-2 text-xs text-green-400">Test notification sent successfully! Check your Discord channel.</div>
                                 </div>
                             </div>
 
@@ -741,7 +741,7 @@
                                     <span x-show="!settingsSaving">Save Settings</span>
                                     <span x-show="settingsSaving" x-cloak><i class="fas fa-circle-notch fa-spin mr-2"></i>Saving...</span>
                                 </button>
-                                <span x-show="settingsSaved" x-transition.opacity class="text-sm text-green-400">Settings saved successfully!</span>
+                                <span x-show="settingsSaved" x-transition.opacity role="status" class="text-sm text-green-400">Settings saved successfully!</span>
                             </div>
                         </form>
                     </div>
