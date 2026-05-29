@@ -43,9 +43,12 @@ def test_build_session_features_filtering():
         {"round": "1", "raceName": "Good", "Circuit": {"Location": {"lat": "0", "long": "0"}}}
     ]
 
-    # This should find the "Good" race and not crash on the "Bad" one
+    # This should skip the malformed round=None row, resolve round 1, and not crash.
     X, meta, roster = build_session_features(mock_jc, mock_om, 2026, 1, "race", datetime.now(timezone.utc), cfg)
-    assert meta["raceName"] == "Good" if "raceName" in meta else True # Check it didn't fail
+    assert isinstance(meta, dict)
+    # The target round was resolved despite the malformed leading row.
+    assert meta["round"] == 1
+    assert meta["season"] == 2026
 
 def test_roster_derivation_filtering():
     """Test that _latest_completed_round_in_season ignores None rounds."""

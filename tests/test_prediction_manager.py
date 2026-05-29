@@ -562,6 +562,12 @@ class TestPredictionManagerPredictRoundSessions:
 
             manager._predict_round(jc, 2024, 1, {"raceName": "Normal GP", "round": 1})
 
+            # The unmatched session type yields an empty session list, which must
+            # fall back to the default ["qualifying", "race"] (prediction_manager
+            # line ~554) rather than predicting nothing.
+            mock_predict.assert_called_once()
+            assert mock_predict.call_args.kwargs["sessions"] == ["qualifying", "race"]
+
 
 class TestPredictionManagerDiscord:
     def test_discord_webhook_url_validation(self, caplog):

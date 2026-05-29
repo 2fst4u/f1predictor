@@ -35,15 +35,21 @@ def sample_roster():
 
 @pytest.fixture
 def sample_features():
-    """Generate sample feature matrix."""
+    """Generate sample feature matrix.
+
+    Uses a seeded RNG so tests that assert on prediction ordering/variance
+    (e.g. test_models.test_pace_model_order_makes_sense) are deterministic
+    rather than occasionally flaky.
+    """
     n_drivers = 20
+    rng = np.random.default_rng(1234)
     return pd.DataFrame({
         'driverId': [f'driver_{i}' for i in range(n_drivers)],
         'constructorId': [f'team_{i//2}' for i in range(n_drivers)],
-        'form_index': np.random.randn(n_drivers),
-        'team_form_index': np.random.randn(n_drivers),
-        'weather_beta_temp': np.random.randn(n_drivers) * 0.1,
-        'weather_beta_rain': np.random.randn(n_drivers) * 0.1,
+        'form_index': rng.standard_normal(n_drivers),
+        'team_form_index': rng.standard_normal(n_drivers),
+        'weather_beta_temp': rng.standard_normal(n_drivers) * 0.1,
+        'weather_beta_rain': rng.standard_normal(n_drivers) * 0.1,
         'session_type': ['race'] * n_drivers,
     })
 

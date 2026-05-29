@@ -977,7 +977,7 @@ class CalibrationManager:
 
             # Convert to nested structure
             self.current_weights = _unpack_weights(w_opt)
-            self.current_weights["objective_score"] = float(res.fun)
+            self.current_weights["objective_score"] = float(best_res.fun)
 
             self.save_weights()
             duration = time.time() - t0

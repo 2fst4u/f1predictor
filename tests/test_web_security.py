@@ -1,18 +1,37 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from f1pred.web import app, init_web
+# NOTE: reference the live module (f1pred.web) at runtime rather than binding
+# `app`/`init_web` at import time. Another test module (test_config_security)
+# calls importlib.reload(f1pred.web), which rebinds the module's `app` and its
+# `_login_attempts` counter. Referencing the live module guarantees the
+# TestClient's app and the counter we clear come from the *same* module object,
+# keeping the rate-limit test deterministic regardless of suite ordering.
+import f1pred.web as fweb
 from f1pred.config import load_config
+
+
+@pytest.fixture(autouse=True)
+def reset_login_attempts():
+    """Clear the module-global login-attempt counter before/after each test.
+
+    Without this, _login_attempts persists across tests in the same process,
+    making the rate-limit test order-dependent.
+    """
+    fweb._login_attempts.clear()
+    yield
+    fweb._login_attempts.clear()
+
 
 @pytest.fixture
 def client():
     # Use real config for simple init
     cfg = load_config("config.yaml")
-    init_web(cfg)
-    yield TestClient(app)
-    import f1pred.web as web_module
-    if web_module._prediction_manager:
-        web_module._prediction_manager.stop()
+    fweb.init_web(cfg)
+    yield TestClient(fweb.app)
+    if fweb._prediction_manager:
+        fweb._prediction_manager.stop()
+
 
 def test_get_predict_too_many_sessions(client):
     # Pass 11 session parameters
@@ -22,6 +41,7 @@ def test_get_predict_too_many_sessions(client):
     assert response.status_code == 400
     assert response.json() == {"detail": "Too many sessions requested"}
 
+
 def test_get_predict_stream_too_many_sessions(client):
     # Pass 11 session parameters
     sessions = ["race"] * 11
@@ -30,10 +50,9 @@ def test_get_predict_stream_too_many_sessions(client):
     assert response.status_code == 400
     assert response.json() == {"detail": "Too many sessions requested"}
 
+
 @pytest.fixture
 def client_with_auth(client):
-    import f1pred.web as web_module
-
     # Login to get token
     response = client.post("/api/auth/token", data={"username": "admin", "password": "admin"})
     token = response.json()["access_token"]
@@ -41,30 +60,37 @@ def client_with_auth(client):
     client.headers.update({"Authorization": f"Bearer {token}"})
 
     yield client
-    if web_module._prediction_manager:
-        web_module._prediction_manager.stop()
+    if fweb._prediction_manager:
+        fweb._prediction_manager.stop()
+
 
 def test_webhook_ssrf_protection_invalid_scheme(client_with_auth):
     response = client_with_auth.post("/api/settings/test-webhook", json={"url": "file:///etc/passwd"})
     assert response.status_code == 400
 
+
 def test_webhook_ssrf_protection_non_discord(client_with_auth):
     response = client_with_auth.post("/api/settings/test-webhook", json={"url": "https://example.com"})
     assert response.status_code == 400
+
 
 def test_webhook_ssrf_protection_startswith_bypass(client_with_auth):
     response = client_with_auth.post("/api/settings/test-webhook", json={"url": "https://discord.com@127.0.0.1:80/api/webhooks/"})
     assert response.status_code == 400
 
+
 def test_login_rate_limiting(client):
-    # Send 10 failed login attempts
+    # Reset immediately before exercising the limit so the test is independent
+    # of any login attempts made by earlier tests/fixtures.
+    fweb._login_attempts.clear()
+
+    # With a freshly-cleared counter, the first 10 failed attempts are rejected
+    # with 401 (bad credentials), not throttled.
     for _ in range(10):
         response = client.post("/api/auth/token", data={"username": "admin", "password": "wrongpassword"})
-        if response.status_code == 429:
-            break # Stop if rate limit already hit from other tests
         assert response.status_code == 401
 
-    # The next attempt should be rate limited
+    # The 11th attempt within the window is rate limited.
     response = client.post("/api/auth/token", data={"username": "admin", "password": "wrongpassword"})
     assert response.status_code == 429
     assert "Too many login attempts" in response.json()["detail"]
