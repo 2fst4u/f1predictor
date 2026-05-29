@@ -165,16 +165,15 @@ class TestComputeEventMetricsExceptions:
         # Should return nan because len is 0 (< 2)
         assert np.isnan(brier_pairwise(probs, positions))
 
-    def test_dfv_empty_via_actual_positions(self):
-        # We need a dataframe where actual_position is not all NA (so it passes line 54)
-        # BUT after dropna on actual_position, it IS empty. Is that possible?
-        # Actually no, if actual_position has at least one non-NA value, dropna will leave at least one row.
-        # Wait, what if we have a dataframe with 0 rows to start with?
-        _ = pd.DataFrame(columns=["driver_id", "predicted_position", "actual_position"])
-        # df.shape[0] == 0. df["actual_position"].isna().all() is True, so it hits line 54.
-
-        # What if it's all NA but `isna().all()` evaluates to false?
-        pass
+    def test_empty_frame_yields_nan_metrics_with_zero_n(self):
+        # An empty frame has an all-NA actual_position column, so every metric
+        # is NaN and the reported sample count is zero.
+        df = pd.DataFrame(columns=["driver_id", "predicted_position", "actual_position"])
+        metrics = compute_event_metrics(df, None, None, "race", 2023, 1)
+        assert metrics["n"] == 0
+        assert np.isnan(metrics["spearman"])
+        assert np.isnan(metrics["kendall"])
+        assert np.isnan(metrics["brier_pairwise"])
 
     def test_compute_event_empty_dfv(self):
         # Line 64 is reached if dfv.empty is true AFTER dropna.

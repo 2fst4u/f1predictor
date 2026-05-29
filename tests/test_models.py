@@ -157,9 +157,13 @@ def test_models_qual_team_avg_nan_handling():
 
     X_current = pd.DataFrame({"driverId": ["d1", "d2", "d3"], "form_index": [0.0, 1.0, 2.0]})
 
-    # Should not crash on np.bincount
+    # NaN round/constructorId must not cause a negative-index crash in
+    # np.bincount when computing qualifying team averages.
     res = build_hist_training_X(hist, X_current, ref_date)
 
-    # We might not get enough history to build an X matrix so it returns None,
-    # but the point is we didn't raise a ValueError due to bincount negative index.
-    pass
+    # With little history the builder may return None, but it must never raise
+    # and, when it does return a matrix, it must be well-formed.
+    assert res is None or isinstance(res, pd.DataFrame)
+    if isinstance(res, pd.DataFrame):
+        assert "driverId" in res.columns
+        assert len(res) > 0

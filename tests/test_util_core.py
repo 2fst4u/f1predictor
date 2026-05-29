@@ -45,16 +45,19 @@ def test_session_with_retries():
 
 def test_init_caches_disabled():
     # Arrange
+    import requests_cache
     from f1pred.util import init_caches
     class MockConfig:
         pass
-    cfg = MockConfig()
+    cfg = MockConfig()  # deliberately missing all cache config attributes
 
-    # Act
-    # Calling init_caches with disable_cache=True should return immediately.
-    # We verify it doesn't raise any errors or try to access missing config attributes.
-    init_caches(cfg, disable_cache=True)
+    before = requests_cache.is_installed()
 
-    # Assert
-    # If no exception is raised, the test passes and coverage is achieved for lines 133-134.
-    assert True
+    # Act: disable_cache=True must short-circuit before any config access.
+    result = init_caches(cfg, disable_cache=True)
+
+    # Assert: it returned without touching cfg (a MockConfig with no attributes
+    # would raise AttributeError if the body ran) and did not install/uninstall
+    # a global cache.
+    assert result is None
+    assert requests_cache.is_installed() == before

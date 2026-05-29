@@ -22,6 +22,11 @@ def test_sanitize_removes_other_controls():
     # Null
     assert sanitize_for_console("Null\0Value") == "NullValue"
 
+def test_sanitize_preserves_non_ansi_brackets():
+    """Bracketed text that merely resembles an escape sequence is left intact."""
+    assert sanitize_for_console("Price: $100 [USD]") == "Price: $100 [USD]"
+    assert sanitize_for_console("array[0] = value") == "array[0] = value"
+
 def test_sanitize_preserves_unicode():
     """Verify unicode characters (like accents) are preserved."""
     assert sanitize_for_console("Pérez") == "Pérez"

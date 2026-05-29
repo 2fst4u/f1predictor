@@ -1,31 +1,11 @@
 
 from unittest.mock import patch, MagicMock
-from f1pred.util import sanitize_for_console
 import f1pred.predict
 
-def test_sanitize_exception_message():
-    """Verify that sanitize_for_console effectively neutralizes malicious exception messages."""
-
-    # 1. Newlines and Carriage Returns (Log Forging / Terminal Spoofing)
-    malicious_msg = "Error occurred\r\n[INFO] Forged Log Entry"
-    clean = sanitize_for_console(malicious_msg)
-    assert "\r" not in clean
-    assert "\n" not in clean
-    assert "Forged Log Entry" in clean
-    # Expect spaces instead (2 spaces for \r and \n)
-    assert "Error occurred  [INFO] Forged Log Entry" == clean
-
-    # 2. ANSI Codes (Terminal Injection)
-    ansi_msg = "\033[31mCritical Error\033[0m"
-    clean_ansi = sanitize_for_console(ansi_msg)
-    assert "\033" not in clean_ansi
-    assert "Critical Error" == clean_ansi
-
-    # 3. Mixed
-    mixed = "Error\n\033[31mHacked\033[0m"
-    clean_mixed = sanitize_for_console(mixed)
-    # \n -> space, ANSI removed. Result: "Error Hacked"
-    assert clean_mixed == "Error Hacked"
+# Direct sanitize_for_console behaviour (ANSI/newline/control-char handling) is
+# covered comprehensively by tests/test_security_sanitization.py. This file
+# keeps the integration test below, which proves run_predictions_for_event
+# sanitises exception messages *before* they reach the logger.
 
 @patch("f1pred.predict.logger")
 def test_predict_logs_sanitized_exception(mock_logger):
