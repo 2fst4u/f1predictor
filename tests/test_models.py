@@ -120,6 +120,56 @@ def test_build_hist_training_X_basic():
     assert "grid" in result.columns
 
 
+def test_build_hist_training_X_weather_effect(tmp_path):
+    """With a populated weather cache and driver betas, the training matrix must
+    gain a real, varying weather_effect column (instead of an all-NaN one)."""
+    import json, os
+    n_events = 6
+    base_date = datetime(2023, 3, 1, tzinfo=timezone.utc)
+    cache_dir = str(tmp_path)
+    wdir = os.path.join(cache_dir, "weather")
+    os.makedirs(wdir, exist_ok=True)
+
+    rows = []
+    for rnd in range(1, n_events + 1):
+        event_date = base_date + timedelta(days=14 * rnd)
+        # Per-event weather with rain that varies by round.
+        with open(os.path.join(wdir, f"event_2023_{rnd}.json"), "w") as f:
+            json.dump({"temp_mean": 20.0, "pressure_mean": 1010.0,
+                       "wind_mean": 5.0, "rain_sum": float(rnd)}, f)
+        for pos in range(1, 11):
+            rows.append({
+                "season": 2023, "round": rnd, "session": "race",
+                "date": event_date, "driverId": f"driver_{pos}",
+                "constructorId": f"team_{(pos - 1) // 2}", "position": pos,
+                "points": max(0, 26 - pos * 2), "grid": pos, "status": "Finished",
+            })
+    hist = pd.DataFrame(rows)
+
+    X_current = pd.DataFrame({
+        "driverId": [f"driver_{i}" for i in range(1, 11)],
+        "constructorId": [f"team_{(i - 1) // 2}" for i in range(1, 11)],
+        "form_index": np.zeros(10),
+        "weather_beta_temp": 0.0,
+        "weather_beta_pressure": 0.0,
+        "weather_beta_wind": 0.0,
+        # Rain sensitivity varies by driver so weather_effect is non-degenerate.
+        "weather_beta_rain": [0.1 * i for i in range(1, 11)],
+    })
+    ref_date = base_date + timedelta(days=14 * (n_events + 2))
+
+    out = build_hist_training_X(hist, X_current, ref_date, cache_dir=cache_dir)
+    assert out is not None
+    assert "weather_effect" in out.columns
+    # The feature must actually carry signal (beta_rain × rain_sum), not be flat.
+    assert out["weather_effect"].notna().any()
+    assert float(out["weather_effect"].std()) > 0.0
+
+    # Without cache_dir the legacy behaviour is preserved (no weather_effect).
+    out_legacy = build_hist_training_X(hist, X_current, ref_date)
+    assert "weather_effect" not in out_legacy.columns
+
+
 def test_build_hist_training_X_insufficient_history():
     """Test that build_hist_training_X returns None with insufficient data."""
     hist = pd.DataFrame({
