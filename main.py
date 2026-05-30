@@ -71,6 +71,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--live", action="store_true", help="Enable live mode (periodic refresh)")
     p.add_argument("--refresh", type=int, default=None, help="Live refresh interval in seconds")
     p.add_argument("--backtest", action="store_true", help="Run rolling backtests")
+    p.add_argument("--backtest-label", type=str, default=None,
+                   help="Tag for backtest output files (e.g. 'before' / 'after')")
+    p.add_argument("--backtest-baseline", type=str, default=None,
+                   help="Path to a previous backtest summary JSON to compare against (prints before/after deltas)")
     p.add_argument("--no-cache", action="store_true", help="Disable request caching")
     p.add_argument(
         "--log-level", type=str, default=None,
@@ -211,7 +215,15 @@ def main() -> None:
     init_caches(cfg, disable_cache=args.no_cache)
 
     if args.backtest:
-        run_backtests(cfg)
+        baseline_summary = None
+        if args.backtest_baseline:
+            import json as _json
+            try:
+                with open(args.backtest_baseline) as _f:
+                    baseline_summary = _json.load(_f)
+            except Exception as e:
+                logger.warning(f"Could not load backtest baseline {args.backtest_baseline}: {e}")
+        run_backtests(cfg, label=args.backtest_label, baseline_summary=baseline_summary)
         return
 
     if args.web:
