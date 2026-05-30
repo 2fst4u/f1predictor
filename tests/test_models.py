@@ -63,6 +63,28 @@ def test_dnf_probabilities_reasonable_range(sample_historical_data, sample_roste
     assert np.max(dnf_probs) <= 0.35
 
 
+def test_dnf_weights_are_normalized(sample_historical_data, sample_roster):
+    """DNF probabilities must depend only on the *ratio* of driver/team weights,
+    not their absolute magnitude (they are normalised to a convex blend)."""
+    # Doubling both weights must not change the result (1,1 == 0.5,0.5 ratio).
+    p_unit = estimate_dnf_probabilities(
+        sample_historical_data, sample_roster, driver_weight=1.0, team_weight=1.0
+    )
+    p_half = estimate_dnf_probabilities(
+        sample_historical_data, sample_roster, driver_weight=0.5, team_weight=0.5
+    )
+    assert np.allclose(p_unit, p_half)
+
+    # Scaling a given ratio up must also be invariant (0.6/0.4 == 0.3/0.2).
+    p_big = estimate_dnf_probabilities(
+        sample_historical_data, sample_roster, driver_weight=0.6, team_weight=0.4
+    )
+    p_small = estimate_dnf_probabilities(
+        sample_historical_data, sample_roster, driver_weight=0.3, team_weight=0.2
+    )
+    assert np.allclose(p_big, p_small)
+
+
 def test_build_hist_training_X_basic():
     """Test that build_hist_training_X produces a valid training set from history."""
     n_events = 5

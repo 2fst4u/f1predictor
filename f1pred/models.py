@@ -1065,11 +1065,17 @@ def estimate_dnf_probabilities(
     p_drv = current_X["driverId"].map(drv_map).astype(float).fillna(global_p)
     p_team = current_X["constructorId"].map(team_map).astype(float).fillna(global_p)
 
-    # TODO: driver_weight and team_weight are not constrained to sum to 1.0.
-    # The calibrator can set both to 1.0 (doubling DNF rates) or both to near-0
-    # (making DNFs negligible).  Normalising or constraining these weights could
-    # prevent degenerate DNF estimates.  Requires further investigation and confirmation.
-    p = driver_weight * p_drv.values + team_weight * p_team.values
+    # Normalise the driver/team split so the result is always a convex blend of
+    # the two base rates.  The calibrator bounds each weight in [0, 1]
+    # independently, so without this they could sum to 2.0 (doubling every DNF
+    # rate) or to ~0 (making DNFs negligible) — both degenerate.  Dividing by the
+    # total keeps the blend interpretable and decouples it from the calibrated
+    # magnitudes while preserving their *relative* emphasis.
+    w_tot = driver_weight + team_weight
+    if w_tot > 1e-9:
+        p = (driver_weight * p_drv.values + team_weight * p_team.values) / w_tot
+    else:
+        p = 0.5 * p_drv.values + 0.5 * p_team.values
     p = p * circuit_modifier
     p = np.clip(p.astype(float), clip_min, clip_max)
     return p
