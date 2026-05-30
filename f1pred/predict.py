@@ -487,7 +487,7 @@ def _run_single_prediction(
     elo_k = getattr(cfg.modelling, "_calibrated_elo_k", 20.0)
     hl_team = cfg.modelling.recency_half_life_days.team
     try:
-        elo_model = EloModel(k=elo_k).fit(hist)
+        elo_model = EloModel(k=elo_k).fit(hist, half_life_days=hl_team)
         elo_pace = elo_model.predict(X, session_type=sess)
     except Exception as e:
         logger.warning("[predict._run_single] Elo model failed: %s", e)
@@ -978,7 +978,7 @@ def run_predictions_for_event(
                             elo_model, bt_model, mixed_model = ensemble_cache[roster_key]
                         else:
                             try:
-                                elo_model = EloModel(k=elo_k).fit(hist)
+                                elo_model = EloModel(k=elo_k).fit(hist, half_life_days=hl_team)
                             except Exception as e:
                                 logger.info(f"[predict] Elo model fit failed: {e}")
                             try:

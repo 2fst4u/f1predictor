@@ -565,8 +565,13 @@ class CalibrationManager:
                 hist_subset = all_hist[all_hist["date"] < d]
 
                 # Fit ensemble models once per event; use race track for race data,
-                # qualifying track for qualifying data (handled at predict-time below)
-                elo_model_fit = EloModel().fit(hist_subset)
+                # qualifying track for qualifying data (handled at predict-time below).
+                # Elo uses the team recency half-life so historical ratings decay
+                # toward the mean, matching the inference path in predict.py.
+                elo_model_fit = EloModel().fit(
+                    hist_subset,
+                    half_life_days=self.cfg.modelling.recency_half_life_days.team,
+                )
                 bt_model_fit = BradleyTerryModel().fit(hist_subset)
                 mixed_model_fit = MixedEffectsLikeModel().fit(hist_subset)
 
@@ -668,7 +673,10 @@ class CalibrationManager:
 
                 hist_subset_q = all_hist[all_hist["date"] < d]
 
-                elo_model_q = EloModel().fit(hist_subset_q)
+                elo_model_q = EloModel().fit(
+                    hist_subset_q,
+                    half_life_days=self.cfg.modelling.recency_half_life_days.team,
+                )
                 bt_model_q = BradleyTerryModel().fit(hist_subset_q)
                 mixed_model_q = MixedEffectsLikeModel().fit(hist_subset_q)
 
