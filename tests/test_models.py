@@ -1,6 +1,7 @@
 """Tests for model training and prediction."""
 import numpy as np
 import pandas as pd
+import pytest
 from datetime import datetime, timezone, timedelta
 from f1pred.models import train_pace_model, estimate_dnf_probabilities, build_hist_training_X
 
@@ -96,6 +97,71 @@ def test_build_hist_training_X_basic():
     assert len(result) > 0
     # All numeric columns from X_current should be present
     assert "grid" in result.columns
+
+
+def _two_season_history():
+    """Two full seasons (race/sprint/quali/sprint-quali) for 8 drivers, with the
+    finishing order flipped between seasons so a current-season boost has a
+    direction to move the index in. Enough rows to clear the 40-row / 20-finish
+    gates in build_hist_training_X.
+    """
+    drivers = [f"driver_{i}" for i in range(1, 9)]
+    base = datetime(2022, 3, 1, tzinfo=timezone.utc)
+    rows = []
+    for si, season in enumerate([2022, 2023]):
+        for rnd in range(1, 7):
+            d = base + timedelta(days=365 * si + 14 * rnd)
+            for pos, drv in enumerate(drivers, start=1):
+                racepos = pos if season == 2022 else (9 - pos)  # flip per season
+                team = f"team_{(pos - 1) // 2}"
+                rows.append({"season": season, "round": rnd, "session": "race", "date": d,
+                             "driverId": drv, "constructorId": team, "position": racepos,
+                             "points": max(0, 26 - racepos * 2), "grid": racepos, "status": "Finished"})
+                rows.append({"season": season, "round": rnd, "session": "sprint", "date": d,
+                             "driverId": drv, "constructorId": team, "position": racepos,
+                             "points": max(0, 9 - racepos), "grid": racepos, "status": "Finished"})
+                rows.append({"season": season, "round": rnd, "session": "qualifying", "date": d,
+                             "driverId": drv, "constructorId": team, "qpos": racepos})
+                rows.append({"season": season, "round": rnd, "session": "sprint_qualifying", "date": d,
+                             "driverId": drv, "constructorId": team, "qpos": racepos})
+    hist = pd.DataFrame(rows)
+    X_current = pd.DataFrame({
+        "driverId": drivers,
+        "constructorId": [f"team_{i // 2}" for i in range(8)],
+        "form_index": np.zeros(8),
+        "grid": list(range(1, 9)),
+    })
+    ref = datetime(2023, 3, 1, tzinfo=timezone.utc) + timedelta(days=300)
+    return hist, X_current, ref
+
+
+@pytest.mark.parametrize(
+    "boost_kwarg, affected_col",
+    [
+        ("boost_factor", "form_index"),
+        ("qual_boost_factor", "qualifying_form_index"),
+        ("sprint_boost_factor", "sprint_form_index"),
+    ],
+)
+def test_build_hist_training_X_boost_factors_are_wired_through(boost_kwarg, affected_col):
+    """Each of the three current-season boost factors must actually re-weight
+    its own index. The three boost-application blocks are near-identical, so a
+    typo (e.g. applying the race boost where the sprint boost belongs) would go
+    unnoticed without exercising each knob independently.
+    """
+    hist, X_current, ref = _two_season_history()
+
+    base = build_hist_training_X(hist, X_current, ref)
+    boosted = build_hist_training_X(hist, X_current, ref, **{boost_kwarg: 10.0})
+
+    assert base is not None and boosted is not None
+    assert affected_col in base.columns
+    # The boost must move the index it governs, and keep everything finite.
+    assert not np.allclose(base[affected_col].values, boosted[affected_col].values), (
+        f"{boost_kwarg} did not change {affected_col} — boost not wired to its index"
+    )
+    for col in boosted.select_dtypes("number").columns:
+        assert np.all(np.isfinite(boosted[col].values))
 
 
 def test_build_hist_training_X_insufficient_history():

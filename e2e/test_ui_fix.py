@@ -8,7 +8,7 @@ try:
 except ImportError:
     HAS_PLAYWRIGHT = False
 
-@pytest.mark.skipif(not HAS_PLAYWRIGHT or os.environ.get("CI") == "true", reason="Skipping Playwright tests in CI environment or if playwright is missing")
+@pytest.mark.skipif(not HAS_PLAYWRIGHT, reason="Playwright not installed (see e2e/README.md)")
 def test_ui_logic_v6_sync(page: "Page"):
     """Verify UI logic v6: Background sync doesn't overwrite wrong round."""
     abs_path = os.path.abspath("f1pred/templates/index.html")

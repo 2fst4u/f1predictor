@@ -683,7 +683,11 @@ class TestRosterSizeIsUnconstrained:
         jc.get_latest_season_and_round.return_value = ("2025", "22")
         return jc
 
-    @pytest.mark.parametrize("n", [20, 21, 22, 24, 26])
+    # Two representative grid sizes per path are enough to prove "no cap":
+    # a current-era 22-car grid and the historical maximum of 26. Likewise
+    # below, n=14 (Spa 2021) and n=1 (degenerate) prove "no floor". Sweeping
+    # every value in between exercised the identical no-truncation code path.
+    @pytest.mark.parametrize("n", [22, 26])
     def test_previous_round_preserves_full_grid(self, n):
         """A future event whose previous completed round had n drivers must
         return exactly n drivers, for any grid size.
@@ -717,7 +721,7 @@ class TestRosterSizeIsUnconstrained:
             "grid size must not be capped"
         )
 
-    @pytest.mark.parametrize("n", [20, 22, 24])
+    @pytest.mark.parametrize("n", [22, 26])
     def test_same_round_race_results_preserve_full_grid(self, n):
         """When Jolpica returns classified race results for the round, every
         driver (even >20) must be returned unchanged.
@@ -732,7 +736,7 @@ class TestRosterSizeIsUnconstrained:
 
         assert len(roster) == n
 
-    @pytest.mark.parametrize("n", [20, 22, 24])
+    @pytest.mark.parametrize("n", [22, 26])
     def test_fastf1_race_session_preserves_full_grid(self, n):
         """A completed 22- or 24-driver FastF1 Race session must be returned
         whole. Practice-session reserve filtering is the only legitimate
@@ -768,7 +772,7 @@ class TestRosterSizeIsUnconstrained:
 
     # -- No minimum: DSQ / not-classified scenarios must be accepted --------
 
-    @pytest.mark.parametrize("n", [1, 5, 10, 14, 17])
+    @pytest.mark.parametrize("n", [1, 14])
     def test_same_round_accepts_below_20_drivers(self, n):
         """Jolpica returning a small classification (because of mass DSQ,
         DNS, or not-classified) MUST be accepted at face value. The old
@@ -789,7 +793,7 @@ class TestRosterSizeIsUnconstrained:
             "— roster must have no minimum-count gate."
         )
 
-    @pytest.mark.parametrize("n", [1, 5, 10, 14, 17])
+    @pytest.mark.parametrize("n", [1, 14])
     def test_fastf1_authoritative_accepts_below_20_drivers(self, n):
         """A classified Race session with fewer than 20 drivers (after
         widespread DSQ or mechanical carnage) must be returned as-is. There
