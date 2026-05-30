@@ -64,6 +64,28 @@ def test_dnf_probabilities_reasonable_range(sample_historical_data, sample_roste
     assert np.max(dnf_probs) <= 0.35
 
 
+def test_dnf_weights_are_normalized(sample_historical_data, sample_roster):
+    """DNF probabilities must depend only on the *ratio* of driver/team weights,
+    not their absolute magnitude (they are normalised to a convex blend)."""
+    # Doubling both weights must not change the result (1,1 == 0.5,0.5 ratio).
+    p_unit = estimate_dnf_probabilities(
+        sample_historical_data, sample_roster, driver_weight=1.0, team_weight=1.0
+    )
+    p_half = estimate_dnf_probabilities(
+        sample_historical_data, sample_roster, driver_weight=0.5, team_weight=0.5
+    )
+    assert np.allclose(p_unit, p_half)
+
+    # Scaling a given ratio up must also be invariant (0.6/0.4 == 0.3/0.2).
+    p_big = estimate_dnf_probabilities(
+        sample_historical_data, sample_roster, driver_weight=0.6, team_weight=0.4
+    )
+    p_small = estimate_dnf_probabilities(
+        sample_historical_data, sample_roster, driver_weight=0.3, team_weight=0.2
+    )
+    assert np.allclose(p_big, p_small)
+
+
 def test_build_hist_training_X_basic():
     """Test that build_hist_training_X produces a valid training set from history."""
     n_events = 5
@@ -162,6 +184,56 @@ def test_build_hist_training_X_boost_factors_are_wired_through(boost_kwarg, affe
     )
     for col in boosted.select_dtypes("number").columns:
         assert np.all(np.isfinite(boosted[col].values))
+
+
+def test_build_hist_training_X_weather_effect(tmp_path):
+    """With a populated weather cache and driver betas, the training matrix must
+    gain a real, varying weather_effect column (instead of an all-NaN one)."""
+    import json, os
+    n_events = 6
+    base_date = datetime(2023, 3, 1, tzinfo=timezone.utc)
+    cache_dir = str(tmp_path)
+    wdir = os.path.join(cache_dir, "weather")
+    os.makedirs(wdir, exist_ok=True)
+
+    rows = []
+    for rnd in range(1, n_events + 1):
+        event_date = base_date + timedelta(days=14 * rnd)
+        # Per-event weather with rain that varies by round.
+        with open(os.path.join(wdir, f"event_2023_{rnd}.json"), "w") as f:
+            json.dump({"temp_mean": 20.0, "pressure_mean": 1010.0,
+                       "wind_mean": 5.0, "rain_sum": float(rnd)}, f)
+        for pos in range(1, 11):
+            rows.append({
+                "season": 2023, "round": rnd, "session": "race",
+                "date": event_date, "driverId": f"driver_{pos}",
+                "constructorId": f"team_{(pos - 1) // 2}", "position": pos,
+                "points": max(0, 26 - pos * 2), "grid": pos, "status": "Finished",
+            })
+    hist = pd.DataFrame(rows)
+
+    X_current = pd.DataFrame({
+        "driverId": [f"driver_{i}" for i in range(1, 11)],
+        "constructorId": [f"team_{(i - 1) // 2}" for i in range(1, 11)],
+        "form_index": np.zeros(10),
+        "weather_beta_temp": 0.0,
+        "weather_beta_pressure": 0.0,
+        "weather_beta_wind": 0.0,
+        # Rain sensitivity varies by driver so weather_effect is non-degenerate.
+        "weather_beta_rain": [0.1 * i for i in range(1, 11)],
+    })
+    ref_date = base_date + timedelta(days=14 * (n_events + 2))
+
+    out = build_hist_training_X(hist, X_current, ref_date, cache_dir=cache_dir)
+    assert out is not None
+    assert "weather_effect" in out.columns
+    # The feature must actually carry signal (beta_rain × rain_sum), not be flat.
+    assert out["weather_effect"].notna().any()
+    assert float(out["weather_effect"].std()) > 0.0
+
+    # Without cache_dir the legacy behaviour is preserved (no weather_effect).
+    out_legacy = build_hist_training_X(hist, X_current, ref_date)
+    assert "weather_effect" not in out_legacy.columns
 
 
 def test_build_hist_training_X_insufficient_history():

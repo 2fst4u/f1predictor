@@ -87,6 +87,42 @@ def test_elo_fit_and_predict(race_history, roster_X):
     assert pace[0] < pace[2]
 
 
+def test_elo_decay_fades_stale_dominance():
+    """A driver dominant only in the distant past should keep less of a lead
+    the shorter the recency half-life."""
+    rows = []
+    # d_alpha dominates the old era; d_beta/d_gamma are flat fillers.
+    for rnd in range(1, 11):
+        order = ["d_alpha", "d_beta", "d_gamma"]
+        for pos, driver in enumerate(order, start=1):
+            rows.append({
+                "season": 2015, "round": rnd, "session": "race",
+                "date": datetime(2015, 1, 1, tzinfo=timezone.utc)
+                + pd.Timedelta(days=14 * rnd),
+                "driverId": driver, "constructorId": f"team_{pos}",
+                "position": pos, "points": 0, "status": "Finished",
+            })
+    # A long, quiet gap then a single recent race where d_alpha does NOT win.
+    for pos, driver in enumerate(["d_gamma", "d_beta", "d_alpha"], start=1):
+        rows.append({
+            "season": 2024, "round": 1, "session": "race",
+            "date": datetime(2024, 6, 1, tzinfo=timezone.utc),
+            "driverId": driver, "constructorId": f"team_{pos}",
+            "position": pos, "points": 0, "status": "Finished",
+        })
+    hist = pd.DataFrame(rows)
+
+    # A very long half-life barely decays; a short one fades stale dominance.
+    slow_decay = EloModel().fit(hist, half_life_days=100_000.0)
+    fast_decay = EloModel().fit(hist, half_life_days=180.0)
+
+    lead_slow = slow_decay.race_ratings_["d_alpha"] - slow_decay.race_ratings_["d_gamma"]
+    lead_fast = fast_decay.race_ratings_["d_alpha"] - fast_decay.race_ratings_["d_gamma"]
+
+    # Shorter half-life must shrink the stale leader's advantage.
+    assert lead_fast < lead_slow
+
+
 def test_elo_predict_empty():
     model = EloModel()
     result = model.predict(pd.DataFrame())

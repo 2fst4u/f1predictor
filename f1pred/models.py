@@ -31,7 +31,8 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                           max_events: int = 200,
                           boost_factor: float = 1.0,
                           qual_boost_factor: float = 1.0,
-                          sprint_boost_factor: float = 1.0) -> Optional['pd.DataFrame']:
+                          sprint_boost_factor: float = 1.0,
+                          cache_dir: Optional[str] = None) -> Optional['pd.DataFrame']:
     """Build a lightweight training DataFrame from historical race results.
 
     Uses only columns that overlap with the current event feature matrix ``X_current``
@@ -41,6 +42,14 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     The per-driver ``form_index`` is computed at each historical event's date so the
     GBM can learn the relationship between features and outcome quality *across*
     many events rather than memorising a single grid.
+
+    When ``cache_dir`` is given and ``X_current`` carries per-driver weather
+    sensitivities, a ``weather_effect`` feature is computed for each historical
+    row (driver sensitivity × that event's cached weather), so the GBM actually
+    learns weather effects on pace instead of seeing an all-NaN column.  Weather
+    conditions are read from the on-disk cache the inference weather pass already
+    populated — no extra network calls — and the feature is left absent when
+    weather is unavailable, matching the previous behaviour.
 
     Returns ``None`` if insufficient history is available.
     """
@@ -163,6 +172,47 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     races_grid = races["grid"].values
     races_grid_float = np.array([float(x) if pd.notna(x) else np.nan for x in races_grid])
 
+    # --- Weather effect plumbing (driver sensitivity × per-event conditions) ---
+    # Mirror the inference feature so the GBM can learn weather effects on pace.
+    # Driver betas come from the current feature matrix; per-event weather is read
+    # from the cache the inference weather pass populated (no extra network).
+    _weather_cols = {"weather_beta_temp", "weather_beta_pressure",
+                     "weather_beta_wind", "weather_beta_rain"}
+    weather_beta_map: Dict[str, Tuple[float, float, float, float]] = {}
+    if cache_dir and X_current is not None and _weather_cols.issubset(X_current.columns):
+        for drv, bt, bp, bw, br in zip(
+            X_current["driverId"].astype(str),
+            X_current["weather_beta_temp"].astype(float),
+            X_current["weather_beta_pressure"].astype(float),
+            X_current["weather_beta_wind"].astype(float),
+            X_current["weather_beta_rain"].astype(float),
+        ):
+            weather_beta_map[drv] = (bt, bp, bw, br)
+
+    _evt_weather_cache: Dict[Tuple[int, int], Optional[Tuple[float, float, float, float]]] = {}
+
+    def _event_weather_conditions(season_i, round_i):
+        """(temp_mean, pressure_mean, wind_mean, rain_sum) for an event, or None."""
+        if not weather_beta_map:
+            return None
+        key = (int(season_i), int(round_i))
+        if key in _evt_weather_cache:
+            return _evt_weather_cache[key]
+        conditions = None
+        try:
+            from .features import _load_weather_cache
+            wt = _load_weather_cache(cache_dir, key[0], key[1])
+            if wt:
+                def _f(v):
+                    fv = float(v) if v is not None else 0.0
+                    return 0.0 if fv != fv else fv  # NaN -> 0.0
+                conditions = (_f(wt.get("temp_mean")), _f(wt.get("pressure_mean")),
+                              _f(wt.get("wind_mean")), _f(wt.get("rain_sum")))
+        except Exception:
+            conditions = None
+        _evt_weather_cache[key] = conditions
+        return conditions
+
     # O(N) loop over events, using highly vectorized numpy operations
     for evt_row in event_keys.itertuples(index=False):
         s = getattr(evt_row, "season")
@@ -170,6 +220,7 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         d = getattr(evt_row, "date")
 
         d_val = pd.Timestamp(d).to_datetime64()
+        evt_weather_cond = _event_weather_conditions(s, r)
 
         # Mask for current event
         evt_mask = (races_seasons == s) & (races_rounds == r)
@@ -345,6 +396,16 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                 "driverId": uniques[code],
                 "constructorId": t_uniques[t_code] if t_code >= 0 else None,
                 "form_index": float(form_index[code]),
+                **(
+                    {"weather_effect": (
+                        weather_beta_map[str(uniques[code])][0] * evt_weather_cond[0]
+                        + weather_beta_map[str(uniques[code])][1] * evt_weather_cond[1]
+                        + weather_beta_map[str(uniques[code])][2] * evt_weather_cond[2]
+                        + weather_beta_map[str(uniques[code])][3] * evt_weather_cond[3]
+                    )}
+                    if evt_weather_cond is not None and str(uniques[code]) in weather_beta_map
+                    else {}
+                ),
                 "qualifying_form_index": float(q_form_index[code]),
                 "team_form_index": float(team_form_index[t_code]) if t_code >= 0 else 0.0,
                 "sprint_form_index": float(sprint_form_index[code]) if valid_sprint[code] else float(form_index[code]),
@@ -1065,11 +1126,17 @@ def estimate_dnf_probabilities(
     p_drv = current_X["driverId"].map(drv_map).astype(float).fillna(global_p)
     p_team = current_X["constructorId"].map(team_map).astype(float).fillna(global_p)
 
-    # TODO: driver_weight and team_weight are not constrained to sum to 1.0.
-    # The calibrator can set both to 1.0 (doubling DNF rates) or both to near-0
-    # (making DNFs negligible).  Normalising or constraining these weights could
-    # prevent degenerate DNF estimates.  Requires further investigation and confirmation.
-    p = driver_weight * p_drv.values + team_weight * p_team.values
+    # Normalise the driver/team split so the result is always a convex blend of
+    # the two base rates.  The calibrator bounds each weight in [0, 1]
+    # independently, so without this they could sum to 2.0 (doubling every DNF
+    # rate) or to ~0 (making DNFs negligible) — both degenerate.  Dividing by the
+    # total keeps the blend interpretable and decouples it from the calibrated
+    # magnitudes while preserving their *relative* emphasis.
+    w_tot = driver_weight + team_weight
+    if w_tot > 1e-9:
+        p = (driver_weight * p_drv.values + team_weight * p_team.values) / w_tot
+    else:
+        p = 0.5 * p_drv.values + 0.5 * p_team.values
     p = p * circuit_modifier
     p = np.clip(p.astype(float), clip_min, clip_max)
     return p

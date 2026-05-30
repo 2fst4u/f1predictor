@@ -59,6 +59,17 @@ class EloModel:
 
     ``fit()`` processes all available sessions in a single pass.
     ``predict()`` selects the appropriate rating track via ``session_type``.
+
+    Recency decay
+    -------------
+    ``fit()`` reverts ratings exponentially toward ``base_rating`` between
+    events based on the elapsed time, so that stale historical dominance fades.
+    Plain Elo has no time component, which would bias predictions toward
+    historically strong drivers regardless of current form — unlike every other
+    component in the ensemble (Bradley-Terry, Mixed-Effects and the form
+    indices), all of which already weight recent results more heavily.  The
+    half-life defaults to the team recency window; production call sites pass
+    the configured value.
     """
 
     def __init__(self, base_rating: float = 1500.0, k: float = 20.0) -> None:
@@ -72,6 +83,18 @@ class EloModel:
 
     def _get_quali_rating(self, driver_id: str) -> float:
         return self.quali_ratings_.get(driver_id, self.base_rating)
+
+    def _decay_ratings(self, ratings: Dict[str, float], factor: float) -> None:
+        """Pull every rating toward ``base_rating`` by ``factor`` in-place.
+
+        ``factor`` is the retained fraction of the deviation from base
+        (1.0 == no decay, 0.0 == full reversion to base).
+        """
+        base = self.base_rating
+        if factor >= 1.0:
+            return
+        for key, val in ratings.items():
+            ratings[key] = base + (val - base) * factor
 
     def _update_ratings(
         self,
@@ -90,8 +113,61 @@ class EloModel:
                 ratings[a] = ra + self.k * (1.0 - ea)
                 ratings[b] = rb + self.k * (0.0 - eb)
 
-    def fit(self, hist: "pd.DataFrame") -> "EloModel":
-        """Fit both race and qualifying Elo tracks from historical results."""
+    def _fit_track(
+        self,
+        ratings: Dict[str, float],
+        rows: "pd.DataFrame",
+        pos_col: str,
+        half_life_days: float,
+    ) -> int:
+        """Apply ordered Elo updates for one rating track; returns update count.
+
+        Events are processed chronologically.  Before each event's results are
+        applied, ratings revert toward ``base_rating`` in proportion to the days
+        elapsed since the previous event.
+        """
+        import numpy as np
+        import pandas as pd
+
+        # ⚡ Bolt: Fast vectorized group iteration instead of pandas groupby logic.
+        # Sorting by date, season, round guarantees event grouping, then the
+        # position column ensures correct finishing/qualifying order.
+        sorted_rows = rows.sort_values(["date", "season", "round", pos_col])
+        driver_ids = sorted_rows["driverId"].astype(str).values
+        seasons = sorted_rows["season"].values
+        rounds = sorted_rows["round"].values
+        dates = pd.to_datetime(sorted_rows["date"], utc=True).values  # datetime64[ns]
+
+        changes = (seasons[1:] != seasons[:-1]) | (rounds[1:] != rounds[:-1])
+        split_indices = np.where(changes)[0] + 1
+        id_groups = np.split(driver_ids, split_indices)
+        date_groups = np.split(dates, split_indices)
+
+        hl = max(1.0, float(half_life_days))
+        prev_date = None
+        updates = 0
+        for ids_g, date_g in zip(id_groups, date_groups):
+            evt_date = date_g[0]
+            if prev_date is not None:
+                delta_days = (evt_date - prev_date) / np.timedelta64(1, "D")
+                if delta_days > 0:
+                    self._decay_ratings(ratings, 2.0 ** (-float(delta_days) / hl))
+            ids = ids_g.tolist()
+            self._update_ratings(ratings, ids)
+            updates += len(ids) * (len(ids) - 1) // 2
+            prev_date = evt_date
+        return updates
+
+    def fit(
+        self, hist: "pd.DataFrame", half_life_days: float = 240.0
+    ) -> "EloModel":
+        """Fit both race and qualifying Elo tracks from historical results.
+
+        Ratings decay toward ``base_rating`` between events with the given
+        ``half_life_days`` so recent results dominate (see the class docstring).
+        The default matches the team recency window; production call sites pass
+        the configured ``recency_half_life_days.team``.
+        """
         if hist is None or hist.empty:
             logger.info("[ensemble.elo] No history; using flat base ratings")
             return self
@@ -115,39 +191,16 @@ class EloModel:
         # --- Race Elo ---
         race_updates = 0
         if not race_rows.empty:
-            # ⚡ Bolt: Fast vectorized group iteration instead of pandas groupby logic.
-            # Sorting by date, season, round guarantees event grouping, then position ensures correct order.
-            sorted_race = race_rows.sort_values(["date", "season", "round", "position"])
-            driver_ids = sorted_race["driverId"].astype(str).values
-            seasons = sorted_race["season"].values
-            rounds = sorted_race["round"].values
-
-            import numpy as np
-            changes = (seasons[1:] != seasons[:-1]) | (rounds[1:] != rounds[:-1])
-            split_indices = np.where(changes)[0] + 1
-
-            for g in np.split(driver_ids, split_indices):
-                ids = g.tolist()
-                self._update_ratings(self.race_ratings_, ids)
-                race_updates += len(ids) * (len(ids) - 1) // 2
+            race_updates = self._fit_track(
+                self.race_ratings_, race_rows, "position", half_life_days
+            )
 
         # --- Qualifying Elo ---
         quali_updates = 0
         if not quali_rows.empty:
-            # ⚡ Bolt: Fast vectorized group iteration instead of pandas groupby logic.
-            sorted_quali = quali_rows.sort_values(["date", "season", "round", "qpos"])
-            driver_ids = sorted_quali["driverId"].astype(str).values
-            seasons = sorted_quali["season"].values
-            rounds = sorted_quali["round"].values
-
-            import numpy as np
-            changes = (seasons[1:] != seasons[:-1]) | (rounds[1:] != rounds[:-1])
-            split_indices = np.where(changes)[0] + 1
-
-            for g in np.split(driver_ids, split_indices):
-                ids = g.tolist()
-                self._update_ratings(self.quali_ratings_, ids)
-                quali_updates += len(ids) * (len(ids) - 1) // 2
+            quali_updates = self._fit_track(
+                self.quali_ratings_, quali_rows, "qpos", half_life_days
+            )
 
         logger.info(
             "[ensemble.elo] Race ratings: %d drivers (%d updates); "
