@@ -87,27 +87,9 @@ def test_elo_fit_and_predict(race_history, roster_X):
     assert pace[0] < pace[2]
 
 
-def test_elo_decay_default_is_no_op():
-    """Without half_life_days, fitting must match the original no-decay path."""
-    rows = []
-    for season in [2023, 2024]:
-        for rnd in range(1, 4):
-            for pos, driver in enumerate(["d_alpha", "d_beta", "d_gamma"], start=1):
-                rows.append({
-                    "season": season, "round": rnd, "session": "race",
-                    "date": datetime(season, 3 + rnd, 1, tzinfo=timezone.utc),
-                    "driverId": driver, "constructorId": f"team_{pos}",
-                    "position": pos, "points": 0, "status": "Finished",
-                })
-    hist = pd.DataFrame(rows)
-    no_decay = EloModel().fit(hist)
-    explicit_none = EloModel().fit(hist, half_life_days=None)
-    assert no_decay.race_ratings_ == explicit_none.race_ratings_
-
-
 def test_elo_decay_fades_stale_dominance():
     """A driver dominant only in the distant past should keep less of a lead
-    once recency decay is enabled."""
+    the shorter the recency half-life."""
     rows = []
     # d_alpha dominates the old era; d_beta/d_gamma are flat fillers.
     for rnd in range(1, 11):
@@ -130,14 +112,15 @@ def test_elo_decay_fades_stale_dominance():
         })
     hist = pd.DataFrame(rows)
 
-    no_decay = EloModel().fit(hist)
-    decayed = EloModel().fit(hist, half_life_days=180.0)
+    # A very long half-life barely decays; a short one fades stale dominance.
+    slow_decay = EloModel().fit(hist, half_life_days=100_000.0)
+    fast_decay = EloModel().fit(hist, half_life_days=180.0)
 
-    lead_no_decay = no_decay.race_ratings_["d_alpha"] - no_decay.race_ratings_["d_gamma"]
-    lead_decayed = decayed.race_ratings_["d_alpha"] - decayed.race_ratings_["d_gamma"]
+    lead_slow = slow_decay.race_ratings_["d_alpha"] - slow_decay.race_ratings_["d_gamma"]
+    lead_fast = fast_decay.race_ratings_["d_alpha"] - fast_decay.race_ratings_["d_gamma"]
 
-    # Recency decay must shrink the stale leader's advantage.
-    assert lead_decayed < lead_no_decay
+    # Shorter half-life must shrink the stale leader's advantage.
+    assert lead_fast < lead_slow
 
 
 def test_elo_predict_empty():

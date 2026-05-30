@@ -62,15 +62,14 @@ class EloModel:
 
     Recency decay
     -------------
-    When ``fit()`` is called with ``half_life_days`` set, ratings revert
-    exponentially toward ``base_rating`` between events based on the elapsed
-    time, so that stale historical dominance fades.  Without this, a driver who
-    was dominant years ago retains an inflated rating indefinitely (plain Elo
-    has no time component), which biases predictions toward historically strong
-    drivers regardless of current form — unlike every other component in the
-    ensemble (Bradley-Terry, Mixed-Effects and the form indices) which already
-    weight recent results more heavily.  Defaults to ``None`` (no decay) for
-    backward compatibility; production call sites pass a real half-life.
+    ``fit()`` reverts ratings exponentially toward ``base_rating`` between
+    events based on the elapsed time, so that stale historical dominance fades.
+    Plain Elo has no time component, which would bias predictions toward
+    historically strong drivers regardless of current form — unlike every other
+    component in the ensemble (Bradley-Terry, Mixed-Effects and the form
+    indices), all of which already weight recent results more heavily.  The
+    half-life defaults to the team recency window; production call sites pass
+    the configured value.
     """
 
     def __init__(self, base_rating: float = 1500.0, k: float = 20.0) -> None:
@@ -119,13 +118,13 @@ class EloModel:
         ratings: Dict[str, float],
         rows: "pd.DataFrame",
         pos_col: str,
-        half_life_days: Optional[float],
+        half_life_days: float,
     ) -> int:
         """Apply ordered Elo updates for one rating track; returns update count.
 
-        Events are processed chronologically.  When ``half_life_days`` is set,
-        ratings revert toward ``base_rating`` in proportion to the days elapsed
-        since the previous event before that event's results are applied.
+        Events are processed chronologically.  Before each event's results are
+        applied, ratings revert toward ``base_rating`` in proportion to the days
+        elapsed since the previous event.
         """
         import numpy as np
         import pandas as pd
@@ -144,13 +143,12 @@ class EloModel:
         id_groups = np.split(driver_ids, split_indices)
         date_groups = np.split(dates, split_indices)
 
-        decay = half_life_days is not None and half_life_days > 0
-        hl = max(1.0, float(half_life_days)) if decay else 1.0
+        hl = max(1.0, float(half_life_days))
         prev_date = None
         updates = 0
         for ids_g, date_g in zip(id_groups, date_groups):
             evt_date = date_g[0]
-            if decay and prev_date is not None:
+            if prev_date is not None:
                 delta_days = (evt_date - prev_date) / np.timedelta64(1, "D")
                 if delta_days > 0:
                     self._decay_ratings(ratings, 2.0 ** (-float(delta_days) / hl))
@@ -161,13 +159,14 @@ class EloModel:
         return updates
 
     def fit(
-        self, hist: "pd.DataFrame", half_life_days: Optional[float] = None
+        self, hist: "pd.DataFrame", half_life_days: float = 240.0
     ) -> "EloModel":
         """Fit both race and qualifying Elo tracks from historical results.
 
-        When ``half_life_days`` is provided, ratings decay toward
-        ``base_rating`` between events so recent results dominate (see the
-        class docstring).  ``None`` keeps the original no-decay behaviour.
+        Ratings decay toward ``base_rating`` between events with the given
+        ``half_life_days`` so recent results dominate (see the class docstring).
+        The default matches the team recency window; production call sites pass
+        the configured ``recency_half_life_days.team``.
         """
         if hist is None or hist.empty:
             logger.info("[ensemble.elo] No history; using flat base ratings")
