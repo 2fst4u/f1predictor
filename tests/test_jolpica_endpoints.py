@@ -1,6 +1,45 @@
 import unittest
 from unittest.mock import MagicMock
+
+import pytest
+
 from f1pred.data.jolpica import JolpicaClient
+
+
+# The three bulk season endpoints (race / qualifying / sprint) share an
+# identical paginate-then-merge-by-round implementation; the only differences
+# are the endpoint path and the per-round results key. Parametrising over that
+# (method, key) pair exercises the merge logic for all three without three
+# copy-pasted test bodies.
+@pytest.mark.parametrize(
+    "method_name, results_key",
+    [
+        ("get_season_race_results", "Results"),
+        ("get_season_qualifying_results", "QualifyingResults"),
+        ("get_season_sprint_results", "SprintResults"),
+    ],
+)
+def test_get_season_bulk_results_merge_by_round(method_name, results_key):
+    client = JolpicaClient("http://mock")
+    # Round 1 appears on two pages (must be merged into 2 entries); round 2 on one.
+    client._fetch_paginated_parallel = MagicMock(return_value=[
+        {"RaceTable": {"Races": [{"round": "1", results_key: [{"position": "1"}]}]}},
+        {"RaceTable": {"Races": [
+            {"round": "1", results_key: [{"position": "2"}]},
+            {"round": "2", results_key: [{"position": "1"}]},
+        ]}},
+    ])
+    results = getattr(client, method_name)("2021")
+    assert len(results) == 2
+
+    round1 = next((r for r in results if r["round"] == "1"), None)
+    assert round1 is not None
+    assert len(round1[results_key]) == 2  # merged across pages
+
+    round2 = next((r for r in results if r["round"] == "2"), None)
+    assert round2 is not None
+    assert len(round2[results_key]) == 1
+
 
 class TestJolpicaEndpoints(unittest.TestCase):
     def test_get_seasons(self):
@@ -41,51 +80,6 @@ class TestJolpicaEndpoints(unittest.TestCase):
         client.get_season_schedule.side_effect = Exception("API Error")
         event_error = client.get_event("2021", "1")
         self.assertIsNone(event_error)
-
-    def test_get_season_race_results(self):
-        client = JolpicaClient("http://mock")
-        client._fetch_paginated_parallel = MagicMock(return_value=[
-            {"RaceTable": {"Races": [{"round": "1", "Results": [{"position": "1"}]}]}},
-            {"RaceTable": {"Races": [{"round": "1", "Results": [{"position": "2"}]}, {"round": "2", "Results": [{"position": "1"}]}]}}
-        ])
-        results = client.get_season_race_results("2021")
-        self.assertEqual(len(results), 2)
-
-        # Round 1 should have 2 results merged
-        round1 = next((r for r in results if r["round"] == "1"), None)
-        self.assertIsNotNone(round1)
-        self.assertEqual(len(round1["Results"]), 2)
-
-        # Round 2 should have 1 result
-        round2 = next((r for r in results if r["round"] == "2"), None)
-        self.assertIsNotNone(round2)
-        self.assertEqual(len(round2["Results"]), 1)
-
-    def test_get_season_qualifying_results(self):
-        client = JolpicaClient("http://mock")
-        client._fetch_paginated_parallel = MagicMock(return_value=[
-            {"RaceTable": {"Races": [{"round": "1", "QualifyingResults": [{"position": "1"}]}]}},
-            {"RaceTable": {"Races": [{"round": "1", "QualifyingResults": [{"position": "2"}]}, {"round": "2", "QualifyingResults": [{"position": "1"}]}]}}
-        ])
-        results = client.get_season_qualifying_results("2021")
-        self.assertEqual(len(results), 2)
-
-        round1 = next((r for r in results if r["round"] == "1"), None)
-        self.assertIsNotNone(round1)
-        self.assertEqual(len(round1["QualifyingResults"]), 2)
-
-    def test_get_season_sprint_results(self):
-        client = JolpicaClient("http://mock")
-        client._fetch_paginated_parallel = MagicMock(return_value=[
-            {"RaceTable": {"Races": [{"round": "1", "SprintResults": [{"position": "1"}]}]}},
-            {"RaceTable": {"Races": [{"round": "1", "SprintResults": [{"position": "2"}]}, {"round": "2", "SprintResults": [{"position": "1"}]}]}}
-        ])
-        results = client.get_season_sprint_results("2021")
-        self.assertEqual(len(results), 2)
-
-        round1 = next((r for r in results if r["round"] == "1"), None)
-        self.assertIsNotNone(round1)
-        self.assertEqual(len(round1["SprintResults"]), 2)
 
     def test_get_race_results(self):
         client = JolpicaClient("http://mock")
