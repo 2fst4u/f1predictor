@@ -636,6 +636,10 @@ class CalibrationManager:
                         "form_unboosted": unboosted_map.get(drv_id, base_form[idx]),
                         "form_cur_season": cur_form_map.get(drv_id, 0.0),
                         "grid": float(X_evt.iloc[idx].get("grid", 15.0)),
+                        # Current-weekend qualifying position (NaN when unavailable);
+                        # lets the objective exercise current_quali_factor exactly as
+                        # the production pace blend in models.py does.
+                        "current_quali_pos": float(X_evt.iloc[idx].get("current_quali_pos", np.nan)),
                         "elo": elo[idx] if len(elo) > idx else 0,
                         "bt": bt[idx] if len(bt) > idx else 0,
                         "mixed": mixed[idx] if len(mixed) > idx else 0,
@@ -749,6 +753,26 @@ class CalibrationManager:
                 sd_g = np.nanstd(ev_grid)
                 g_z_precomputed[mask] = (ev_grid - mu_g) / (sd_g + 1e-6)
 
+            # Precompute normalised current-weekend qualifying position per event so
+            # the objective can reproduce the production current_quali blend.  Drivers
+            # without a current-quali result keep their raw pace (mask = False).
+            if "current_quali_pos" in df_calib.columns:
+                quali_pos_vals = df_calib["current_quali_pos"].values.astype(float)
+            else:
+                quali_pos_vals = np.full(len(arr_gbm_raw), np.nan, dtype=float)
+            quali_blend_mask = ~np.isnan(quali_pos_vals)
+            q_z_precomputed = np.zeros_like(quali_pos_vals, dtype=float)
+            for mask in event_masks:
+                vals = quali_pos_vals[mask]
+                valid = ~np.isnan(vals)
+                if valid.sum() < 2:
+                    continue
+                mu_q = np.nanmean(vals)
+                sd_q = np.nanstd(vals)
+                q_z_precomputed[mask] = np.where(
+                    valid, (vals - mu_q) / (sd_q + 1e-6), 0.0
+                )
+
             # Pre-compute arrays for qualifying objective (may be empty)
             has_quali_data = not df_calib_q.empty
             if has_quali_data:
@@ -831,6 +855,17 @@ class CalibrationManager:
                 mu_p_all = means[event_indices]
                 sd_p_all = stds[event_indices]
                 p_z = (raw_pace - mu_p_all) / (sd_p_all + 1e-6)
+
+                # Current-weekend qualifying blend (mirrors models.py): for drivers
+                # with a current-quali result, blend their z-scored pace with the
+                # z-scored qualifying position using current_quali_factor (param 10).
+                # Applied before grid stickiness, exactly as in production.
+                w_quali = np.clip(weights[10], 0.0, 1.0)
+                p_z = np.where(
+                    quali_blend_mask,
+                    (1.0 - w_quali) * p_z + w_quali * q_z_precomputed,
+                    p_z,
+                )
 
                 # Grid stickiness blend
                 pace = (1.0 - grid_imp) * p_z + grid_imp * g_z_precomputed
