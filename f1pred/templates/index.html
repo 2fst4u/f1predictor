@@ -648,12 +648,12 @@
 
                         <form @submit.prevent="login" class="space-y-5">
                             <div>
-                                <label for="login-username" class="block text-sm font-medium text-gray-300">Username</label>
+                                <label for="login-username" class="block text-sm font-medium text-gray-300">Username <span class="text-red-500">*</span></label>
                                 <input id="login-username" type="text" x-model="authUsername" required
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>
                             <div>
-                                <label for="login-password" class="block text-sm font-medium text-gray-300">Password</label>
+                                <label for="login-password" class="block text-sm font-medium text-gray-300">Password <span class="text-red-500">*</span></label>
                                 <input id="login-password" type="password" x-model="authPassword" required
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>
@@ -681,12 +681,12 @@
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div>
-                                            <label for="current-password" class="block text-xs font-medium text-gray-400 mb-1">Current Password</label>
+                                            <label for="current-password" class="block text-xs font-medium text-gray-400 mb-1">Current Password <span class="text-red-500">*</span></label>
                                             <input id="current-password" type="password" x-model="passChange.current" required
                                                 class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                         </div>
                                         <div>
-                                            <label for="new-password" class="block text-xs font-medium text-gray-400 mb-1">New Password</label>
+                                            <label for="new-password" class="block text-xs font-medium text-gray-400 mb-1">New Password <span class="text-red-500">*</span></label>
                                             <input id="new-password" type="password" x-model="passChange.new" required
                                                 class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                         </div>
@@ -709,6 +709,7 @@
                                         <input id="discord-webhook-url" type="text" x-model="settings.discord_webhook_url" placeholder="https://discord.com/api/webhooks/..."
                                             class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                         <button type="button" @click="testWebhook" :disabled="webhookTesting || !settings.discord_webhook_url"
+                                            :title="!settings.discord_webhook_url ? 'Please enter a webhook URL first' : 'Test webhook'"
                                             class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-xs py-1 px-4 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex-shrink-0">
                                             <span x-show="!webhookTesting">Test</span>
                                             <span x-show="webhookTesting"><i class="fas fa-circle-notch fa-spin"></i></span>
