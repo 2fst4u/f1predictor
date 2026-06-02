@@ -82,3 +82,39 @@ def test_prediction_cache_key_stability(tmp_path):
     res = {"val": 42}
     cache.set(inputs1, res)
     assert cache.get(inputs2) == res
+
+def test_prediction_cache_eviction_unlink_failure(tmp_path, monkeypatch):
+    import os
+    cache_dir = tmp_path / "cache"
+    cache = PredictionCache(str(cache_dir), max_entries=2)
+
+    cache.set({"v": 1}, {"res": 1})
+    cache.set({"v": 2}, {"res": 2})
+
+    # Monkeypatch os.path.getmtime to ensure deterministic ordering
+    # so we know which file will be evicted without relying on system clock
+    mtime_mapping = {}
+    files = list(cache_dir.glob("*.json"))
+    if len(files) == 2:
+        mtime_mapping[str(files[0])] = 1000.0
+        mtime_mapping[str(files[1])] = 2000.0
+
+    original_getmtime = os.path.getmtime
+    def mock_getmtime(path):
+        return mtime_mapping.get(str(path), original_getmtime(path))
+
+    monkeypatch.setattr(os.path, "getmtime", mock_getmtime)
+
+    # Monkeypatch unlink to fail
+    def mock_unlink(*args, **kwargs):
+        raise OSError("Permission denied")
+
+    from pathlib import Path
+    monkeypatch.setattr(Path, "unlink", mock_unlink)
+
+    # Adding a 3rd should trigger eviction of the oldest
+    # But unlink fails, which is silently swallowed
+    cache.set({"v": 3}, {"res": 3})
+
+    # Ensure it didn't crash
+    assert cache.get({"v": 3}) is not None

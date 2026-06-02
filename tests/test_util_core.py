@@ -61,3 +61,29 @@ def test_init_caches_disabled():
     # a global cache.
     assert result is None
     assert requests_cache.is_installed() == before
+
+import pytest
+import hashlib
+from unittest.mock import patch, MagicMock
+from f1pred.util import logic_fingerprint
+
+def test_logic_fingerprint(monkeypatch):
+    import f1pred.util
+    monkeypatch.setattr(f1pred.util, "_LOGIC_FINGERPRINT", None)
+
+    fp1 = logic_fingerprint()
+    assert len(fp1) == 12
+
+    fp2 = logic_fingerprint()
+    assert fp1 == fp2
+
+@patch('f1pred.util.Path.read_bytes')
+def test_logic_fingerprint_missing_file(mock_read_bytes, monkeypatch):
+    import f1pred.util
+    monkeypatch.setattr(f1pred.util, "_LOGIC_FINGERPRINT", None)
+
+    # Simulate missing file
+    mock_read_bytes.side_effect = FileNotFoundError()
+
+    fp = logic_fingerprint()
+    assert len(fp) == 12
