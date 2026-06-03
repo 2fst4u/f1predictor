@@ -106,6 +106,12 @@ The model uses a variety of engineered features to capture driver talent, car pe
 All settings live in `config.yaml`. The main things you might want to tweak:
 
 ```yaml
+app:
+  live_refresh_seconds: 600   # Live mode poll interval (seconds)
+  auto_refresh_seconds: 3600  # Background prediction refresh interval (seconds)
+  timezone: "UTC"             # System timezone for session times
+  log_level: "WARNING"        # DEBUG, INFO, WARNING, ERROR
+
 modelling:
   # Model weights (including recency, blending, ensemble, DNF)
   # are dynamically calibrated at runtime.
