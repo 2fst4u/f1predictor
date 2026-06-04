@@ -255,7 +255,7 @@ def _roster_from_round(jc: JolpicaClient, season: str, rnd: str) -> List[Dict]:
 def _build_canonical_mapping_from_entries(raw_entries: List[Dict]) -> Dict[str, 'Any']:  # noqa: F821
     """Build canonical-id lookup tables directly from a pre-fetched entry list.
 
-    Factored out of :func:`_get_canonical_mapping` so that callers who have
+    Factored out so that callers who have
     already fetched the entry list don't pay the network cost twice.
 
     Returns a dict with keys:
@@ -307,20 +307,6 @@ def _build_canonical_mapping_from_entries(raw_entries: List[Dict]) -> Dict[str, 
         "constructors": constructor_map,
         "race_driver_ids": race_driver_ids,
     }
-
-
-def _get_canonical_mapping(jc: JolpicaClient, season: str) -> Dict[str, 'Any']:  # noqa: F821
-    """Fetch season entry list and build canonical-id lookup tables."""
-    try:
-        raw_entries = jc.get_season_entry_list(season)
-    except Exception as e:
-        logger.warning(f"[roster] Failed to fetch canonical entry list: {e}")
-        return {}
-    try:
-        return _build_canonical_mapping_from_entries(raw_entries or [])
-    except Exception as e:
-        logger.warning(f"[roster] Failed to build canonical mapping: {e}")
-        return {}
 
 
 def _roster_entries_from_fastf1_results(
