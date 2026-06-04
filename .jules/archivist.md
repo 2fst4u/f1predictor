@@ -17,3 +17,7 @@
 ## 2024-05-24 - Documenting Weather Features
 **Learning:** Weather condition sensitivity features (`weather_beta_temp`, `weather_beta_pressure`, `weather_beta_wind`, `weather_beta_rain`) were added to the codebase but left undocumented in the README.md's "Input Variables" section, creating drift between the feature list and the actual implementation.
 **Action:** When adding new features or sensitivity parameters to `f1pred/predict.py`, always ensure they are fully documented in the `README.md` to keep the model's inputs fully transparent.
+
+## 2024-06-15 - Undocumented Configuration Drift
+**Learning:** Application-level configuration options defined in `f1pred/config.py` and `config.yaml` (such as `live_refresh_seconds`, `auto_refresh_seconds`, `timezone`, and `log_level`) frequently drift from the documented setup in `README.md`, causing users to be unaware of tweakable application parameters.
+**Action:** When auditing or modifying application configurations, always explicitly cross-reference and update the `README.md` Configuration section to prevent undocumented configuration drift.
