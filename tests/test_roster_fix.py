@@ -57,9 +57,6 @@ def test_roster_derivation_prefers_later_sessions():
     mock_event.get_session.side_effect = get_session_mock
 
     with patch("f1pred.data.fastf1_backend.get_event", return_value=mock_event):
-        # We need to mock _get_canonical_mapping to return something that won't fail
-        # Or just let it return empty dict, and it will use Abbreviations.
-
         roster = derive_roster(jc, "2026", "4")
 
         # Currently, it picks FP1 first because it iterates ["FP1", "Qualifying", ...]
