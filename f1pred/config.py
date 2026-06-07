@@ -211,7 +211,7 @@ def _is_http_url(s: str) -> bool:
     try:
         from urllib.parse import urlsplit
         parsed = urlsplit(s)
-        return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+        return parsed.scheme in ("http", "https") and bool(parsed.hostname)
     except ValueError:
         return False
 
