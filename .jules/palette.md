@@ -5,3 +5,6 @@
 ## 2025-02-24 - Form validation required indicators
 **Learning:** A common UX/A11y pattern is explicitly marking `required` form fields. While `required` attributes ensure client-side validation logic catches empty fields, without a visual indicator (like a red asterisk `*`) users may only discover the field is required *after* a failed submission.
 **Action:** Always pair `required` inputs with explicit visual indicators (like `<span class="text-red-500">*</span>`) appended to the associated `<label>` element, and provide helpful tooltips on disabled actionable elements.
+## 2026-06-08 - Accessible Tooltips for Disabled States
+**Learning:** `pointer-events-none` on parent wrappers completely blocks pointer events, making it impossible for users to interact with or even see tooltips (like `title` attributes) on disabled elements nested inside.
+**Action:** Remove `pointer-events-none` from parent wrappers and apply `disabled:cursor-not-allowed` and dynamic `title` attributes directly to the interactive elements (buttons/inputs) themselves so screen readers and mouse users get context on why the element is disabled.

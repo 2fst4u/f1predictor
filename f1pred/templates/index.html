@@ -657,7 +657,7 @@
                                 <input id="login-password" type="password" x-model="authPassword" required
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>
-                            <button type="submit" :disabled="authLoading" class="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white py-2 px-4 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex justify-center items-center">
+                            <button type="submit" :disabled="authLoading" :title="authLoading ? 'Logging in...' : 'Login'" class="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2 px-4 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex justify-center items-center">
                                 <span x-show="!authLoading">Login</span>
                                 <span x-show="authLoading" x-cloak><i class="fas fa-circle-notch fa-spin mr-2"></i>Logging in...</span>
                             </button>
@@ -691,8 +691,8 @@
                                                 class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                         </div>
                                     </div>
-                                    <button type="submit" :disabled="passChangeLoading"
-                                         class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-xs py-1.5 px-4 rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white hover:scale-[1.02] active:scale-[0.98] flex justify-center items-center">
+                                    <button type="submit" :disabled="passChangeLoading" :title="passChangeLoading ? 'Updating password...' : 'Update Password'"
+                                         class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs py-1.5 px-4 rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white hover:scale-[1.02] active:scale-[0.98] flex justify-center items-center">
                                         <span x-show="!passChangeLoading">Update Password</span>
                                         <span x-show="passChangeLoading" x-cloak><i class="fas fa-circle-notch fa-spin mr-2"></i>Updating...</span>
                                     </button>
@@ -709,8 +709,8 @@
                                         <input id="discord-webhook-url" type="text" x-model="settings.discord_webhook_url" placeholder="https://discord.com/api/webhooks/..."
                                             class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                         <button type="button" @click="testWebhook" :disabled="webhookTesting || !settings.discord_webhook_url"
-                                            :title="!settings.discord_webhook_url ? 'Please enter a webhook URL first' : 'Test webhook'"
-                                            class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-xs py-1 px-4 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex-shrink-0">
+                                            :title="webhookTesting ? 'Testing webhook...' : (!settings.discord_webhook_url ? 'Please enter a webhook URL first' : 'Test webhook')"
+                                            class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs py-1 px-4 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex-shrink-0">
                                             <span x-show="!webhookTesting">Test</span>
                                             <span x-show="webhookTesting"><i class="fas fa-circle-notch fa-spin"></i></span>
                                         </button>
@@ -723,22 +723,22 @@
 
                             <div>
                                 <h3 class="text-sm font-medium text-gray-200 mb-3">Integrations (Coming Soon)</h3>
-                                <div class="bg-gray-900/50 p-5 rounded border border-gray-700 space-y-5 opacity-50 pointer-events-none">
+                                <div class="bg-gray-900/50 p-5 rounded border border-gray-700 space-y-5 opacity-50">
                                     <div>
                                         <label for="llm-server-url" class="block text-sm font-medium text-gray-400 mb-1">LLM Server URL</label>
-                                        <input id="llm-server-url" type="text" x-model="settings.llm_server_url" disabled
-                                            class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm text-white">
+                                        <input id="llm-server-url" type="text" x-model="settings.llm_server_url" disabled title="This feature is coming soon"
+                                            class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm text-white disabled:cursor-not-allowed">
                                     </div>
                                     <div>
                                         <label for="llm-api-key" class="block text-sm font-medium text-gray-400 mb-1">LLM API Key</label>
-                                        <input id="llm-api-key" type="password" x-model="settings.llm_api_key" disabled
-                                            class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm text-white">
+                                        <input id="llm-api-key" type="password" x-model="settings.llm_api_key" disabled title="This feature is coming soon"
+                                            class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-sm text-white disabled:cursor-not-allowed">
                                     </div>
                                 </div>
                             </div>
 
                             <div class="flex items-center space-x-4 pt-4 border-t border-gray-700">
-                                <button type="submit" :disabled="settingsSaving" class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2 px-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex justify-center items-center">
+                                <button type="submit" :disabled="settingsSaving" :title="settingsSaving ? 'Saving settings...' : 'Save Settings'" class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2 px-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex justify-center items-center">
                                     <span x-show="!settingsSaving">Save Settings</span>
                                     <span x-show="settingsSaving" x-cloak><i class="fas fa-circle-notch fa-spin mr-2"></i>Saving...</span>
                                 </button>
