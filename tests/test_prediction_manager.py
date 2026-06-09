@@ -292,6 +292,33 @@ class TestPredictionManagerCycle:
 
         assert manager.status == "error"
 
+    def test_run_season_cycle_resolve_fails_schedule_succeeds(self):
+        cfg = MagicMock()
+        manager = PredictionManager(cfg, poll_interval=60)
+        manager._running = True
+
+        with patch('f1pred.predict.resolve_event') as mock_resolve:
+            with patch('f1pred.data.jolpica.JolpicaClient') as mock_jc_class:
+                mock_jc = mock_jc_class.return_value
+                # Mock resolve_event to throw Exception, covering lines 469-470
+                mock_resolve.side_effect = Exception("resolve error")
+
+                # Mock schedule to succeed and return a valid schedule
+                mock_schedule = [
+                    {"round": "1", "raceName": "Bahrain GP", "season": "2024"},
+                    {"round": "2", "raceName": "Saudi GP", "season": "2024"}
+                ]
+                mock_jc.get_season_schedule.return_value = mock_schedule
+
+                with patch.object(manager, '_predict_round') as mock_predict_round:
+                    manager._run_season_cycle(0)
+
+                    assert mock_predict_round.call_count == 2
+                    mock_predict_round.assert_any_call(mock_jc, "2024", 1, mock_schedule[0])
+                    mock_predict_round.assert_any_call(mock_jc, "2024", 2, mock_schedule[1])
+
+        assert manager.status == "idle"
+
     def test_run_season_cycle_success(self):
         cfg = MagicMock()
         manager = PredictionManager(cfg, poll_interval=60)
