@@ -118,6 +118,10 @@ modelling:
   # Delete calibration_weights.json to force full re-calibration.
   monte_carlo:
     draws: 5000 # Simulation iterations (more = slower but smoother)
+  features:
+    include_fastf1_fill: true
+    include_circuit_elevation: true
+    include_weather_ensemble: true
 
 data_sources:
   open_meteo:

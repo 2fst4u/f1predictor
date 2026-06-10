@@ -21,3 +21,7 @@
 ## 2024-06-15 - Undocumented Configuration Drift
 **Learning:** Application-level configuration options defined in `f1pred/config.py` and `config.yaml` (such as `live_refresh_seconds`, `auto_refresh_seconds`, `timezone`, and `log_level`) frequently drift from the documented setup in `README.md`, causing users to be unaware of tweakable application parameters.
 **Action:** When auditing or modifying application configurations, always explicitly cross-reference and update the `README.md` Configuration section to prevent undocumented configuration drift.
+
+## 2026-06-10 - Undocumented Feature Flags in Configuration
+**Learning:** Feature toggles in the `modelling.features` section of `config.yaml` (such as `include_fastf1_fill`, `include_circuit_elevation`, and `include_weather_ensemble`) often drift from the `README.md` documentation. When new modeling features are introduced, developers update `config.py` and `config.yaml` but forget to document these flags in the `README.md` Configuration section.
+**Action:** When adding new feature flags or modeling configurations, always update the Configuration section in `README.md` to match the actual `config.yaml` defaults and provide visibility to users.
