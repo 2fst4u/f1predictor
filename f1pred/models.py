@@ -569,12 +569,18 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     if hist_X is not None and not hist_X.empty and "y_pace" in hist_X.columns \
             and hist_X["y_pace"].notna().any():
         labelled = hist_X[hist_X["y_pace"].notna()]
+
+        def _flag(col: str) -> 'pd.Series':
+            if col in labelled.columns:
+                return labelled[col].fillna(0).astype(int)
+            return pd.Series(0, index=labelled.index)
+
         if session_type in ("qualifying", "sprint_qualifying"):
-            sess_mask = labelled.get("is_qualifying", 0) == 1
+            sess_mask = _flag("is_qualifying") == 1
         elif session_type == "sprint":
-            sess_mask = (labelled.get("is_sprint", 0) == 1) & (labelled.get("is_qualifying", 0) == 0)
+            sess_mask = (_flag("is_sprint") == 1) & (_flag("is_qualifying") == 0)
         else:
-            sess_mask = labelled.get("is_race", 0) == 1
+            sess_mask = _flag("is_race") == 1
         selected = labelled[sess_mask]
         # Too few session-specific samples: train on all outcome rows and let
         # the is_race/is_qualifying/is_sprint flags differentiate session types.

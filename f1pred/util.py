@@ -72,9 +72,12 @@ def logic_fingerprint() -> str:
     parts: list[str] = [f"version={__version__}"]
 
     # Resolve module source paths relative to this file so import-order
-    # quirks don't matter.
+    # quirks don't matter.  Every module whose logic affects prediction
+    # output is included, so a deploy that changes any of them invalidates
+    # cached predictions (including the row order of cached prob matrices).
     here = Path(__file__).resolve().parent
-    for rel in ("roster.py", "features.py"):
+    for rel in ("roster.py", "features.py", "models.py", "simulate.py",
+                "ensemble.py", "ranking.py", "predict.py", "calibrate.py"):
         src = here / rel
         try:
             h = hashlib.sha256(src.read_bytes()).hexdigest()
