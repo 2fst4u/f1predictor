@@ -57,6 +57,7 @@ modelling:
     session_types: ["qualifying", "race", "sprint_qualifying", "sprint"]
   simulation:
     max_penalty_base: 20.0   # DNF penalty ceiling (structural, not calibrated)
+    team_correlation: 0.25   # shared fraction of noise variance between teammates
   dnf:
     clip_min: 0.02           # safety guardrail (not calibrated)
     clip_max: 0.35           # safety guardrail (not calibrated)

@@ -117,6 +117,9 @@ class SimulationCfg:
     noise_factor: float = 0.15
     min_noise: float = 0.05
     max_penalty_base: float = 20.0
+    # Fraction of simulation noise variance shared between teammates (the
+    # "car performance on the day" random effect).  Structural, not calibrated.
+    team_correlation: float = 0.25
 
 
 @dataclass

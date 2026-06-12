@@ -4,10 +4,27 @@ This module simulates race finishes by adding stochastic noise to pace
 predictions and applying DNF probabilities.
 """
 from __future__ import annotations
-from typing import Tuple
+from typing import Optional, Tuple
 import numpy as np
 
-__all__ = ["simulate_grid"]
+__all__ = ["simulate_grid", "noise_sigma"]
+
+# Scale linking noise_factor to the pace standard deviation.  Kept as a module
+# constant so the calibration objective can reproduce the exact same sigma
+# analytically (see calibrate.py).
+NOISE_STD_MULTIPLIER = 3.0
+
+
+def noise_sigma(pace_index: np.ndarray, noise_factor: float, min_noise: float) -> float:
+    """Per-driver Gaussian noise std used by the simulation.
+
+    Based on the standard deviation of the pace spread (robust to a single
+    outlier, unlike the previous max-min range) with a floor of min_noise.
+    """
+    pace_std = float(np.std(pace_index)) if len(pace_index) else 0.0
+    if not np.isfinite(pace_std) or pace_std < 1e-6:
+        pace_std = 0.1
+    return max(pace_std * float(noise_factor) * NOISE_STD_MULTIPLIER, float(min_noise))
 
 
 def simulate_grid(
@@ -19,6 +36,8 @@ def simulate_grid(
     min_noise: float = 0.05,
     max_penalty_base: float = 20.0,
     compute_pairwise: bool = True,
+    team_codes: Optional[np.ndarray] = None,
+    team_correlation: float = 0.0,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Monte Carlo simulation: for each draw, add noise to pace, apply DNFs, and derive finishing order.
@@ -33,6 +52,11 @@ def simulate_grid(
         max_penalty_base: Base penalty added to max pace for DNF drivers
         compute_pairwise: Whether to compute the O(N^2) pairwise probability matrix.
                           Defaults to True for backward compatibility.
+        team_codes: Optional integer team index per driver.  When given together
+                    with team_correlation > 0, a shared per-team noise component
+                    is mixed in so teammates' outcomes are correlated (car
+                    performance on the day is a team-level random effect).
+        team_correlation: Fraction of noise variance shared within a team (0-1).
     """
     rng = np.random.RandomState(random_seed)
 
@@ -58,16 +82,9 @@ def simulate_grid(
     if len(dnf_prob) != n:
         dnf_prob = np.full(n, 0.08, dtype=float)
 
-    # Calculate noise scale based on pace spread
-    pace_range = float(np.ptp(pace_index))  # max - min
-    
-    if pace_range > 0.01:
-        noise_scale = pace_range * noise_factor
-    else:
-        noise_scale = 0.1
-    
-    noise_scale = max(noise_scale, min_noise)
-    
+    # Calculate noise scale based on pace spread (std-based; robust to outliers)
+    noise_scale = noise_sigma(pace_index, noise_factor, min_noise)
+
     # DNF penalty - move driver to back of grid
     max_penalty = abs(np.max(pace_index)) + abs(np.min(pace_index)) + max_penalty_base
 
@@ -77,7 +94,23 @@ def simulate_grid(
 
     # 1. Generate all random events at once (Shape: draws x n)
     # ⚡ Bolt: standard_normal is slightly faster than normal(0, scale) due to less C overhead
-    noise = rng.standard_normal((draws, n)) * noise_scale
+    indiv_noise = rng.standard_normal((draws, n))
+
+    rho = float(np.clip(team_correlation, 0.0, 1.0)) if team_correlation else 0.0
+    if rho > 0.0 and team_codes is not None and len(team_codes) == n:
+        # Mix a shared per-team component with the individual component so the
+        # total variance stays noise_scale^2 while teammates are correlated.
+        codes = np.asarray(team_codes, dtype=int)
+        valid_codes = codes >= 0
+        n_teams = int(codes.max()) + 1 if valid_codes.any() else 0
+        if n_teams > 0:
+            team_draws = rng.standard_normal((draws, n_teams))
+            shared = np.where(valid_codes[None, :], team_draws[:, np.clip(codes, 0, None)], 0.0)
+            mix = np.sqrt(rho) * shared + np.sqrt(1.0 - rho) * indiv_noise
+            # Drivers without a team keep pure individual noise
+            indiv_noise = np.where(valid_codes[None, :], mix, indiv_noise)
+
+    noise = indiv_noise * noise_scale
     dnf_draws = rng.binomial(1, dnf_prob, size=(draws, n))
 
     # 2. Compute simulated pace for all draws

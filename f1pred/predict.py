@@ -211,6 +211,18 @@ def _get_session_datetime(race_info: Dict[str, Any], sess: str) -> Optional[date
 
 
 
+def _team_codes_for(X: 'pd.DataFrame') -> Optional['np.ndarray']:
+    """Integer team index per driver row for teammate-correlated simulation noise."""
+    try:
+        import pandas as pd
+        if X is None or "constructorId" not in X.columns:
+            return None
+        codes, _ = pd.factorize(X["constructorId"])
+        return codes  # -1 for missing constructorId (treated as team-less)
+    except Exception:
+        return None
+
+
 def _collect_hist_weather(hist: 'pd.DataFrame', season_i: int, cfg) -> Optional[Dict[Tuple[int, int], Dict[str, Any]]]:
     """Cached weather for recent historical race events, for wet/dry DNF rates.
 
@@ -600,8 +612,10 @@ def _run_single_prediction(
         min_noise=cfg.modelling.simulation.min_noise,
         max_penalty_base=cfg.modelling.simulation.max_penalty_base,
         compute_pairwise=False,
+        team_codes=_team_codes_for(X),
+        team_correlation=getattr(cfg.modelling.simulation, "team_correlation", 0.0),
     )
-    
+
     p_top3 = prob_matrix[:, :3].sum(axis=1)
     p_win = prob_matrix[:, 0]
     order = np.argsort(mean_pos)
@@ -1127,6 +1141,8 @@ def run_predictions_for_event(
                             min_noise=cfg.modelling.simulation.min_noise,
                             max_penalty_base=cfg.modelling.simulation.max_penalty_base,
                             compute_pairwise=return_results,
+                            team_codes=_team_codes_for(X),
+                            team_correlation=getattr(cfg.modelling.simulation, "team_correlation", 0.0),
                         )
 
                         # Analytical probabilities — blend weight is configurable
