@@ -183,7 +183,13 @@ def test_build_hist_training_X_boost_factors_are_wired_through(boost_kwarg, affe
         f"{boost_kwarg} did not change {affected_col} — boost not wired to its index"
     )
     for col in boosted.select_dtypes("number").columns:
+        if col == "grid":
+            # Qualifying samples intentionally have no grid (imputed downstream)
+            continue
         assert np.all(np.isfinite(boosted[col].values))
+    # Outcome targets must be present and labelled for every sample.
+    assert "y_pace" in boosted.columns
+    assert boosted["y_pace"].notna().all()
 
 
 def test_build_hist_training_X_weather_effect(tmp_path):

@@ -84,21 +84,27 @@ def compute_event_metrics(ranked_df: pd.DataFrame,
     actual_order_ids = df.sort_values("actual_position", na_position="last")[drv_col].tolist() if drv_col else []
     acc_top3 = accuracy_top_k(pred_order_ids, actual_order_ids, k=3) if drv_col else np.nan
 
+    # Probability metrics: rows of prob_matrix/pairwise must align 1:1 with df
+    # rows (predict.py stores them re-ordered to match the ranked frame).  Rows
+    # with missing actuals (substitute drivers etc.) are masked out rather than
+    # disqualifying the whole event.
+    valid_mask = df["actual_position"].notna().to_numpy()
+
     brier_pw = np.nan
-    if pairwise is not None and df["actual_position"].notna().all():
-        act_pos = df["actual_position"].to_numpy(dtype=int)
-        brier_pw = brier_pairwise(pairwise, act_pos)
+    if pairwise is not None and getattr(pairwise, "shape", (0,))[0] == df.shape[0] and valid_mask.sum() >= 2:
+        idx = np.where(valid_mask)[0]
+        act_pos = df["actual_position"].to_numpy(dtype=float)[idx].astype(int)
+        brier_pw = brier_pairwise(pairwise[np.ix_(idx, idx)], act_pos)
 
     crps = np.nan
-    if prob_matrix is not None and df["actual_position"].notna().all():
+    if prob_matrix is not None and getattr(prob_matrix, "shape", (0,))[0] == df.shape[0] and valid_mask.any():
         N = prob_matrix.shape[1]
-        if N == df.shape[0]:
-            # Vectorized CRPS computation: O(N^2) using NumPy broadcasting (~40x speedup)
-            act_pos = df["actual_position"].to_numpy(dtype=int)
-            F = np.cumsum(prob_matrix, axis=1)
-            j_idx = np.arange(N)
-            H = (j_idx[None, :] >= (act_pos[:, None] - 1)).astype(float)
-            crps = float(np.mean((F - H) ** 2))
+        # Vectorized CRPS computation: O(N^2) using NumPy broadcasting
+        act_pos = df["actual_position"].to_numpy(dtype=float)[valid_mask].astype(int)
+        F = np.cumsum(prob_matrix[valid_mask], axis=1)
+        j_idx = np.arange(N)
+        H = (j_idx[None, :] >= (act_pos[:, None] - 1)).astype(float)
+        crps = float(np.mean((F - H) ** 2))
 
     return {
         "season": season,
