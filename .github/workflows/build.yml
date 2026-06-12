@@ -2,9 +2,12 @@ name: "Build"
 
 on:
   push:
-    branches: ["**"]
-  release:
-    types: [published]
+    branches-ignore:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/workflows/**"
   workflow_call:
     inputs:
       is_release:
@@ -33,7 +36,7 @@ jobs:
     needs: [tests]
     if: needs.tests.result == 'success'
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -46,8 +49,8 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          # Find the latest v*.*.* release tag, default to v0.0.0
-          LATEST=$(git tag -l 'v*.*.*' --sort=-v:refname | grep -v '-' | head -n 1)
+          # Find the latest stable v*.*.* tag, default to v0.0.0
+          LATEST=$(git tag -l 'v*.*.*' --sort=-v:refname | grep -vE -- '-' | head -n 1)
           if [ -z "$LATEST" ]; then
             LATEST="v0.0.0"
           fi
@@ -62,20 +65,30 @@ jobs:
             echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
             echo "is_release=true" >> "$GITHUB_OUTPUT"
             echo "Release version: ${RELEASE_TAG#v}"
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            # For releases, use the release tag directly
-            RELEASE_TAG="${{ github.event.release.tag_name }}"
-            echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "Release version: ${RELEASE_TAG#v}"
           else
-            # For prerelease builds, bump patch and add pre suffix
-            PATCH=$((PATCH + 1))
-            # Use github.run_number since workflow_run is gone
-            PRERELEASE="${MAJOR}.${MINOR}.${PATCH}-pre.${{ github.run_number }}"
-            echo "version=$PRERELEASE" >> "$GITHUB_OUTPUT"
+            # Dev builds target the next (unreleased) version.
+            NEXT_PATCH=$((PATCH + 1))
+            BASE="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+
+            # Number dev builds from 1 for the upcoming version, resetting
+            # back to 1 whenever the target version changes (i.e. after a release).
+            LAST_DEV=$(git tag -l "v${BASE}-dev.*" --sort=-v:refname | head -n 1)
+            if [ -z "$LAST_DEV" ]; then
+              DEV_NUM=1
+            else
+              LAST_NUM=$(echo "$LAST_DEV" | sed -E "s/^v${BASE}-dev\.([0-9]+)\$/\1/")
+              DEV_NUM=$((LAST_NUM + 1))
+            fi
+
+            DEV_VERSION="${BASE}-dev.${DEV_NUM}"
+            echo "version=$DEV_VERSION" >> "$GITHUB_OUTPUT"
             echo "is_release=false" >> "$GITHUB_OUTPUT"
-            echo "Prerelease version: $PRERELEASE"
+            echo "Dev version: $DEV_VERSION"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "v${DEV_VERSION}"
+            git push origin "v${DEV_VERSION}"
           fi
 
       - name: Set up Docker Buildx
@@ -88,16 +101,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Prerelease tags: version, branch, sha, and static prerelease tag
-      - name: Extract Docker metadata (prerelease)
+      # Dev tags: version, branch, sha, and static dev tag
+      - name: Extract Docker metadata (dev)
         if: steps.version.outputs.is_release == 'false'
-        id: meta-prerelease
+        id: meta-dev
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
-            type=raw,value=prerelease
+            type=raw,value=dev
             type=ref,event=branch
             type=sha
 
@@ -118,7 +131,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ steps.version.outputs.is_release == 'true' && steps.meta-release.outputs.tags || steps.meta-prerelease.outputs.tags }}
-          labels: ${{ steps.version.outputs.is_release == 'true' && steps.meta-release.outputs.labels || steps.meta-prerelease.outputs.labels }}
+          tags: ${{ steps.version.outputs.is_release == 'true' && steps.meta-release.outputs.tags || steps.meta-dev.outputs.tags }}
+          labels: ${{ steps.version.outputs.is_release == 'true' && steps.meta-release.outputs.labels || steps.meta-dev.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
