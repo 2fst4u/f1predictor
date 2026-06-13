@@ -13,17 +13,22 @@ on:
           - major
         default: patch
 
+# A release must be atomic: the git tag and GitHub Release are only published
+# AFTER the Docker image has been built and pushed. Previously the tag/release
+# were created first and the image was built in a separate downstream job, so any
+# build failure (including a flaky second test run tripping the coverage gate)
+# left a published "stable release" with no corresponding container image.
+#
+# Flow: version -> build-release (runs tests, then builds & pushes image) ->
+# publish (creates tag + GitHub Release). Tests run exactly once, inside
+# build.yml, where they gate the image build.
 jobs:
-  tests:
-    name: "Tests"
-    uses: ./.github/workflows/tests.yml
-
-  release:
-    name: "Release"
-    needs: tests
+  # Resolve the next version up-front from the existing stable tags so the image
+  # can be built and tagged before the new git tag exists. build.yml injects this
+  # version into the build, so the tag itself is not required at build time.
+  version:
+    name: "Resolve next version"
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     outputs:
       version: ${{ steps.next.outputs.version }}
 
@@ -76,27 +81,46 @@ jobs:
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "Next version: $NEXT (bump=$BUMP)"
 
+  # Build & push the release image. build.yml runs the test suite before building,
+  # so this gates the entire release on a green test run and a successful image
+  # push. If anything here fails, no tag or GitHub Release is created.
+  build-release:
+    name: "Build Release Image"
+    needs: version
+    uses: ./.github/workflows/build.yml
+    with:
+      is_release: true
+      release_tag: ${{ needs.version.outputs.version }}
+    permissions:
+      contents: read
+      packages: write
+
+  # Only tag the commit and publish the GitHub Release once the image exists.
+  publish:
+    name: "Publish Release"
+    needs: [version, build-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
       - name: Create and push tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ steps.next.outputs.version }}" -m "Release ${{ steps.next.outputs.version }}"
-          git push origin "${{ steps.next.outputs.version }}"
+          git tag -a "${{ needs.version.outputs.version }}" -m "Release ${{ needs.version.outputs.version }}"
+          git push origin "${{ needs.version.outputs.version }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.next.outputs.version }}
-          name: ${{ steps.next.outputs.version }}
+          tag_name: ${{ needs.version.outputs.version }}
+          name: ${{ needs.version.outputs.version }}
           generate_release_notes: true
-
-  build-release:
-    name: "Build Release Image"
-    needs: release
-    uses: ./.github/workflows/build.yml
-    with:
-      is_release: true
-      release_tag: ${{ needs.release.outputs.version }}
-    permissions:
-      contents: read
-      packages: write
