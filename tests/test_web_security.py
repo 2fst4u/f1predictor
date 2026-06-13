@@ -64,6 +64,34 @@ def client_with_auth(client):
         fweb._prediction_manager.stop()
 
 
+def test_get_settings_authenticated(client_with_auth):
+    response = client_with_auth.get("/api/settings")
+    assert response.status_code == 200
+    assert isinstance(response.json(), dict)
+
+
+def test_update_settings_create_and_update(client_with_auth):
+    # First write creates the setting (else branch)...
+    response = client_with_auth.post(
+        "/api/settings", json=[{"key": "ui_test_key", "value": "v1"}]
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "success"}
+    assert client_with_auth.get("/api/settings").json().get("ui_test_key") == "v1"
+
+    # ...second write updates the existing row (if branch).
+    response = client_with_auth.post(
+        "/api/settings", json=[{"key": "ui_test_key", "value": "v2"}]
+    )
+    assert response.status_code == 200
+    assert client_with_auth.get("/api/settings").json().get("ui_test_key") == "v2"
+
+
+def test_settings_require_auth(client):
+    # Without a token the settings endpoints are rejected.
+    assert client.get("/api/settings").status_code == 401
+
+
 def test_webhook_ssrf_protection_invalid_scheme(client_with_auth):
     response = client_with_auth.post("/api/settings/test-webhook", json={"url": "file:///etc/passwd"})
     assert response.status_code == 400
