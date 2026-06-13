@@ -729,37 +729,61 @@ class PredictionManager:
                 # Format session title (e.g. race -> Race, sprint_qualifying -> Sprint Qualifying)
                 display_sess = sess_name.replace("_", " ").title()
 
-                # Build weather description
-                weather_str = ""
-                if weather and weather.get("temp_mean") is not None:
-                    t = weather.get("temp_mean")
-                    r = weather.get("rain_sum", 0)
-                    w = weather.get("wind_mean", 0)
-                    weather_str = f"\n🌡️ **{t:.0f}°C** | 💧 **{r:.1f}mm** | 🌬️ **{w:.0f}km/h**"
+                # Concise summary of what triggered this update
+                changes_str = ", ".join(diff.changed_variables) if diff.changed_variables else "Prediction refreshed"
 
                 embed = {
-                    "author": {"name": "F1 Outcome Predictor"},
+                    "author": {"name": "F1 Outcome Predictor • Prediction Update"},
                     "title": f"🏁 {event_title} ({display_sess})",
-                    "description": f"**Detected changes:** {', '.join(diff.changed_variables)}.{weather_str}",
+                    "description": f"*{changes_str}*",
                     "color": 0xe10600,  # F1 Red
                     "timestamp": diff.timestamp,
                     "fields": [],
-                    "footer": {"text": f"Model v{self.cfg.app.model_version}"}
+                    "footer": {"text": f"Model v{self.cfg.app.model_version} • {len(diff.movements)} position change(s)"}
                 }
 
-                # Top Movers highlight
+                # Weather conditions as a clean single-line field
+                if weather and weather.get("temp_mean") is not None:
+                    t = weather.get("temp_mean")
+                    r = weather.get("rain_sum", 0) or 0
+                    w = weather.get("wind_mean", 0) or 0
+                    embed["fields"].append({
+                        "name": "Conditions",
+                        "value": f"🌡️ {t:.0f}°C 💧 {r:.1f}mm 🌬️ {w:.0f}km/h",
+                        "inline": False
+                    })
+
+                # Highlight biggest gainers and losers side by side
                 top_gains = sorted([m for m in diff.movements if m.direction > 0],
                                   key=lambda m: m.direction, reverse=True)[:3]
+                top_drops = sorted([m for m in diff.movements if m.direction < 0],
+                                  key=lambda m: m.direction)[:3]
+                mover_field_count = 0
                 if top_gains:
                     movers_text = "\n".join([f"⬆️ **{m.code}** (+{m.direction} positions)" for m in top_gains])
                     embed["fields"].append({
                         "name": "🚀 Movers & Shakers",
                         "value": movers_text,
-                        "inline": False
+                        "inline": True
                     })
+                    mover_field_count += 1
+                if top_drops:
+                    drops_text = "\n".join([f"⬇️ **{m.code}** ({m.direction} positions)" for m in top_drops])
+                    embed["fields"].append({
+                        "name": "📉 Sliding Back",
+                        "value": drops_text,
+                        "inline": True
+                    })
+                    mover_field_count += 1
+
+                # Pad the mover row so the Top 10 / Bottom 10 grid always begins on
+                # its own row (Discord packs up to 3 inline fields per row).
+                for _ in range((3 - (mover_field_count % 3)) % 3):
+                    embed["fields"].append({"name": "​", "value": "​", "inline": True})
 
                 # Create position maps for movement indicators
                 movements = {m.driver_id: m for m in diff.movements}
+                medals = {1: "🥇", 2: "🥈", 3: "🥉"}
 
                 # Build the grid display in two columns
                 sorted_preds = sorted(predictions, key=lambda x: int(x.get("predicted_position", 99) or 99))
@@ -772,14 +796,16 @@ class PredictionManager:
                         code = p.get("code", "???")
                         d_id = p.get("driverId")
 
+                        prefix = medals.get(pos_val, "▫️")
+
                         m = movements.get(d_id)
                         if m:
                             icon = "⬆️" if m.direction > 0 else "⬇️"
                             diff_val = f"{icon}{abs(m.direction)}"
                         else:
-                            diff_val = "⏺️"
+                            diff_val = " "  # en space keeps unchanged rows tidy
 
-                        lines.append(f"`P{pos_str}` **{code}** {diff_val}")
+                        lines.append(f"{prefix} `P{pos_str}` **{code}** {diff_val}")
                     return "\n".join(lines) or "No data"
 
                 embed["fields"].append({
@@ -789,7 +815,7 @@ class PredictionManager:
                 })
                 embed["fields"].append({
                     "name": "Bottom 10",
-                    "value": format_grid_lines(sorted_preds[10:]),
+                    "value": format_grid_lines(sorted_preds[10:20]),
                     "inline": True
                 })
 
