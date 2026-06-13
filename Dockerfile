@@ -34,8 +34,16 @@ COPY pyproject.toml .
 COPY README.md .
 COPY f1pred/ f1pred/
 
+# CI injects the resolved version here so setuptools-scm doesn't have to derive
+# it from git tags during the build. The build workflow tags dev images with
+# prerelease versions (e.g. 0.2.1-dev.5) that setuptools-scm's default scheme
+# cannot bump; passing the version explicitly avoids that failure. Local builds
+# that omit VERSION fall back to normal git-based version detection.
+ARG VERSION=""
+
 # Build the application wheel (this also generates f1pred/_version.py automatically)
-RUN python -m pip wheel . --no-deps -w dist
+RUN if [ -n "$VERSION" ]; then export SETUPTOOLS_SCM_PRETEND_VERSION="$VERSION"; fi; \
+    python -m pip wheel . --no-deps -w dist
 
 # --- Stage 2: Final Runtime Stage ---
 FROM python:3.12-alpine

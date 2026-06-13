@@ -582,12 +582,13 @@ async def test_webhook(
     try:
         payload = {
             "embeds": [{
-                "title": "🧪 F1 Predictor Webhook Test",
-                "description": "Your Discord webhook integration is working correctly!",
+                "author": {"name": "F1 Outcome Predictor • Connection Test"},
+                "title": "✅ Webhook Connected",
+                "description": "Your Discord webhook is set up correctly. Prediction updates will arrive here.",
                 "color": 0x22c55e,  # Green
                 "fields": [
-                    {"name": "Status", "value": "Success", "inline": True},
-                    {"name": "Timestamp", "value": datetime.now().isoformat(), "inline": True}
+                    {"name": "Status", "value": "🟢 Success", "inline": True},
+                    {"name": "Sent", "value": f"<t:{int(datetime.now().timestamp())}:R>", "inline": True}
                 ],
                 "footer": {"text": f"F1 Predictor v{__version__}"}
             }]
