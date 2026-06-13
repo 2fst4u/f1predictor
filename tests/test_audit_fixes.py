@@ -118,8 +118,31 @@ class TestFormComponents:
                 current_season=2024, boost_factor=boost, sprint_boost_factor=boost,
             )
             expected_val = expected.loc[expected["driverId"] == "max", "form_index"].iloc[0]
-            got = (row.s_pre + boost * row.s_cur) / (row.w_pre + boost * row.w_cur)
+            # form(b_r, b_s) = (s_pre + b_r*s_cur_race + b_s*s_cur_sprint)
+            #                / (w_pre + b_r*w_cur_race + b_s*w_cur_sprint)
+            num = row.s_pre + boost * row.s_cur_race + boost * row.s_cur_sprint
+            den = row.w_pre + boost * row.w_cur_race + boost * row.w_cur_sprint
+            got = num / den
             assert got == pytest.approx(expected_val, rel=1e-9), f"boost={boost}"
+
+    def test_race_and_sprint_buckets_are_separated(self):
+        # A current-season sprint result lands in the sprint bucket, a race
+        # result in the race bucket, so the two boosts can move independently.
+        rows = [
+            {"season": 2024, "round": 1, "session": "race",
+             "date": REF - timedelta(days=20), "driverId": "max", "position": 2,
+             "points": 18.0, "status": "Finished"},
+            {"season": 2024, "round": 1, "session": "sprint",
+             "date": REF - timedelta(days=21), "driverId": "max", "position": 5,
+             "points": 4.0, "status": "Finished"},
+        ]
+        out = compute_form_components(
+            pd.DataFrame(rows), ref_date=REF, half_life_days=120, current_season=2024,
+        )
+        row = out[out["driverId"] == "max"].iloc[0]
+        assert row.w_cur_race > 0 and row.w_cur_sprint > 0
+        assert row.s_cur_race / row.w_cur_race == pytest.approx(-2.0)
+        assert row.s_cur_sprint / row.w_cur_sprint == pytest.approx(-5.0)
 
     def test_empty_history(self):
         out = compute_form_components(pd.DataFrame(), ref_date=REF, half_life_days=120, current_season=2024)
@@ -133,8 +156,9 @@ class TestFormComponents:
             sessions=("qualifying", "sprint_qualifying"), pos_col="qpos",
         )
         row = out[out["driverId"] == "max"].iloc[0]
-        assert row.w_cur > 0 and row.w_pre == 0
-        assert row.s_cur / row.w_cur == pytest.approx(-3.0)
+        # A plain "qualifying" session is a non-sprint -> race bucket
+        assert row.w_cur_race > 0 and row.w_pre == 0
+        assert row.s_cur_race / row.w_cur_race == pytest.approx(-3.0)
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +346,99 @@ def test_team_codes_for_roster():
     assert codes[0] != codes[2]
     assert codes[3] == -1
     assert _team_codes_for(pd.DataFrame({"foo": [1]})) is None
+
+
+# ---------------------------------------------------------------------------
+# Calibration: previously-static params are now on-the-fly calibrated
+# ---------------------------------------------------------------------------
+class TestCalibrationGrids:
+    def test_param_vector_includes_formerly_static_params(self):
+        import f1pred.calibrate as c
+        assert c.N_PARAMS == 27
+        assert len(c.PARAM_BOUNDS) == 27
+        assert len(c.PARAM_DEFAULTS) == 27
+        # Every default within its bound
+        for i, (lo, hi) in enumerate(c.PARAM_BOUNDS):
+            assert lo <= c.PARAM_DEFAULTS[i] <= hi
+        # Interpolation bounds must stay inside their grids so brackets exist
+        assert c.PARAM_BOUNDS[23][0] >= c.H_BASE_GRID[0]
+        assert c.PARAM_BOUNDS[23][1] <= c.H_BASE_GRID[-1]
+        assert c.PARAM_BOUNDS[24][0] >= c.H_TEAM_GRID[0]
+        assert c.PARAM_BOUNDS[24][1] <= c.H_TEAM_GRID[-1]
+        assert c.PARAM_BOUNDS[25][0] >= c.ELO_K_GRID[0]
+        assert c.PARAM_BOUNDS[25][1] <= c.ELO_K_GRID[-1]
+
+    def test_unpack_emits_calibrated_recency_elo_team_corr(self):
+        import f1pred.calibrate as c
+        w = list(c.PARAM_DEFAULTS)
+        w[23] = 200.0   # half_life_base
+        w[24] = 300.0   # half_life_team
+        w[25] = 30.0    # elo_k
+        w[26] = 0.5     # team_correlation
+        w[22] = 12.0    # sprint weight
+        out = c._unpack_weights(w)
+        assert out["recency"]["half_life_base"] == pytest.approx(200.0)
+        assert out["recency"]["half_life_team"] == pytest.approx(300.0)
+        assert out["elo"]["k"] == pytest.approx(30.0)
+        assert out["simulation"]["team_correlation"] == pytest.approx(0.5)
+        assert out["blending"]["current_season_sprint_weight"] == pytest.approx(12.0)
+        # pack round-trips length
+        assert len(c._pack_weights(out)) == c.N_PARAMS
+
+    def test_unpack_pads_short_vectors(self):
+        import f1pred.calibrate as c
+        # A legacy 22-length vector still unpacks (padded with defaults)
+        out = c._unpack_weights(c.PARAM_DEFAULTS[:22])
+        assert out["recency"]["half_life_base"] == pytest.approx(c.PARAM_DEFAULTS[23])
+        assert out["simulation"]["team_correlation"] == pytest.approx(c.PARAM_DEFAULTS[26])
+
+    def test_log_interp_coeffs_brackets_and_blends(self):
+        from f1pred.calibrate import _log_interp_coeffs, H_BASE_GRID
+        lo, hi, t = _log_interp_coeffs(H_BASE_GRID, H_BASE_GRID[0])
+        assert lo == 0 and t == pytest.approx(0.0)
+        lo, hi, t = _log_interp_coeffs(H_BASE_GRID, H_BASE_GRID[-1])
+        assert hi == len(H_BASE_GRID) - 1 and t == pytest.approx(1.0)
+        # A value at the geometric midpoint of a cell blends ~0.5
+        mid = (H_BASE_GRID[0] * H_BASE_GRID[1]) ** 0.5
+        lo, hi, t = _log_interp_coeffs(H_BASE_GRID, mid)
+        assert (lo, hi) == (0, 1)
+        assert t == pytest.approx(0.5, abs=1e-9)
+        # Out-of-range clamps into the grid
+        _, _, t_low = _log_interp_coeffs(H_BASE_GRID, 1.0)
+        assert 0.0 <= t_low <= 1.0
+
+    def test_fit_model_grids_shapes(self):
+        from f1pred.calibrate import _fit_model_grids, H_TEAM_GRID, ELO_K_GRID
+        drivers = [f"d{i}" for i in range(6)]
+        teams = [f"t{i // 2}" for i in range(6)]
+        rows = []
+        for rnd in range(1, 6):
+            d = REF - timedelta(days=20 * rnd)
+            for pos, (drv, tm) in enumerate(zip(drivers, teams), 1):
+                rows.append({"season": 2024, "round": rnd, "session": "race", "date": d,
+                             "driverId": drv, "constructorId": tm, "position": pos,
+                             "qpos": pos, "points": max(0, 26 - pos), "status": "Finished"})
+        hist = pd.DataFrame(rows)
+        X = pd.DataFrame({"driverId": drivers, "constructorId": teams})
+        elo, bt, mixed = _fit_model_grids(hist, X, "race")
+        assert len(elo) == len(H_TEAM_GRID)
+        assert len(elo[0]) == len(ELO_K_GRID)
+        assert len(elo[0][0]) == len(X)
+        assert len(bt) == len(H_TEAM_GRID) and len(bt[0]) == len(X)
+        assert len(mixed) == len(H_TEAM_GRID)
+
+    def test_form_component_grids_cover_all_half_lives(self):
+        from f1pred.calibrate import _form_component_grids, H_BASE_GRID
+        rows = []
+        for rnd in range(1, 5):
+            d = REF - timedelta(days=30 * rnd)
+            rows.append({"season": 2024, "round": rnd, "session": "race", "date": d,
+                         "driverId": "max", "position": rnd, "points": 10.0, "status": "Finished"})
+        grids = _form_component_grids(pd.DataFrame(rows), REF, 2024)
+        assert len(grids) == len(H_BASE_GRID)
+        # Each grid point maps the driver to a 6-tuple of components
+        assert all("max" in g for g in grids)
+        assert all(len(g["max"]) == 6 for g in grids)
 
 
 def test_collect_hist_weather_reads_cache(tmp_path):

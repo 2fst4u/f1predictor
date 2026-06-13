@@ -680,16 +680,21 @@ def compute_form_components(df: pd.DataFrame, ref_date: datetime, half_life_days
                             pos_col: str = "position") -> pd.DataFrame:
     """Per-driver weighted-sum components of the form index, split by season.
 
-    Returns columns ``driverId, s_pre, w_pre, s_cur, w_cur`` where the boosted
-    form index for a current-season boost factor ``b`` is exactly::
+    Returns columns ``driverId, s_pre, w_pre, s_cur_race, w_cur_race,
+    s_cur_sprint, w_cur_sprint`` where the boosted form index for a
+    current-season race boost ``b_r`` and sprint boost ``b_s`` is exactly::
 
-        form(b) = (s_pre + b * s_cur) / (w_pre + b * w_cur)
+        form(b_r, b_s) = (s_pre + b_r*s_cur_race + b_s*s_cur_sprint)
+                       / (w_pre + b_r*w_cur_race + b_s*w_cur_sprint)
 
     This lets the calibration objective recompute the *production* form formula
-    for any candidate boost without re-scanning history.  ``s`` components use
+    for any candidate boosts without re-scanning history.  ``s`` components use
     pos_score = -position (higher is better), matching compute_form_indices.
+    Current-season rows whose session name contains "sprint" land in the
+    sprint bucket; everything else in the race bucket.
     """
-    cols = ["driverId", "s_pre", "w_pre", "s_cur", "w_cur"]
+    cols = ["driverId", "s_pre", "w_pre",
+            "s_cur_race", "w_cur_race", "s_cur_sprint", "w_cur_sprint"]
     if df is None or df.empty:
         return pd.DataFrame(columns=cols)
 
@@ -702,18 +707,25 @@ def compute_form_components(df: pd.DataFrame, ref_date: datetime, half_life_days
     w = exponential_weights(dfg["date"], ref_date, half_life_days)
     is_cur = (dfg["season"] == current_season).values if "season" in dfg.columns \
         else np.zeros(len(dfg), dtype=bool)
+    is_sprint = dfg["session"].astype(str).str.contains("sprint").values
 
     codes, uniques = pd.factorize(dfg["driverId"])
     n = len(uniques)
-    w_pre = np.bincount(codes, weights=np.where(is_cur, 0.0, w), minlength=n)
-    s_pre = np.bincount(codes, weights=np.where(is_cur, 0.0, w * score), minlength=n)
-    w_cur = np.bincount(codes, weights=np.where(is_cur, w, 0.0), minlength=n)
-    s_cur = np.bincount(codes, weights=np.where(is_cur, w * score, 0.0), minlength=n)
+
+    def _agg(mask):
+        w_m = np.where(mask, w, 0.0)
+        return (np.bincount(codes, weights=w_m * score, minlength=n),
+                np.bincount(codes, weights=w_m, minlength=n))
+
+    s_pre, w_pre = _agg(~is_cur)
+    s_cur_race, w_cur_race = _agg(is_cur & ~is_sprint)
+    s_cur_sprint, w_cur_sprint = _agg(is_cur & is_sprint)
 
     return pd.DataFrame({
         "driverId": uniques,
         "s_pre": s_pre, "w_pre": w_pre,
-        "s_cur": s_cur, "w_cur": w_cur,
+        "s_cur_race": s_cur_race, "w_cur_race": w_cur_race,
+        "s_cur_sprint": s_cur_sprint, "w_cur_sprint": w_cur_sprint,
     })
 
 

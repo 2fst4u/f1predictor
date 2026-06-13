@@ -8,22 +8,21 @@ noise model, and a DNF Brier using the exact estimate_dnf_probabilities
 formula), so ranking AND probability outputs are both fitted to outcomes.
 
 Every parameter in the optimisation vector receives real gradient signal from
-the objective.  Parameters that cannot be exercised without re-fitting all
-precomputed components per candidate (recency half-lives, Elo K, the sprint
-season weight) are NOT optimised: they are emitted as fixed defaults (see
-FIXED_DEFAULTS) so the weights-file schema stays complete and production
-behaviour stays explicit.
+the objective — including the recency half-lives, Elo K and the teammate
+noise correlation, which are exercised through log-interpolation over
+component grids precomputed during data collection (form sufficient
+statistics per half-life; Elo/BT/Mixed predictions per (k, half-life) point;
+teammate-aware pairwise probabilities for the correlation).
 
-Calibrated parameter groups:
+Calibrated parameter groups (all optimised at runtime):
     - blending: GBM/baseline weights, team factor, grid stickiness,
-                season weights, qualifying factor, analytical win weight
+                season weights (race/qualifying/sprint), qualifying factor,
+                analytical win weight
     - ensemble: w_gbm/w_elo/w_bt/w_mixed (race + qualifying sets)
     - dnf:      alpha, beta, driver_weight, team_weight
-    - simulation: noise_factor, min_noise
-Fixed (not optimised, emitted as defaults):
+    - simulation: noise_factor, min_noise, team_correlation
     - recency:  half_life_base, half_life_team
     - elo:      k (Elo update strength)
-    - blending.current_season_sprint_weight
 """
 from __future__ import annotations
 
@@ -51,11 +50,15 @@ logger = get_logger(__name__)
 # Changing the order here requires updating _pack / _unpack helpers below.
 
 # Every parameter in this vector receives a real gradient from the objective
-# function (rank terms, probability terms, or the DNF term).  Parameters that
-# CANNOT be exercised cheaply by the objective — recency half-lives, Elo K and
-# the sprint season weight — are intentionally NOT in the vector: they are
-# emitted as fixed defaults (see FIXED_DEFAULTS) instead of pretending to be
-# calibrated while only ever being moved by the regulariser.
+# function (rank terms, probability terms, or the DNF term):
+#   - blending / season weights / grid / ensemble weights -> rank terms using
+#     the exact production formulas;
+#   - noise_factor / min_noise / analytical_win_weight / team_correlation ->
+#     analytic pairwise & winner Brier mirroring the Monte Carlo noise model;
+#   - DNF alpha/beta/driver/team -> Brier on actual DNFs;
+#   - half_life_base / half_life_team / elo_k -> log-interpolation over
+#     component grids precomputed during data collection (form sufficient
+#     statistics per half-life; Elo/BT/Mixed predictions per (k, half-life)).
 PARAM_NAMES = [
     # -- blending (0-3) --
     "gbm_weight",               # 0
@@ -88,9 +91,23 @@ PARAM_NAMES = [
     "ens_elo_quali",            # 19
     "ens_bt_quali",             # 20
     "ens_mixed_quali",          # 21
+    # -- previously fixed, now calibrated (22-26) --
+    "current_season_sprint_weight",  # 22
+    "half_life_base",           # 23
+    "half_life_team",           # 24
+    "elo_k",                    # 25
+    "team_correlation",         # 26
 ]
 
 N_PARAMS = len(PARAM_NAMES)
+
+# Component grids used during data collection.  The objective log-interpolates
+# between grid points, giving half_life_base/half_life_team/elo_k genuine
+# gradients without re-fitting models inside the optimiser.  Bounds for these
+# parameters must stay within their grids so interpolation always brackets.
+H_BASE_GRID = (60.0, 120.0, 240.0, 480.0)
+H_TEAM_GRID = (120.0, 240.0, 480.0)
+ELO_K_GRID = (10.0, 25.0, 50.0)
 
 # Bounds for L-BFGS-B  (lower, upper) per parameter
 PARAM_BOUNDS = [
@@ -122,6 +139,11 @@ PARAM_BOUNDS = [
     (0.0, 0.5),     # 19 ens_elo_quali   (capped lower — race-only model)
     (0.0, 0.5),     # 20 ens_bt_quali    (capped lower — race-only model)
     (0.0, 0.5),     # 21 ens_mixed_quali (capped lower — race-only model)
+    (1.0, 50.0),    # 22 current_season_sprint_weight
+    (60.0, 480.0),  # 23 half_life_base  (within H_BASE_GRID)
+    (120.0, 480.0), # 24 half_life_team  (within H_TEAM_GRID)
+    (10.0, 50.0),   # 25 elo_k           (within ELO_K_GRID)
+    (0.0, 0.8),     # 26 team_correlation
 ]
 
 # Default / initial guess (matches config.yaml defaults)
@@ -148,19 +170,12 @@ PARAM_DEFAULTS = [
     0.1,    # 19 ens_elo_quali
     0.1,    # 20 ens_bt_quali
     0.1,    # 21 ens_mixed_quali
+    8.0,    # 22 current_season_sprint_weight
+    120.0,  # 23 half_life_base
+    240.0,  # 24 half_life_team
+    20.0,   # 25 elo_k
+    0.25,   # 26 team_correlation
 ]
-
-# Parameters used by production but NOT optimised here, because the objective
-# cannot give them a gradient without re-fitting all components per candidate:
-#   - recency half-lives feed every precomputed component (form, Elo, BT, Mixed)
-#   - elo_k changes the Elo fit itself
-#   - the sprint season weight has too few sprint events to fit reliably
-# They are emitted verbatim so the weights-file schema stays complete.
-FIXED_DEFAULTS = {
-    "recency": {"half_life_base": 120.0, "half_life_team": 240.0},
-    "elo": {"k": 20.0},
-    "current_season_sprint_weight": 8.0,
-}
 
 
 def _calibration_version() -> str:
@@ -177,7 +192,8 @@ def _calibration_version() -> str:
         + str(PARAM_BOUNDS)
         + str(PARAM_DEFAULTS)
         + str(N_PARAMS)
-        + "v3_outcome_targets_prob_calibration"
+        + str(H_BASE_GRID) + str(H_TEAM_GRID) + str(ELO_K_GRID)
+        + "v4_all_params_calibrated"
     )
     return hashlib.sha256(sig.encode()).hexdigest()[:12]
 
@@ -186,14 +202,12 @@ CALIBRATION_VERSION = _calibration_version()
 
 
 def _unpack_weights(w) -> Dict[str, Any]:
-    """Convert flat parameter vector to nested weights dict.
-
-    The recency, elo, and sprint-weight entries are emitted from
-    FIXED_DEFAULTS — they are structural constants, not optimised values
-    (see the note above PARAM_NAMES).
-    """
+    """Convert flat parameter vector to nested weights dict."""
     import numpy as np
     w = np.asarray(w, dtype=float)
+    if len(w) < N_PARAMS:
+        # Short vector (older caller): pad with defaults
+        w = np.concatenate([w, np.asarray(PARAM_DEFAULTS[len(w):], dtype=float)])
 
     # Normalise race ensemble weights to sum to 1
     ens_raw = w[4:8].copy()
@@ -241,7 +255,7 @@ def _unpack_weights(w) -> Dict[str, Any]:
             "current_season_qualifying_weight": float(w[9]),
             "current_quali_factor": float(np.clip(w[10], 0.0, 1.0)),
             "analytical_win_weight": float(np.clip(w[11], 0.0, 1.0)),
-            "current_season_sprint_weight": float(FIXED_DEFAULTS["current_season_sprint_weight"]),
+            "current_season_sprint_weight": float(max(1.0, w[22])),
         },
         "dnf": {
             "alpha": float(max(0.1, w[12])),
@@ -252,9 +266,15 @@ def _unpack_weights(w) -> Dict[str, Any]:
         "simulation": {
             "noise_factor": float(max(0.01, w[16])),
             "min_noise": float(max(0.01, w[17])),
+            "team_correlation": float(np.clip(w[26], 0.0, 1.0)),
         },
-        "recency": dict(FIXED_DEFAULTS["recency"]),
-        "elo": dict(FIXED_DEFAULTS["elo"]),
+        "recency": {
+            "half_life_base": float(np.clip(w[23], H_BASE_GRID[0], H_BASE_GRID[-1])),
+            "half_life_team": float(np.clip(w[24], H_TEAM_GRID[0], H_TEAM_GRID[-1])),
+        },
+        "elo": {
+            "k": float(np.clip(w[25], ELO_K_GRID[0], ELO_K_GRID[-1])),
+        },
     }
 
 
@@ -264,6 +284,8 @@ def _pack_weights(d: Dict[str, Any]) -> list:
     e = d.get("ensemble", {})
     dn = d.get("dnf", {})
     sim = d.get("simulation", {})
+    rec = d.get("recency", {})
+    elo = d.get("elo", {})
 
     return [
         b.get("gbm_weight", PARAM_DEFAULTS[0]),
@@ -288,7 +310,112 @@ def _pack_weights(d: Dict[str, Any]) -> list:
         e.get("w_elo_quali", PARAM_DEFAULTS[19]),
         e.get("w_bt_quali", PARAM_DEFAULTS[20]),
         e.get("w_mixed_quali", PARAM_DEFAULTS[21]),
+        b.get("current_season_sprint_weight", PARAM_DEFAULTS[22]),
+        rec.get("half_life_base", PARAM_DEFAULTS[23]),
+        rec.get("half_life_team", PARAM_DEFAULTS[24]),
+        elo.get("k", PARAM_DEFAULTS[25]),
+        sim.get("team_correlation", PARAM_DEFAULTS[26]),
     ]
+
+
+# Names of the per-driver form sufficient-statistic components stored per
+# half-life grid point (see features.compute_form_components).
+_FORM_COMPONENT_NAMES = ("s_pre", "w_pre", "s_cur_race", "w_cur_race",
+                         "s_cur_sprint", "w_cur_sprint")
+
+
+def _form_component_grids(hist_subset, ref_date, season,
+                          sessions=("race", "sprint"), pos_col="position"):
+    """compute_form_components at every H_BASE_GRID half-life.
+
+    Returns a list (aligned with H_BASE_GRID) of dicts:
+    driverId -> tuple of the six component values.
+    """
+    from .features import compute_form_components
+    grids = []
+    for h in H_BASE_GRID:
+        try:
+            comp_df = compute_form_components(
+                hist_subset, ref_date=ref_date, half_life_days=h,
+                current_season=season, sessions=sessions, pos_col=pos_col,
+            )
+            grids.append({
+                row.driverId: (row.s_pre, row.w_pre, row.s_cur_race,
+                               row.w_cur_race, row.s_cur_sprint, row.w_cur_sprint)
+                for row in comp_df.itertuples()
+            })
+        except Exception as e:
+            logger.warning("[calibrate] Form components failed at h=%s: %s", h, e)
+            grids.append({})
+    return grids
+
+
+def _fit_model_grids(hist_subset, X_evt, session_type):
+    """Fit Elo/BT/Mixed over the component grids and predict on X_evt.
+
+    Returns (elo_preds, bt_preds, mixed_preds) where
+      elo_preds[hi][ki]  -> ndarray over X_evt rows (H_TEAM_GRID x ELO_K_GRID)
+      bt_preds[hi]       -> ndarray over X_evt rows (H_TEAM_GRID)
+      mixed_preds[hi]    -> ndarray over X_evt rows (H_TEAM_GRID)
+    Failed fits yield zeros, matching the previous per-model fallbacks.
+    """
+    import numpy as np
+    from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel
+
+    n = len(X_evt)
+    zeros = np.zeros(n, dtype=float)
+    elo_preds, bt_preds, mixed_preds = [], [], []
+    for h in H_TEAM_GRID:
+        row_elo = []
+        for k in ELO_K_GRID:
+            try:
+                row_elo.append(EloModel(k=k).fit(hist_subset, half_life_days=h)
+                               .predict(X_evt, session_type=session_type))
+            except Exception as e:
+                logger.debug("[calibrate] Elo grid fit failed (h=%s,k=%s): %s", h, k, e)
+                row_elo.append(zeros)
+        elo_preds.append(row_elo)
+        try:
+            bt_preds.append(BradleyTerryModel().fit(hist_subset, half_life_days=h)
+                            .predict(X_evt, session_type=session_type))
+        except Exception as e:
+            logger.debug("[calibrate] BT grid fit failed (h=%s): %s", h, e)
+            bt_preds.append(zeros)
+        try:
+            mixed_preds.append(MixedEffectsLikeModel().fit(hist_subset, half_life_days=h)
+                               .predict(X_evt, session_type=session_type))
+        except Exception as e:
+            logger.debug("[calibrate] Mixed grid fit failed (h=%s): %s", h, e)
+            mixed_preds.append(zeros)
+    return elo_preds, bt_preds, mixed_preds
+
+
+def _add_grid_columns(sample, idx, driver_id, comp_maps, elo_preds, bt_preds, mixed_preds):
+    """Attach per-row grid columns (form components per H_BASE_GRID point and
+    Elo/BT/Mixed predictions per H_TEAM_GRID/ELO_K_GRID point) to a sample."""
+    for hi in range(len(H_BASE_GRID)):
+        comp = comp_maps[hi].get(driver_id, (0.0,) * len(_FORM_COMPONENT_NAMES))
+        for name, val in zip(_FORM_COMPONENT_NAMES, comp):
+            sample[f"form_{name}_h{hi}"] = float(val)
+    for hj in range(len(H_TEAM_GRID)):
+        for ki in range(len(ELO_K_GRID)):
+            arr = elo_preds[hj][ki]
+            sample[f"elo_h{hj}k{ki}"] = float(arr[idx]) if len(arr) > idx else 0.0
+        bt_arr = bt_preds[hj]
+        mx_arr = mixed_preds[hj]
+        sample[f"bt_h{hj}"] = float(bt_arr[idx]) if len(bt_arr) > idx else 0.0
+        sample[f"mixed_h{hj}"] = float(mx_arr[idx]) if len(mx_arr) > idx else 0.0
+
+
+def _log_interp_coeffs(grid, x):
+    """(lower index, upper index, blend t) for log-linear interpolation of x in grid."""
+    import numpy as np
+    g = np.log(np.asarray(grid, dtype=float))
+    lx = float(np.log(np.clip(x, grid[0], grid[-1])))
+    j = int(np.searchsorted(g, lx))
+    j = min(max(j, 1), len(grid) - 1)
+    t = (lx - g[j - 1]) / (g[j] - g[j - 1])
+    return j - 1, j, float(np.clip(t, 0.0, 1.0))
 
 
 class CalibrationManager:
@@ -586,43 +713,23 @@ class CalibrationManager:
                 # History up to this race (strict temporal cutoff)
                 hist_subset = all_hist[all_hist["date"] < d]
 
-                # Fit ensemble models once per event; use race track for race data,
-                # qualifying track for qualifying data (handled at predict-time below).
-                # Elo uses the team recency half-life so historical ratings decay
-                # toward the mean, matching the inference path in predict.py.
-                elo_model_fit = EloModel().fit(
-                    hist_subset,
-                    half_life_days=self.cfg.modelling.recency_half_life_days.team,
+                # Fit ensemble models per event over the component grids, so the
+                # objective can interpolate predictions for any candidate
+                # half_life_team / elo_k instead of using a single fixed value.
+                elo_grid_preds, bt_grid_preds, mixed_grid_preds = _fit_model_grids(
+                    hist_subset, X_evt, "race",
                 )
-                bt_model_fit = BradleyTerryModel().fit(hist_subset)
-                mixed_model_fit = MixedEffectsLikeModel().fit(hist_subset)
-
-                elo = elo_model_fit.predict(X_evt, session_type="race")
-                bt = bt_model_fit.predict(X_evt, session_type="race")
-                mixed = mixed_model_fit.predict(X_evt, session_type="race")
 
                 # Baseline components (boosted form as computed by features.py)
                 base_form = -X_evt["form_index"].fillna(0).astype(float).values
                 base_team = -X_evt.get("team_form_index", pd.Series(0, index=X_evt.index)).fillna(0).astype(float).values
 
-                # Weighted-sum form components so the objective can recompute the
-                # EXACT production form formula for any current_season_weight b:
-                #     form(b) = (s_pre + b*s_cur) / (w_pre + b*w_cur)
-                # (production applies the boost as a multiplicative weight inside
-                # a weighted average — a ratio, not an additive term).
-                try:
-                    from .features import compute_form_components
-                    hl_base = self.cfg.modelling.recency_half_life_days.base
-                    comp_df = compute_form_components(
-                        hist_subset, ref_date=d, half_life_days=hl_base, current_season=s,
-                    )
-                    comp_map = {
-                        row_c.driverId: (row_c.s_pre, row_c.w_pre, row_c.s_cur, row_c.w_cur)
-                        for row_c in comp_df.itertuples()
-                    }
-                except Exception as e:
-                    logger.warning("[calibrate] Form component computation failed: %s", e)
-                    comp_map = {}
+                # Weighted-sum form components at each half-life grid point, so
+                # the objective can recompute the EXACT production form formula
+                #     form(b_r, b_s) = (s_pre + b_r*s_cur_race + b_s*s_cur_sprint)
+                #                    / (w_pre + b_r*w_cur_race + b_s*w_cur_sprint)
+                # for any candidate season weights AND half_life_base.
+                comp_maps = _form_component_grids(hist_subset, d, s)
 
                 # Per-driver / per-team DNF base-rate counts BEFORE this event, so
                 # the objective can recompute estimate_dnf_probabilities exactly
@@ -677,7 +784,6 @@ class CalibrationManager:
 
                     drv_id = row.driverId
                     team_id = getattr(row, "constructorId", None)
-                    s_pre, w_pre, s_cur, w_cur = comp_map.get(drv_id, (0.0, 0.0, 0.0, 0.0))
                     d_k, d_n = (
                         (float(drv_stats.loc[drv_id, "sum"]), float(drv_stats.loc[drv_id, "count"]))
                         if drv_stats is not None and drv_id in drv_stats.index else (0.0, 0.0)
@@ -686,8 +792,9 @@ class CalibrationManager:
                         (float(team_stats.loc[team_id, "sum"]), float(team_stats.loc[team_id, "count"]))
                         if team_stats is not None and team_id in team_stats.index else (0.0, 0.0)
                     )
-                    calibration_data.append({
+                    sample = {
                         "driverId": drv_id,
+                        "team": str(team_id) if team_id is not None else "",
                         "season": s,
                         "round": r,
                         "actual_pos": act_pos,
@@ -695,23 +802,20 @@ class CalibrationManager:
                         "gbm_raw": pace_hat[idx],
                         "base_form": base_form[idx],
                         "base_team": base_team[idx],
-                        # Exact production form components for season-weight gradient
-                        "form_s_pre": float(s_pre), "form_w_pre": float(w_pre),
-                        "form_s_cur": float(s_cur), "form_w_cur": float(w_cur),
                         "grid": float(X_evt.iloc[idx].get("grid", np.nan)),
                         # Current-weekend qualifying position (NaN when unavailable);
                         # lets the objective exercise current_quali_factor exactly as
                         # the production pace blend in models.py does.
                         "current_quali_pos": float(X_evt.iloc[idx].get("current_quali_pos", np.nan)),
-                        "elo": elo[idx] if len(elo) > idx else 0,
-                        "bt": bt[idx] if len(bt) > idx else 0,
-                        "mixed": mixed[idx] if len(mixed) > idx else 0,
                         # DNF base-rate sufficient statistics
                         "dnf_drv_k": d_k, "dnf_drv_n": d_n,
                         "dnf_team_k": t_k, "dnf_team_n": t_n,
                         "dnf_global_k": dnf_gk, "dnf_global_n": float(dnf_gn),
                         "dnf_circuit_mod": circuit_mod,
-                    })
+                    }
+                    _add_grid_columns(sample, idx, drv_id,
+                                      comp_maps, elo_grid_preds, bt_grid_preds, mixed_grid_preds)
+                    calibration_data.append(sample)
 
                 if (i + 1) % 5 == 0:
                     logger.info("[calibrate] Processed %d/%d race events", i + 1, len(events))
@@ -745,37 +849,20 @@ class CalibrationManager:
 
                 hist_subset_q = all_hist[all_hist["date"] < d]
 
-                elo_model_q = EloModel().fit(
-                    hist_subset_q,
-                    half_life_days=self.cfg.modelling.recency_half_life_days.team,
+                elo_grid_q, bt_grid_q, mixed_grid_q = _fit_model_grids(
+                    hist_subset_q, X_evt_q, "qualifying",
                 )
-                bt_model_q = BradleyTerryModel().fit(hist_subset_q)
-                mixed_model_q = MixedEffectsLikeModel().fit(hist_subset_q)
-
-                elo_q = elo_model_q.predict(X_evt_q, session_type="qualifying")
-                bt_q = bt_model_q.predict(X_evt_q, session_type="qualifying")
-                mixed_q = mixed_model_q.predict(X_evt_q, session_type="qualifying")
 
                 base_team_q = -X_evt_q.get("team_form_index", pd.Series(0, index=X_evt_q.index)).fillna(0).astype(float).values
 
-                # Qualifying form components (qpos-based) so the objective can
-                # exercise current_season_qualifying_weight with the exact
-                # production ratio formula.
-                try:
-                    from .features import compute_form_components
-                    hl_base = self.cfg.modelling.recency_half_life_days.base
-                    comp_q_df = compute_form_components(
-                        hist_subset_q, ref_date=d, half_life_days=hl_base,
-                        current_season=s,
-                        sessions=("qualifying", "sprint_qualifying"), pos_col="qpos",
-                    )
-                    comp_q_map = {
-                        row_c.driverId: (row_c.s_pre, row_c.w_pre, row_c.s_cur, row_c.w_cur)
-                        for row_c in comp_q_df.itertuples()
-                    }
-                except Exception as e:
-                    logger.debug("[calibrate] Quali form components failed: %s", e)
-                    comp_q_map = {}
+                # Qualifying form components (qpos-based) at each half-life grid
+                # point so the objective can exercise both
+                # current_season_qualifying_weight and half_life_base with the
+                # exact production ratio formula.
+                comp_maps_q = _form_component_grids(
+                    hist_subset_q, d, s,
+                    sessions=("qualifying", "sprint_qualifying"), pos_col="qpos",
+                )
 
                 # Actual qualifying positions
                 evt_actuals_q = calib_quali[
@@ -787,20 +874,18 @@ class CalibrationManager:
                     act_qpos = actual_qpos_map.get(row.driverId)
                     if act_qpos is None or pd.isna(act_qpos):
                         continue
-                    s_pre, w_pre, s_cur, w_cur = comp_q_map.get(row.driverId, (0.0, 0.0, 0.0, 0.0))
-                    quali_calibration_data.append({
+                    sample = {
                         "driverId": row.driverId,
+                        "team": str(getattr(row, "constructorId", "") or ""),
                         "season": s,
                         "round": r,
                         "actual_pos": act_qpos,
                         "gbm_raw": pace_hat_q[idx],
                         "base_team": base_team_q[idx],
-                        "form_s_pre": float(s_pre), "form_w_pre": float(w_pre),
-                        "form_s_cur": float(s_cur), "form_w_cur": float(w_cur),
-                        "elo": elo_q[idx] if len(elo_q) > idx else 0,
-                        "bt": bt_q[idx] if len(bt_q) > idx else 0,
-                        "mixed": mixed_q[idx] if len(mixed_q) > idx else 0,
-                    })
+                    }
+                    _add_grid_columns(sample, idx, row.driverId,
+                                      comp_maps_q, elo_grid_q, bt_grid_q, mixed_grid_q)
+                    quali_calibration_data.append(sample)
 
             if not calibration_data:
                 logger.warning("[calibrate] No race calibration data generated.")
@@ -821,20 +906,35 @@ class CalibrationManager:
             from scipy.special import ndtr
             from .simulate import NOISE_STD_MULTIPLIER
 
+            n_hb, n_ht, n_k = len(H_BASE_GRID), len(H_TEAM_GRID), len(ELO_K_GRID)
+
+            def _grid_matrix(df, pattern, count):
+                """Stack columns pattern.format(i) for i in range(count) -> (n, count)."""
+                return np.column_stack([
+                    df[pattern.format(i)].values.astype(float) for i in range(count)
+                ])
+
+            def _form_grids(df):
+                """{component name -> (n_rows, n_hb) matrix} of form statistics."""
+                return {
+                    name: _grid_matrix(df, f"form_{name}_h{{}}", n_hb)
+                    for name in _FORM_COMPONENT_NAMES
+                }
+
             # Pre-compute arrays for vectorised race objective
             arr_gbm_raw = df_calib["gbm_raw"].values.astype(float)
             arr_base_team = df_calib["base_team"].values.astype(float)
-            arr_elo = df_calib["elo"].values.astype(float)
-            arr_bt = df_calib["bt"].values.astype(float)
-            arr_mixed = df_calib["mixed"].values.astype(float)
             arr_actual_pos = df_calib["actual_pos"].values.astype(float)
             arr_actual_dnf = df_calib["actual_dnf"].values.astype(float)
 
-            # Form sufficient statistics for the exact production boost formula
-            arr_s_pre = df_calib["form_s_pre"].values.astype(float)
-            arr_w_pre = df_calib["form_w_pre"].values.astype(float)
-            arr_s_cur = df_calib["form_s_cur"].values.astype(float)
-            arr_w_cur = df_calib["form_w_cur"].values.astype(float)
+            # Component grids: Elo over (h_team, k), BT/Mixed over h_team,
+            # form sufficient statistics over h_base.
+            arr_elo_grid = np.stack([
+                _grid_matrix(df_calib, f"elo_h{hj}k{{}}", n_k) for hj in range(n_ht)
+            ], axis=1)  # shape (n_rows, n_ht, n_k)
+            arr_bt_grid = _grid_matrix(df_calib, "bt_h{}", n_ht)
+            arr_mixed_grid = _grid_matrix(df_calib, "mixed_h{}", n_ht)
+            form_grids = _form_grids(df_calib)
 
             # DNF sufficient statistics
             arr_dnf_drv_k = df_calib["dnf_drv_k"].values.astype(float)
@@ -853,6 +953,20 @@ class CalibrationManager:
             unique_events, event_indices = np.unique(event_keys, axis=0, return_inverse=True)
             n_unique = len(unique_events)
             event_masks = [np.where(event_indices == ei)[0] for ei in range(n_unique)]
+
+            def _teammate_matrices(df, masks):
+                """Per-event boolean same-team matrices for correlated-noise pairs."""
+                teams_all = df["team"].astype(str).values if "team" in df.columns \
+                    else np.array([""] * len(df))
+                mats = []
+                for mask in masks:
+                    t = teams_all[mask]
+                    same = (t[:, None] == t[None, :]) & (t[:, None] != "")
+                    np.fill_diagonal(same, False)
+                    mats.append(same)
+                return mats
+
+            team_mats = _teammate_matrices(df_calib, event_masks)
 
             def _event_z(vals: np.ndarray, ev_idx: np.ndarray, n_ev: int) -> np.ndarray:
                 """Vectorised per-event z-score; NaNs contribute 0 and stay 0."""
@@ -900,34 +1014,38 @@ class CalibrationManager:
             if has_quali_data:
                 arr_q_gbm = df_calib_q["gbm_raw"].values.astype(float)
                 arr_q_team = df_calib_q["base_team"].values.astype(float)
-                arr_q_elo = df_calib_q["elo"].values.astype(float)
-                arr_q_bt = df_calib_q["bt"].values.astype(float)
-                arr_q_mixed = df_calib_q["mixed"].values.astype(float)
                 arr_q_actual = df_calib_q["actual_pos"].values.astype(float)
-                arr_q_s_pre = df_calib_q["form_s_pre"].values.astype(float)
-                arr_q_w_pre = df_calib_q["form_w_pre"].values.astype(float)
-                arr_q_s_cur = df_calib_q["form_s_cur"].values.astype(float)
-                arr_q_w_cur = df_calib_q["form_w_cur"].values.astype(float)
+                arr_q_elo_grid = np.stack([
+                    _grid_matrix(df_calib_q, f"elo_h{hj}k{{}}", n_k) for hj in range(n_ht)
+                ], axis=1)
+                arr_q_bt_grid = _grid_matrix(df_calib_q, "bt_h{}", n_ht)
+                arr_q_mixed_grid = _grid_matrix(df_calib_q, "mixed_h{}", n_ht)
+                form_grids_q = _form_grids(df_calib_q)
                 q_event_keys = df_calib_q[["season", "round"]].values
                 _, q_event_indices = np.unique(q_event_keys, axis=0, return_inverse=True)
                 n_q_unique = len(np.unique(q_event_keys, axis=0))
                 q_event_masks = [
                     np.where(q_event_indices == ei)[0] for ei in range(n_q_unique)
                 ]
+                q_team_mats = _teammate_matrices(df_calib_q, q_event_masks)
 
             SQRT2 = float(np.sqrt(2.0))
 
-            def _rank_and_prob_terms(combined_z, actual, masks, sigma, aw):
+            def _rank_and_prob_terms(combined_z, actual, masks, mats, sigma, rho, aw):
                 """Per-event rank loss + probability calibration terms.
 
                 Returns (mean_spearman, mean_podium_err, mean_pairwise_brier,
                 mean_winner_brier, n_scored).  The probability terms use the
                 analytic Gaussian-race model that mirrors the Monte Carlo
-                simulation: P(i beats j) = Phi((z_j - z_i) / (sigma*sqrt(2))).
+                simulation: the difference of two drivers' noise has variance
+                2*sigma^2 for rivals and 2*sigma^2*(1-rho) for teammates (the
+                shared team component cancels), so
+                P(i beats j) = Phi((z_j - z_i) / (sigma*sqrt(2*(1-rho*same_team)))).
+                This is what gives team_correlation its gradient.
                 """
                 sp_sum = pod_sum = pair_sum = win_sum = 0.0
                 n_scored = 0
-                for mask in masks:
+                for mask, same_team in zip(masks, mats):
                     if len(mask) < 3:
                         continue
                     pred = combined_z[mask]
@@ -943,7 +1061,10 @@ class CalibrationManager:
                     pod_sum += np.mean(np.abs(act[pred_order[:3]] - np.arange(1, 4)))
 
                     # Pairwise win probabilities under the simulation's noise model
-                    diff = (pred[None, :] - pred[:, None]) / (sigma * SQRT2)
+                    pair_sigma = sigma * SQRT2 * np.sqrt(
+                        np.maximum(1.0 - rho * same_team.astype(float), 1e-3)
+                    )
+                    diff = (pred[None, :] - pred[:, None]) / pair_sigma
                     P = ndtr(diff)  # P[i, j] = P(i finishes ahead of j)
                     Y = (act[:, None] < act[None, :]).astype(float)
                     iu = np.triu_indices(len(mask), k=1)
@@ -974,13 +1095,17 @@ class CalibrationManager:
                 """Combined objective over race AND qualifying sessions.
 
                 Every parameter in the vector receives gradient signal:
-                  - blending/season/grid/ensemble params -> per-event Spearman +
-                    podium terms (race and qualifying), via the same formulas
-                    production uses (ratio-form season boost, anchor-delta grid);
-                  - noise_factor/min_noise/analytical_win_weight -> analytic
-                    pairwise & winner Brier terms mirroring the MC simulation;
+                  - blending/season/sprint/grid/ensemble params -> per-event
+                    Spearman + podium terms (race and qualifying), via the same
+                    formulas production uses (ratio-form season boosts,
+                    anchor-delta grid);
+                  - noise_factor/min_noise/analytical_win_weight/
+                    team_correlation -> analytic pairwise & winner Brier terms
+                    mirroring the MC simulation (incl. teammate noise sharing);
                   - DNF alpha/beta/driver/team weights -> Brier on actual DNFs
-                    using the exact estimate_dnf_probabilities formula.
+                    using the exact estimate_dnf_probabilities formula;
+                  - half_life_base/half_life_team/elo_k -> log-interpolation
+                    over precomputed component grids.
                 """
                 # Unpack race/blending params
                 wb_gbm = max(0, weights[0])
@@ -1013,20 +1138,58 @@ class CalibrationManager:
                 we_q_bt = max(0, weights[20]) if len(weights) > 20 else PARAM_DEFAULTS[20]
                 we_q_mixed = max(0, weights[21]) if len(weights) > 21 else PARAM_DEFAULTS[21]
 
+                # Previously fixed, now calibrated (params 22-26)
+                w_sprint = max(1.0, weights[22]) if len(weights) > 22 else PARAM_DEFAULTS[22]
+                h_base = weights[23] if len(weights) > 23 else PARAM_DEFAULTS[23]
+                h_team = weights[24] if len(weights) > 24 else PARAM_DEFAULTS[24]
+                elo_k = weights[25] if len(weights) > 25 else PARAM_DEFAULTS[25]
+                rho = float(np.clip(weights[26] if len(weights) > 26 else PARAM_DEFAULTS[26], 0.0, 1.0))
+
+                # Log-linear interpolation coefficients over the component grids
+                hb0, hb1, hb_t = _log_interp_coeffs(H_BASE_GRID, h_base)
+                ht0, ht1, ht_t = _log_interp_coeffs(H_TEAM_GRID, h_team)
+                k0, k1, k_t = _log_interp_coeffs(ELO_K_GRID, elo_k)
+
+                def _form_at(name, grids):
+                    g = grids[name]
+                    return (1.0 - hb_t) * g[:, hb0] + hb_t * g[:, hb1]
+
+                def _elo_at(grid3d):
+                    # interpolate k within each bracketing h, then across h
+                    lo = (1.0 - k_t) * grid3d[:, ht0, k0] + k_t * grid3d[:, ht0, k1]
+                    hi = (1.0 - k_t) * grid3d[:, ht1, k0] + k_t * grid3d[:, ht1, k1]
+                    return (1.0 - ht_t) * lo + ht_t * hi
+
+                def _h_team_at(grid2d):
+                    return (1.0 - ht_t) * grid2d[:, ht0] + ht_t * grid2d[:, ht1]
+
                 # Noise sigma exactly as simulate_grid derives it for the
                 # z-normalised combined pace it receives (std == 1).
                 sigma = max(nf * NOISE_STD_MULTIPLIER, mn)
 
                 # ---- Race objective ----
                 # Exact production form: weighted average with the current-season
-                # boost as a multiplicative weight (a ratio in b, not additive).
-                denom_form = arr_w_pre + w_season * arr_w_cur
+                # race AND sprint boosts as multiplicative weights (ratios, not
+                # additive terms), at the candidate half_life_base.
+                arr_s_pre = _form_at("s_pre", form_grids)
+                arr_w_pre = _form_at("w_pre", form_grids)
+                arr_s_cr = _form_at("s_cur_race", form_grids)
+                arr_w_cr = _form_at("w_cur_race", form_grids)
+                arr_s_cs = _form_at("s_cur_sprint", form_grids)
+                arr_w_cs = _form_at("w_cur_sprint", form_grids)
+
+                denom_form = arr_w_pre + w_season * arr_w_cr + w_sprint * arr_w_cs
                 form_idx = np.where(
                     denom_form > 1e-9,
-                    (arr_s_pre + w_season * arr_s_cur) / np.maximum(denom_form, 1e-9),
+                    (arr_s_pre + w_season * arr_s_cr + w_sprint * arr_s_cs)
+                    / np.maximum(denom_form, 1e-9),
                     0.0,
                 )
                 form_pace = -form_idx  # lower = faster
+
+                arr_elo = _elo_at(arr_elo_grid)
+                arr_bt = _h_team_at(arr_bt_grid)
+                arr_mixed = _h_team_at(arr_mixed_grid)
 
                 # Production baseline: base = -form - w_team * team_form,
                 # then pace = w_gbm * gbm + w_base * base.
@@ -1065,7 +1228,7 @@ class CalibrationManager:
                 combined_race = _event_z(combined_race, event_indices, n_unique)
 
                 race_terms = _rank_and_prob_terms(
-                    combined_race, arr_actual_pos, event_masks, sigma, aw,
+                    combined_race, arr_actual_pos, event_masks, team_mats, sigma, rho, aw,
                 )
                 if race_terms is None:
                     return 1e6
@@ -1091,6 +1254,16 @@ class CalibrationManager:
                 # ---- Qualifying objective ----
                 quali_loss = None
                 if has_quali_data:
+                    # Production qualifying form boosts ALL current-season
+                    # qualifying rows (incl. sprint qualifying) with the same
+                    # weight, so the race/sprint buckets are lumped here.
+                    arr_q_s_pre = _form_at("s_pre", form_grids_q)
+                    arr_q_w_pre = _form_at("w_pre", form_grids_q)
+                    arr_q_s_cur = (_form_at("s_cur_race", form_grids_q)
+                                   + _form_at("s_cur_sprint", form_grids_q))
+                    arr_q_w_cur = (_form_at("w_cur_race", form_grids_q)
+                                   + _form_at("w_cur_sprint", form_grids_q))
+
                     q_denom = arr_q_w_pre + w_q_season * arr_q_w_cur
                     q_form_idx = np.where(
                         q_denom > 1e-9,
@@ -1106,14 +1279,14 @@ class CalibrationManager:
                         q_wsum = 1.0
                     combined_quali = (
                         (we_q_pace / q_wsum) * q_z
-                        + (we_q_elo / q_wsum) * arr_q_elo
-                        + (we_q_bt / q_wsum) * arr_q_bt
-                        + (we_q_mixed / q_wsum) * arr_q_mixed
+                        + (we_q_elo / q_wsum) * _elo_at(arr_q_elo_grid)
+                        + (we_q_bt / q_wsum) * _h_team_at(arr_q_bt_grid)
+                        + (we_q_mixed / q_wsum) * _h_team_at(arr_q_mixed_grid)
                     )
                     combined_quali = _event_z(combined_quali, q_event_indices, n_q_unique)
 
                     quali_terms = _rank_and_prob_terms(
-                        combined_quali, arr_q_actual, q_event_masks, sigma, aw,
+                        combined_quali, arr_q_actual, q_event_masks, q_team_mats, sigma, rho, aw,
                     )
                     if quali_terms is not None:
                         q_sp, q_pod, q_pair, q_win, _ = quali_terms
