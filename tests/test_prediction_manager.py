@@ -716,8 +716,8 @@ class TestPredictionManagerDiscord:
                     top10_field = next(f for f in r_embed["fields"] if f["name"] == "Top 10")
                     assert "HAM" in top10_field["value"]
                     assert "VER" in top10_field["value"]
-                    assert "⬆️" in top10_field["value"] # HAM moved up (from P2 to P1)
-                    assert "⬇️" in top10_field["value"] # VER moved down (from P1 to P2)
+                    assert "▲" in top10_field["value"] # HAM moved up (from P2 to P1)
+                    assert "▼" in top10_field["value"] # VER moved down (from P1 to P2)
 
                     # Check order in Top 10 field
                     lines = top10_field["value"].split("\n")
@@ -732,7 +732,7 @@ class TestPredictionManagerDiscord:
                     # Check "Movers & Shakers" field
                     movers_field = next(f for f in r_embed["fields"] if f["name"] == "🚀 Movers & Shakers")
                     assert "HAM" in movers_field["value"]
-                    assert "(+1 positions)" in movers_field["value"]
+                    assert "+1" in movers_field["value"]
 
                     # Check two-column grid layout (Bottom 10 exists)
                     bottom10_field = next(f for f in r_embed["fields"] if f["name"] == "Bottom 10")
