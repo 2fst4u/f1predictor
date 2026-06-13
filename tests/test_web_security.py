@@ -79,6 +79,71 @@ def test_webhook_ssrf_protection_startswith_bypass(client_with_auth):
     assert response.status_code == 400
 
 
+def test_webhook_test_success(client_with_auth, monkeypatch):
+    """A valid Discord webhook URL with a successful POST returns success.
+
+    The outbound Discord call is stubbed so the test stays offline and
+    deterministic while still exercising the embed-building success path.
+    """
+    captured = {}
+
+    class _FakeResp:
+        status_code = 204
+        text = ""
+
+    class _FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None, timeout=None):
+            captured["url"] = url
+            captured["payload"] = json
+            return _FakeResp()
+
+    monkeypatch.setattr(fweb.httpx, "AsyncClient", lambda *a, **k: _FakeAsyncClient())
+
+    response = client_with_auth.post(
+        "/api/settings/test-webhook",
+        json={"url": "https://discord.com/api/webhooks/123/abc"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "success"}
+    # The success path builds and sends a single embed to the given URL.
+    assert captured["url"] == "https://discord.com/api/webhooks/123/abc"
+    assert "embeds" in captured["payload"]
+    assert captured["payload"]["embeds"][0]["title"] == "✅ Webhook Connected"
+
+
+def test_webhook_test_discord_error(client_with_auth, monkeypatch):
+    """A Discord API error (4xx/5xx) is surfaced as a failure to the client."""
+    class _FakeResp:
+        status_code = 400
+        text = "Bad Request"
+
+    class _FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None, timeout=None):
+            return _FakeResp()
+
+    monkeypatch.setattr(fweb.httpx, "AsyncClient", lambda *a, **k: _FakeAsyncClient())
+
+    response = client_with_auth.post(
+        "/api/settings/test-webhook",
+        json={"url": "https://discord.com/api/webhooks/123/abc"},
+    )
+    # The endpoint surfaces the upstream failure as an error response (the
+    # inner HTTPException is remapped to 500 by the broad exception handler).
+    assert response.status_code >= 400
+
+
 def test_login_rate_limiting(client):
     # Reset immediately before exercising the limit so the test is independent
     # of any login attempts made by earlier tests/fixtures.

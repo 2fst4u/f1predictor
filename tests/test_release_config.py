@@ -124,27 +124,42 @@ class TestReleaseInfrastructure:
             "review invocation"
         )
 
-    def test_build_workflow_triggers_on_release(self):
-        """build.yml must also trigger when a GitHub Release is published."""
+    def test_build_workflow_supports_release_via_workflow_call(self):
+        """Stable release builds are produced by invoking build.yml through
+        workflow_call (from release.yml) with is_release=true, rather than via
+        a direct release trigger on build.yml itself."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"
         content = workflow.read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
         triggers = parsed.get(True, {})
-        assert "release" in triggers, (
-            "build.yml must trigger on release events for stable builds"
+        assert "workflow_call" in triggers, (
+            "build.yml must be callable via workflow_call so release.yml can "
+            "trigger stable release builds"
         )
-        release_types = triggers["release"].get("types", [])
-        assert "published" in release_types, (
-            "build.yml must trigger on release type 'published'"
+        inputs = (triggers.get("workflow_call") or {}).get("inputs", {})
+        assert "is_release" in inputs, (
+            "build.yml workflow_call must accept an 'is_release' input to "
+            "distinguish stable release builds from dev builds"
+        )
+
+        # release.yml must actually wire the stable build through build.yml.
+        release = ROOT / ".github" / "workflows" / "release.yml"
+        rel_content = release.read_text(encoding="utf-8")
+        assert "./.github/workflows/build.yml" in rel_content, (
+            "release.yml must call build.yml to produce the release image"
+        )
+        assert "is_release: true" in rel_content, (
+            "release.yml must invoke build.yml with is_release: true"
         )
 
     def test_build_workflow_has_prerelease_versions(self):
-        """build.yml must produce numerically increasing prerelease tags."""
+        """build.yml must produce numerically increasing dev prerelease tags
+        (the '-dev.N' scheme) for non-release pushes."""
         workflow = ROOT / ".github" / "workflows" / "build.yml"
         content = workflow.read_text(encoding="utf-8")
-        assert "-pre." in content, (
-            "build.yml must produce prerelease versions with "
-            "'-pre.' suffix for Flux auto-pull compatibility"
+        assert "-dev." in content, (
+            "build.yml must produce dev prerelease versions with the "
+            "'-dev.' suffix for non-release pushes"
         )
 
     def test_build_workflow_has_semver_tags(self):
