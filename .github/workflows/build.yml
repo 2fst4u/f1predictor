@@ -36,7 +36,7 @@ jobs:
     needs: [tests]
     if: needs.tests.result == 'success'
     permissions:
-      contents: write
+      contents: read
       packages: write
 
     steps:
@@ -66,29 +66,28 @@ jobs:
             echo "is_release=true" >> "$GITHUB_OUTPUT"
             echo "Release version: ${RELEASE_TAG#v}"
           else
-            # Dev builds target the next (unreleased) version.
+            # Dev builds target the next (unreleased) patch version. The dev
+            # number is the commit distance since the latest stable release, so
+            # it increases with every commit and resets to a low number after
+            # each release (when a new stable tag becomes the baseline).
+            #
+            # No git tag is created for dev builds: the Docker image version is
+            # injected via the VERSION build-arg (SETUPTOOLS_SCM_PRETEND_VERSION),
+            # so prerelease tags are unnecessary and would only break
+            # setuptools-scm's version derivation inside the build.
             NEXT_PATCH=$((PATCH + 1))
             BASE="${MAJOR}.${MINOR}.${NEXT_PATCH}"
 
-            # Number dev builds from 1 for the upcoming version, resetting
-            # back to 1 whenever the target version changes (i.e. after a release).
-            LAST_DEV=$(git tag -l "v${BASE}-dev.*" --sort=-v:refname | head -n 1)
-            if [ -z "$LAST_DEV" ]; then
-              DEV_NUM=1
+            if git rev-parse -q --verify "refs/tags/${LATEST}" >/dev/null; then
+              DEV_NUM=$(git rev-list "${LATEST}..HEAD" --count)
             else
-              LAST_NUM=$(echo "$LAST_DEV" | sed -E "s/^v${BASE}-dev\.([0-9]+)\$/\1/")
-              DEV_NUM=$((LAST_NUM + 1))
+              DEV_NUM=$(git rev-list HEAD --count)
             fi
 
             DEV_VERSION="${BASE}-dev.${DEV_NUM}"
             echo "version=$DEV_VERSION" >> "$GITHUB_OUTPUT"
             echo "is_release=false" >> "$GITHUB_OUTPUT"
             echo "Dev version: $DEV_VERSION"
-
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag "v${DEV_VERSION}"
-            git push origin "v${DEV_VERSION}"
           fi
 
       - name: Set up Docker Buildx
@@ -131,6 +130,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
           tags: ${{ steps.version.outputs.is_release == 'true' && steps.meta-release.outputs.tags || steps.meta-dev.outputs.tags }}
           labels: ${{ steps.version.outputs.is_release == 'true' && steps.meta-release.outputs.labels || steps.meta-dev.outputs.labels }}
           cache-from: type=gha
