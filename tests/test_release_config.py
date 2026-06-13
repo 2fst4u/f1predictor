@@ -57,6 +57,23 @@ class TestReleaseInfrastructure:
             "build.yml must trigger on push to ensure every commit is gated and build Docker images after tests pass"
         )
 
+    def test_build_workflow_triggers_on_release(self):
+        """build.yml must trigger on a published GitHub Release so that
+        manually publishing a release (e.g. from the 'Draft a new release' UI)
+        builds the stable container image."""
+        workflow = ROOT / ".github" / "workflows" / "build.yml"
+        content = workflow.read_text(encoding="utf-8")
+        parsed = yaml.safe_load(content)
+        triggers = parsed.get(True, {})
+        assert "release" in triggers, (
+            "build.yml must trigger on the 'release' event so a "
+            "manually published GitHub Release builds the stable image"
+        )
+        types = (triggers.get("release") or {}).get("types", [])
+        assert "published" in types, (
+            "build.yml's release trigger must fire on the 'published' type"
+        )
+
     def test_build_workflow_has_no_review_job(self):
         """build.yml must not define a review job. Code review is invoked
         manually via /oc-review (handled by opencode-review.yml), not as

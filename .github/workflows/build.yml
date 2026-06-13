@@ -8,6 +8,11 @@ on:
       - "**.md"
       - "docs/**"
       - ".github/workflows/**"
+  # Stable builds are triggered by publishing a GitHub Release (e.g. from the
+  # "Draft a new release" UI). A release published by a human fires this event;
+  # the image is built and tagged from the release's tag.
+  release:
+    types: [published]
   workflow_call:
     inputs:
       is_release:
@@ -36,7 +41,11 @@ jobs:
     needs: [tests]
     if: needs.tests.result == 'success'
     permissions:
-      contents: read
+      # contents: write is required by the dev-build commit-comment step below
+      # (creating a commit comment needs write access). The release path is
+      # called via workflow_call from release.yml, which caps this to read —
+      # that's fine because the comment step is skipped for releases.
+      contents: write
       packages: write
 
     steps:
@@ -60,8 +69,18 @@ jobs:
           MINOR=$(echo "$VERSION" | cut -d. -f2)
           PATCH=$(echo "$VERSION" | cut -d. -f3)
 
-          if [ "${{ inputs.is_release }}" = "true" ]; then
+          # A stable release build is triggered either by publishing a GitHub
+          # Release (release event) or by release.yml calling this workflow
+          # (workflow_call with is_release=true). Both supply the release tag.
+          if [ "${{ github.event_name }}" = "release" ]; then
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+          elif [ "${{ inputs.is_release }}" = "true" ]; then
             RELEASE_TAG="${{ inputs.release_tag }}"
+          else
+            RELEASE_TAG=""
+          fi
+
+          if [ -n "$RELEASE_TAG" ]; then
             echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
             echo "is_release=true" >> "$GITHUB_OUTPUT"
             echo "Release version: ${RELEASE_TAG#v}"
@@ -138,6 +157,9 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Comment on commit with dev build info
+        # The commit comment is a cosmetic notification — never let it fail an
+        # otherwise-successful build and image push.
+        continue-on-error: true
         if: steps.version.outputs.is_release == 'false'
         uses: peter-evans/commit-comment@v3
         with:
