@@ -41,7 +41,11 @@ jobs:
     needs: [tests]
     if: needs.tests.result == 'success'
     permissions:
-      contents: read
+      # contents: write is required by the dev-build commit-comment step below
+      # (creating a commit comment needs write access). The release path is
+      # called via workflow_call from release.yml, which caps this to read —
+      # that's fine because the comment step is skipped for releases.
+      contents: write
       packages: write
 
     steps:
@@ -153,6 +157,9 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Comment on commit with dev build info
+        # The commit comment is a cosmetic notification — never let it fail an
+        # otherwise-successful build and image push.
+        continue-on-error: true
         if: steps.version.outputs.is_release == 'false'
         uses: peter-evans/commit-comment@v3
         with:
