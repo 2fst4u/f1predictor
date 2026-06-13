@@ -42,6 +42,7 @@ def _apply_calibrated_weights(cfg, calibrated_weights: Dict[str, Any]) -> None:
         for key in ("gbm_weight", "baseline_weight", "baseline_team_factor",
                      "grid_factor",
                      "current_season_weight", "current_season_qualifying_weight",
+                     "current_season_sprint_weight",
                      "current_quali_factor", "analytical_win_weight"):
             if key in b:
                 setattr(bl, key, b[key])
@@ -208,6 +209,47 @@ def _get_session_datetime(race_info: Dict[str, Any], sess: str) -> Optional[date
     except ValueError:
         return None
 
+
+
+def _team_codes_for(X: 'pd.DataFrame') -> Optional['np.ndarray']:
+    """Integer team index per driver row for teammate-correlated simulation noise."""
+    try:
+        import pandas as pd
+        if X is None or "constructorId" not in X.columns:
+            return None
+        codes, _ = pd.factorize(X["constructorId"])
+        return codes  # -1 for missing constructorId (treated as team-less)
+    except Exception:
+        return None
+
+
+def _collect_hist_weather(hist: 'pd.DataFrame', season_i: int, cfg) -> Optional[Dict[Tuple[int, int], Dict[str, Any]]]:
+    """Cached weather for recent historical race events, for wet/dry DNF rates.
+
+    Only reads the on-disk/in-memory weather cache (populated by the weather
+    sensitivity pass) — never the network.  Restricted to the last ~6 seasons
+    to bound filesystem probing.  Returns None when nothing is available.
+    """
+    import pandas as pd
+    try:
+        from .features import get_event_weather_map
+        if hist is None or hist.empty or "season" not in hist.columns or "round" not in hist.columns:
+            return None
+        races = hist[hist["session"] == "race"] if "session" in hist.columns else hist
+        seasons = pd.to_numeric(races["season"], errors="coerce")
+        races = races[seasons >= (int(season_i) - 6)]
+        events = [
+            (int(s), int(r))
+            for s, r in zip(races["season"], races["round"])
+            if pd.notna(s) and pd.notna(r)
+        ]
+        if not events:
+            return None
+        weather_map = get_event_weather_map(cfg.paths.cache_dir, events)
+        return weather_map or None
+    except Exception as e:
+        logger.debug("[predict] hist weather collection failed: %s", e)
+        return None
 
 
 def _get_actual_positions_for_session(
@@ -431,19 +473,22 @@ def _run_single_prediction(
     cfg,
     X_override: Optional['pd.DataFrame'] = None,
     meta_override: Optional[Dict[str, Any]] = None,
+    ens_cfg: Optional['EnsembleConfig'] = None,
 ) -> Optional['pd.DataFrame']:
     """Run prediction for a single session and return ranked DataFrame.
-    
+
     If X_override is provided, use it instead of building features.
     meta_override may be supplied alongside X_override to pass session
     metadata (e.g. weather) used by downstream estimation stages.
+    ens_cfg, when given, carries the calibrated ensemble weights so this
+    helper blends components the same way as the main prediction loop.
     Returns None if prediction cannot be completed.
     """
     from .features import build_session_features, collect_historical_results
-    from .models import train_pace_model, estimate_dnf_probabilities
+    from .models import train_pace_model, estimate_dnf_probabilities, build_hist_training_X
     from .simulate import simulate_grid
     from .ensemble import EloModel, BradleyTerryModel, MixedEffectsLikeModel, EnsembleConfig, combine_pace
-    
+
     # Build features (or use override)
     if X_override is not None:
         X = X_override.copy()
@@ -451,13 +496,36 @@ def _run_single_prediction(
         meta = meta_override if meta_override is not None else {}
     else:
         X, meta, roster = build_session_features(jc, om, season_i, round_i, sess, ref_date, cfg)
-    
+
     if X is None or roster is None or X.empty or roster.empty:
         return None
-    
-    # Train pace model
-    _, pace_hat, _, _ = train_pace_model(X, session_type=sess, cfg=cfg)
-    
+
+    # Historical results — needed both for out-of-sample GBM training and
+    # for the ensemble models below.
+    roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
+    hist = collect_historical_results(
+        jc,
+        season=season_i,
+        end_before=ref_date,
+        lookback_years=75,
+        roster_driver_ids=roster_ids,
+    )
+
+    # Train pace model out-of-sample (same as the main prediction path)
+    hist_X_train = None
+    try:
+        hist_X_train = build_hist_training_X(
+            hist, X, ref_date,
+            half_life_days=cfg.modelling.recency_half_life_days.base,
+            boost_factor=getattr(cfg.modelling.blending, "current_season_weight", 8.0),
+            qual_boost_factor=getattr(cfg.modelling.blending, "current_season_qualifying_weight", 20.0),
+            sprint_boost_factor=getattr(cfg.modelling.blending, "current_season_sprint_weight", 8.0),
+            cache_dir=cfg.paths.cache_dir,
+        )
+    except Exception as e:
+        logger.info("[predict._run_single] Could not build historical training set: %s", e)
+    _, pace_hat, _, _ = train_pace_model(X, session_type=sess, cfg=cfg, hist_X=hist_X_train)
+
     # Standardize pace
     try:
         mu = float(np.mean(pace_hat))
@@ -467,20 +535,6 @@ def _run_single_prediction(
         pace_hat = (pace_hat - mu) / sd
     except Exception as e:
         logger.warning("[predict._run_single] Pace standardization failed: %s", e)
-    
-    # Historical results for ensemble models
-    # lookback_years=75 sets the maximum scan range, but
-    # collect_historical_results stops early once a season is found with no
-    # current-roster drivers.  The effective lookback is therefore typically
-    # much shorter than 75 years.
-    roster_ids = roster["driverId"].dropna().astype(str).tolist() if not roster.empty else []
-    hist = collect_historical_results(
-        jc,
-        season=season_i,
-        end_before=ref_date,
-        lookback_years=75,
-        roster_driver_ids=roster_ids,
-    )
     
     # Ensemble skill components
     elo_pace = bt_pace = mixed_pace = None
@@ -502,19 +556,21 @@ def _run_single_prediction(
     except Exception as e:
         logger.warning("[predict._run_single] Mixed model failed: %s", e)
     
-    # Combine pace (use config ensemble weights, not hardcoded defaults)
+    # Combine pace — prefer the calibrated ensemble weights passed by the
+    # caller; fall back to config.yaml weights otherwise.
     try:
-        ens_cfg = EnsembleConfig(
-            w_elo=cfg.modelling.ensemble.w_elo,
-            w_bt=cfg.modelling.ensemble.w_bt,
-            w_mixed=cfg.modelling.ensemble.w_mixed,
-            w_gbm=cfg.modelling.ensemble.w_gbm,
-            min_std=cfg.modelling.ensemble.min_std,
-            w_gbm_quali=getattr(cfg.modelling.ensemble, "w_gbm_quali", 0.7),
-            w_elo_quali=getattr(cfg.modelling.ensemble, "w_elo_quali", 0.1),
-            w_bt_quali=getattr(cfg.modelling.ensemble, "w_bt_quali", 0.1),
-            w_mixed_quali=getattr(cfg.modelling.ensemble, "w_mixed_quali", 0.1),
-        )
+        if ens_cfg is None:
+            ens_cfg = EnsembleConfig(
+                w_elo=cfg.modelling.ensemble.w_elo,
+                w_bt=cfg.modelling.ensemble.w_bt,
+                w_mixed=cfg.modelling.ensemble.w_mixed,
+                w_gbm=cfg.modelling.ensemble.w_gbm,
+                min_std=cfg.modelling.ensemble.min_std,
+                w_gbm_quali=getattr(cfg.modelling.ensemble, "w_gbm_quali", 0.7),
+                w_elo_quali=getattr(cfg.modelling.ensemble, "w_elo_quali", 0.1),
+                w_bt_quali=getattr(cfg.modelling.ensemble, "w_bt_quali", 0.1),
+                w_mixed_quali=getattr(cfg.modelling.ensemble, "w_mixed_quali", 0.1),
+            )
         combined_pace = combine_pace(
             gbm_pace=pace_hat,
             elo_pace=elo_pace,
@@ -531,7 +587,10 @@ def _run_single_prediction(
     dnf_prob = np.zeros(X.shape[0], dtype=float)
     if sess in ("race", "sprint"):
         try:
-            dnf_prob = estimate_dnf_probabilities(hist, X, cfg=cfg, event_weather=meta.get("weather"))
+            dnf_prob = estimate_dnf_probabilities(
+                hist, X, cfg=cfg, event_weather=meta.get("weather"),
+                hist_weather=_collect_hist_weather(hist, season_i, cfg),
+            )
         except Exception as e:
             logger.warning("[predict._run_single] DNF estimation failed, using default 0.12: %s", e)
             dnf_prob[:] = 0.12
@@ -553,8 +612,10 @@ def _run_single_prediction(
         min_noise=cfg.modelling.simulation.min_noise,
         max_penalty_base=cfg.modelling.simulation.max_penalty_base,
         compute_pairwise=False,
+        team_codes=_team_codes_for(X),
+        team_correlation=getattr(cfg.modelling.simulation, "team_correlation", 0.0),
     )
-    
+
     p_top3 = prob_matrix[:, :3].sum(axis=1)
     p_win = prob_matrix[:, 0]
     order = np.argsort(mean_pos)
@@ -878,7 +939,8 @@ def run_predictions_for_event(
                                     logger.info(f"[predict] {precursor} not in current loop and no actuals - running simulation to estimate grid")
                                     spinner.update(f"Simulating {precursor} for grid...")
                                     qual_ranked = _run_single_prediction(
-                                        jc, om, season_i, round_i, precursor, ref_date, cfg
+                                        jc, om, season_i, round_i, precursor, ref_date, cfg,
+                                        ens_cfg=ens_cfg_obj,
                                     )
                                     if qual_ranked is not None and not qual_ranked.empty:
                                         grid_map = dict(zip(
@@ -1042,12 +1104,14 @@ def run_predictions_for_event(
                             logger.info(f"[predict] Ensemble combine failed, falling back to GBM pace: {e}")
                             combined_pace = pace_hat
 
-                        # DNF probabilities
+                        # DNF probabilities (weather-aware: historical wet/dry
+                        # rates come from the cached per-event weather)
                         dnf_prob = np.zeros(X.shape[0], dtype=float)
                         if sess in ("race", "sprint"):
                             try:
                                 dnf_prob = estimate_dnf_probabilities(
                                     hist, X, cfg=cfg, event_weather=meta.get("weather"),
+                                    hist_weather=_collect_hist_weather(hist, season_i, cfg),
                                 )
                             except Exception as e:
                                 logger.info(f"[predict] DNF estimation failed; using default 0.12: {e}")
@@ -1077,6 +1141,8 @@ def run_predictions_for_event(
                             min_noise=cfg.modelling.simulation.min_noise,
                             max_penalty_base=cfg.modelling.simulation.max_penalty_base,
                             compute_pairwise=return_results,
+                            team_codes=_team_codes_for(X),
+                            team_correlation=getattr(cfg.modelling.simulation, "team_correlation", 0.0),
                         )
 
                         # Analytical probabilities — blend weight is configurable
@@ -1086,8 +1152,18 @@ def run_predictions_for_event(
                         sim_p_win = prob_matrix[:, 0]
                         aw = getattr(cfg.modelling.blending, "analytical_win_weight", 0.5)
                         p_win = (1.0 - aw) * sim_p_win + aw * analytical_p_win
+                        # Consistency guard: blending p_win analytically can push it
+                        # above the simulated podium probability; a win is a subset
+                        # of a podium, so enforce p_top3 >= p_win.
+                        p_top3 = np.maximum(p_top3, p_win)
 
                         order = np.argsort(mean_pos)
+                        # Re-order the probability matrices to match the ranked frame
+                        # so downstream metrics (CRPS, pairwise Brier) pair row i of
+                        # the matrix with row i of the DataFrame.
+                        prob_matrix = prob_matrix[order]
+                        if pairwise is not None and getattr(pairwise, "size", 0) > 0:
+                            pairwise = pairwise[np.ix_(order, order)]
                         ranked = X.iloc[order].reset_index(drop=True)
                         ranked["mean_pos"] = mean_pos[order]
                         ranked["p_top3"] = p_top3[order]
@@ -1189,18 +1265,28 @@ def run_predictions_for_event(
                     }
                 )
                 
-                # Add to accumulated history for subsequent sessions in this run
-                # We need columns: driverId, position, date, session, constructorId, points, qpos, grid
-                # Note: 'points' are estimates, 'qpos' is relevant for 'qualifying' session
+                # Add to accumulated history for subsequent sessions in this run.
+                # Prefer the ACTUAL result when the session has finished; only fall
+                # back to the prediction for sessions that have not run yet.  Feeding
+                # predictions back in as if they were results lets one session's error
+                # amplify into the next (especially with the current-season boost).
+                # points stays NaN so synthetic rows never distort the points-based
+                # team_form_index (which drops NaN-points rows).
+                if pd.notna(row.get("actual_position")):
+                    hist_pos = int(row["actual_position"])
+                elif pd.notna(row["predicted_position"]):
+                    hist_pos = int(row["predicted_position"])
+                else:
+                    hist_pos = None
                 accumulated_history.append({
                     "driverId": row["driverId"],
-                    "position": int(row["predicted_position"]) if pd.notna(row["predicted_position"]) else None,
+                    "position": hist_pos,
                     "date": ref_date,
                     "session": sess,
                     "constructorId": row.get("constructorId"),
-                    "points": 0.0, # Placeholder
+                    "points": np.nan,
                     "grid": row.get("grid"),
-                    "qpos": int(row["predicted_position"]) if sess in ("qualifying", "sprint_qualifying") and pd.notna(row["predicted_position"]) else np.nan
+                    "qpos": hist_pos if sess in ("qualifying", "sprint_qualifying") and hist_pos is not None else np.nan
                 })
 
                 # Check for wet session via FastF1 (only if session happened)

@@ -256,9 +256,17 @@ class EloModel:
 
 
 class BradleyTerryModel:
-    """Session-aware Bradley–Terry style strength estimate.
+    """Session-aware Bradley–Terry strength estimate.
 
-    For race/sprint sessions the model uses finishing position (as before).
+    Fits an actual Bradley–Terry model: per event, every pair of classified
+    drivers contributes a recency-weighted pairwise comparison (the driver
+    with the lower position "beats" the other), and driver strengths are
+    estimated with the standard MM (minorisation–maximisation / Zermelo)
+    iteration.  This gives genuinely different information from the
+    mean-position models: strength is driven by *who you beat*, with wins
+    over strong opponents worth more than wins over backmarkers.
+
+    For race/sprint sessions the model uses finishing position.
     For qualifying/sprint_qualifying sessions it uses qualifying position
     (``qpos``) so the strength estimate reflects pure one-lap pace.
 
@@ -276,8 +284,10 @@ class BradleyTerryModel:
         pos_col: str,
         ref_date: "pd.Timestamp",
         half_life_days: float,
+        max_iter: int = 60,
+        tol: float = 1e-7,
     ) -> Dict[str, float]:
-        """Compute recency-weighted mean-position strength for *rows*."""
+        """Weighted Bradley–Terry strengths (log-scale) via MM iteration."""
         import numpy as np
         import pandas as pd
 
@@ -287,24 +297,57 @@ class BradleyTerryModel:
         dates = pd.to_datetime(rows["date"], utc=True)
         diff = ref_date.to_datetime64() - dates.values
         ages = diff.astype("timedelta64[ns]").astype(float) / 86_400_000_000_000.0
-        w = np.exp2(-ages / max(1.0, half_life_days))
+        w_rows = np.exp2(-ages / max(1.0, half_life_days))
 
-        driver_ids, group_idx = np.unique(rows["driverId"].values, return_inverse=True)
-        n_groups = len(driver_ids)
+        driver_ids, codes = np.unique(rows["driverId"].astype(str).values, return_inverse=True)
+        n = len(driver_ids)
+        if n < 2:
+            return {str(driver_ids[0]): 0.0} if n == 1 else {}
 
         pos_vals = rows[pos_col].values.astype(float)
-        w_pos = pos_vals * w
 
-        w_sum = np.bincount(group_idx, weights=w, minlength=n_groups)
-        w_pos_sum = np.bincount(group_idx, weights=w_pos, minlength=n_groups)
+        # Group rows into events and accumulate weighted pairwise wins:
+        # wins[i, j] = total weight of comparisons where i beat j.
+        evt_keys = pd.MultiIndex.from_arrays([rows["season"], rows["round"]]) \
+            if {"season", "round"}.issubset(rows.columns) \
+            else pd.MultiIndex.from_arrays([dates.dt.year, dates.dt.dayofyear])
+        evt_codes, _ = pd.factorize(evt_keys)
 
-        w_sum_safe = np.maximum(w_sum, 1e-6)
-        w_mean = w_pos_sum / w_sum_safe
+        wins = np.zeros((n, n), dtype=float)
+        order = np.argsort(evt_codes, kind="mergesort")
+        sorted_evt = evt_codes[order]
+        boundaries = np.flatnonzero(np.diff(sorted_evt)) + 1
+        for grp in np.split(order, boundaries):
+            if len(grp) < 2:
+                continue
+            # Order group members by position (ascending = better)
+            grp_sorted = grp[np.argsort(pos_vals[grp], kind="mergesort")]
+            g_codes = codes[grp_sorted]
+            g_w = float(w_rows[grp_sorted].mean())
+            # Every earlier (better-placed) driver beats every later one
+            i_idx, j_idx = np.triu_indices(len(g_codes), k=1)
+            np.add.at(wins, (g_codes[i_idx], g_codes[j_idx]), g_w)
 
-        max_pos = float(pos_vals.max() or 20.0)
-        str_vals = (max_pos - w_mean) / max_pos
+        # Small symmetric prior keeps strengths finite for drivers who never
+        # win (or never lose) a weighted comparison.
+        wins += 0.05 / n
 
-        return {str(k): float(v) for k, v in zip(driver_ids, str_vals)}
+        n_ij = wins + wins.T
+        w_i = wins.sum(axis=1)
+
+        p = np.ones(n, dtype=float)
+        for _ in range(max_iter):
+            denom = (n_ij / (p[:, None] + p[None, :])).sum(axis=1)
+            p_new = w_i / np.maximum(denom, 1e-12)
+            # Normalise (geometric mean 1) for identifiability
+            p_new /= np.exp(np.mean(np.log(np.maximum(p_new, 1e-12))))
+            if np.max(np.abs(p_new - p)) < tol:
+                p = p_new
+                break
+            p = p_new
+
+        log_strength = np.log(np.maximum(p, 1e-12))
+        return {str(k): float(v) for k, v in zip(driver_ids, log_strength)}
 
     def fit(
         self, hist: "pd.DataFrame", half_life_days: float = 365.0

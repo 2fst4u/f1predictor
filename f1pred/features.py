@@ -28,16 +28,91 @@ __all__ = [
     "build_session_features",
     "collect_historical_results",
     "compute_form_indices",
+    "compute_form_components",
     "compute_sprint_form",
     "compute_sprint_qualifying_form",
     "compute_teammate_delta",
     "compute_grid_finish_delta",
     "compute_circuit_proficiency",
     "compute_qualifying_form",
+    "compute_dnf_flags",
     "exponential_weights",
+    "normalize_weather_conditions",
+    "get_event_weather_map",
 ]
 
 logger = get_logger(__name__)
+
+# A result counts as a *finish* only when the status says so explicitly.
+# Ergast/Jolpica assigns a numeric classification position to most retirements,
+# so "position is NaN" alone misses nearly all DNFs; and enumerating failure
+# causes (the old approach) missed dozens of statuses ("Retired", "Puncture",
+# "Overheating", "Power Unit", ...).  Inverting the test is robust: "Finished"
+# and "+N Lap(s)" are the only ways to be classified as a finisher.
+_FINISHED_STATUS_RE = r"^(finished|\+\d+\s*laps?|lapped)$"
+
+
+def compute_dnf_flags(df: pd.DataFrame) -> pd.Series:
+    """Return a boolean Series marking non-finishes (DNF/DNS/DSQ) for result rows.
+
+    A row is a finish iff its status matches ``_FINISHED_STATUS_RE``.  Rows with
+    a missing/empty status but a valid position are treated as finishes (common
+    in mocked or partial data); rows with no position at all are non-finishes.
+    """
+    pos = pd.to_numeric(df.get("position"), errors="coerce") if "position" in df.columns \
+        else pd.Series(np.nan, index=df.index)
+    if "status" not in df.columns:
+        return pos.isna()
+    raw = df["status"]
+    s = raw.astype(str).str.strip().str.lower()
+    finished = s.str.match(_FINISHED_STATUS_RE, na=False)
+    missing = raw.isna() | s.isin(("", "none", "nan"))
+    return (~finished & ~missing) | pos.isna()
+
+
+# Reference scales used to convert raw weather readings into comparable
+# anomalies before multiplying with per-driver sensitivity betas.  Without
+# this, raw air pressure (~1013 hPa) dwarfs rain (~0-10 mm) by two orders of
+# magnitude and weather_effect degenerates into a pressure proxy.
+_WEATHER_BASELINES = {
+    "temp": (22.0, 8.0),       # deg C
+    "pressure": (1013.0, 10.0),  # hPa
+    "wind": (15.0, 10.0),      # km/h
+    "rain": (0.0, 5.0),        # mm (one-sided; clipped below)
+}
+
+
+def normalize_weather_conditions(
+    temp_mean: Optional[float],
+    pressure_mean: Optional[float],
+    wind_mean: Optional[float],
+    rain_sum: Optional[float],
+) -> Tuple[float, float, float, float]:
+    """Convert raw weather readings into standardized anomalies.
+
+    Missing/NaN readings map to a 0.0 anomaly (neutral) so absent data never
+    pushes the weather_effect feature in either direction.  Rain is clipped to
+    a sane ceiling so a monsoon outlier cannot dominate.
+    """
+    def _anom(value, key):
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if v != v:  # NaN
+            return 0.0
+        base, scale = _WEATHER_BASELINES[key]
+        if key == "rain":
+            v = min(max(v, 0.0), 25.0)
+        return (v - base) / scale
+
+    return (
+        _anom(temp_mean, "temp"),
+        _anom(pressure_mean, "pressure"),
+        _anom(wind_mean, "wind"),
+        _anom(rain_sum, "rain"),
+    )
+
 
 # In-process cache to avoid re-building history multiple times in the same run
 # Key: (season, sorted roster driver ids) - Note: end_before is applied on retrieval
@@ -96,6 +171,32 @@ def _load_weather_cache(cache_dir: str, season: int, rnd: int) -> Optional[Dict[
         except Exception as e:
             logger.info(f"[features] [cache] Failed to load weather {path}: {e}")
     return None
+
+
+def get_event_weather_map(
+    cache_dir: Optional[str],
+    events: List[Tuple[int, int]],
+) -> Dict[Tuple[int, int], Dict[str, float]]:
+    """Return cached weather aggregates for the given (season, round) events.
+
+    Reads the in-process cache first, then the on-disk cache populated by the
+    weather-sensitivity pass.  Events with no cached weather are simply absent
+    from the result — no network calls are made here.
+    """
+    out: Dict[Tuple[int, int], Dict[str, float]] = {}
+    for key in set(events):
+        try:
+            s, r = int(key[0]), int(key[1])
+        except (TypeError, ValueError):
+            continue
+        cached = _WEATHER_EVENT_CACHE.get((s, r))
+        if cached is None and cache_dir:
+            cached = _load_weather_cache(cache_dir, s, r)
+            if cached:
+                _WEATHER_EVENT_CACHE[(s, r)] = cached
+        if cached:
+            out[(s, r)] = cached
+    return out
 
 
 def _save_weather_cache(cache_dir: str, season: int, rnd: int, data: Dict[str, float]) -> None:
@@ -248,7 +349,9 @@ def _parse_races_block(races: List[Dict[str, Any]], session_label: str, cutoff: 
                     "driverId": drv.get("driverId"),
                     "driverCode": drv.get("code"),
                     "constructorId": cons.get("constructorId"),
-                    "grid": int(res.get("grid", 0) or 0),
+                    # Ergast uses grid "0" for pit-lane starts; treating that as
+                    # P0 corrupts grid_finish_delta / overtake stats, so map to None.
+                    "grid": (int(res.get("grid", 0) or 0) or None),
                     "position": int(res.get("position", 0) or 0) if res.get("position") else None,
                     "status": res.get("status"),
                     "points": float(res.get("points", 0.0) or 0.0),
@@ -504,17 +607,14 @@ def collect_historical_results(
         "driverId", "position", "date", "session", "constructorId", "points", "status"
     ])
 
-    # Optimization: Pre-calculate is_dnf to avoid repeated regex operations
-    if not df.empty and "status" in df.columns:
-        status_s = df["status"].astype(str).str.lower()
-        # "position" is NaN for DNF often, or check regex
-        # Using vectorized bitwise OR
-        df["is_dnf"] = ((~df["position"].notna()) | status_s.str.contains(
-            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage",
-            regex=True
-        )).astype(int)
-    elif not df.empty:
+    # Optimization: Pre-calculate is_dnf once.  Only race/sprint rows carry a
+    # meaningful status; qualifying rows have no status and a NaN position, so
+    # restrict the flag to result sessions to avoid marking every quali row DNF.
+    if not df.empty:
         df["is_dnf"] = 0
+        res_mask = df["session"].isin(["race", "sprint"]) if "session" in df.columns else pd.Series(True, index=df.index)
+        if res_mask.any():
+            df.loc[res_mask, "is_dnf"] = compute_dnf_flags(df.loc[res_mask]).astype(int)
 
     # Safeguard: Check if roster driverIds have any overlap with collected history for the current season
     if roster_set and not df.empty:
@@ -572,6 +672,61 @@ def compute_form_indices(df: pd.DataFrame, ref_date: datetime, half_life_days: i
     })
     return sums
 
+
+
+def compute_form_components(df: pd.DataFrame, ref_date: datetime, half_life_days: int,
+                            current_season: int,
+                            sessions: Tuple[str, ...] = ("race", "sprint"),
+                            pos_col: str = "position") -> pd.DataFrame:
+    """Per-driver weighted-sum components of the form index, split by season.
+
+    Returns columns ``driverId, s_pre, w_pre, s_cur_race, w_cur_race,
+    s_cur_sprint, w_cur_sprint`` where the boosted form index for a
+    current-season race boost ``b_r`` and sprint boost ``b_s`` is exactly::
+
+        form(b_r, b_s) = (s_pre + b_r*s_cur_race + b_s*s_cur_sprint)
+                       / (w_pre + b_r*w_cur_race + b_s*w_cur_sprint)
+
+    This lets the calibration objective recompute the *production* form formula
+    for any candidate boosts without re-scanning history.  ``s`` components use
+    pos_score = -position (higher is better), matching compute_form_indices.
+    Current-season rows whose session name contains "sprint" land in the
+    sprint bucket; everything else in the race bucket.
+    """
+    cols = ["driverId", "s_pre", "w_pre",
+            "s_cur_race", "w_cur_race", "s_cur_sprint", "w_cur_sprint"]
+    if df is None or df.empty:
+        return pd.DataFrame(columns=cols)
+
+    dfg = df[df["session"].isin(list(sessions))].copy()
+    dfg = dfg.dropna(subset=["driverId", pos_col, "date"])
+    if dfg.empty:
+        return pd.DataFrame(columns=cols)
+
+    score = -dfg[pos_col].astype(float).values
+    w = exponential_weights(dfg["date"], ref_date, half_life_days)
+    is_cur = (dfg["season"] == current_season).values if "season" in dfg.columns \
+        else np.zeros(len(dfg), dtype=bool)
+    is_sprint = dfg["session"].astype(str).str.contains("sprint").values
+
+    codes, uniques = pd.factorize(dfg["driverId"])
+    n = len(uniques)
+
+    def _agg(mask):
+        w_m = np.where(mask, w, 0.0)
+        return (np.bincount(codes, weights=w_m * score, minlength=n),
+                np.bincount(codes, weights=w_m, minlength=n))
+
+    s_pre, w_pre = _agg(~is_cur)
+    s_cur_race, w_cur_race = _agg(is_cur & ~is_sprint)
+    s_cur_sprint, w_cur_sprint = _agg(is_cur & is_sprint)
+
+    return pd.DataFrame({
+        "driverId": uniques,
+        "s_pre": s_pre, "w_pre": w_pre,
+        "s_cur_race": s_cur_race, "w_cur_race": w_cur_race,
+        "s_cur_sprint": s_cur_sprint, "w_cur_sprint": w_cur_sprint,
+    })
 
 
 def compute_sprint_form(df: pd.DataFrame, ref_date: datetime, half_life_days: int,
@@ -726,10 +881,7 @@ def compute_circuit_proficiency(df: pd.DataFrame, circuit_id: str, ref_date: dat
     if "is_dnf" in hist_c.columns:
         dnf_mask = hist_c["is_dnf"].astype(bool)
     else:
-        status_str = hist_c["status"].astype(str).str.lower()
-        dnf_mask = (~hist_c["position"].notna()) | status_str.str.contains(
-            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
-        )
+        dnf_mask = compute_dnf_flags(hist_c)
     hist_c["is_dnf"] = dnf_mask.astype(int)
 
     # Calculate DNF rate using bincount
@@ -843,10 +995,7 @@ def compute_circuit_globals(hist: pd.DataFrame, circuit_id: str, ref_date: datet
     if "is_dnf" in hist_c.columns:
         dnf_mask = hist_c["is_dnf"].astype(bool)
     else:
-        status_str = hist_c["status"].astype(str).str.lower()
-        dnf_mask = (~hist_c["position"].notna()) | status_str.str.contains(
-            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
-        )
+        dnf_mask = compute_dnf_flags(hist_c)
     global_dnf = dnf_mask.mean() if len(hist_c) > 0 else 0.08
 
     # Now drop NaN positions for metrics that require a finishing position
@@ -1214,71 +1363,69 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
     grid_df = pd.DataFrame(columns=["driverId", "grid"])
     # Current weekend qualifying position (raw pace signal, NOT penalty-adjusted)
     quali_pos_df = pd.DataFrame(columns=["driverId", "current_quali_pos"])
-    if session_type == "race" and not roster.empty:
-        try:
-            from .data.fastf1_backend import get_session_classification
-            s_int = int(season) if str(season) != "current" else datetime.now().year
-            r_int = int(rnd)
-            
-            # Fetch Qualifying Results via FastF1
-            fast_q = get_session_classification(s_int, r_int, "Q")
+    def _grid_from_results(results: List[Dict[str, Any]]) -> pd.DataFrame:
+        """Penalty-adjusted grid straight from the results endpoint (grid>0)."""
+        rows = []
+        for res in results or []:
+            drv = (res.get("Driver") or {}).get("driverId")
+            try:
+                g = int(res.get("grid", 0) or 0)
+            except (TypeError, ValueError):
+                g = 0
+            if drv and g > 0:
+                rows.append({"driverId": drv, "grid": g})
+        return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["driverId", "grid"])
+
+    def _quali_from_fastf1(session_names: List[str]) -> pd.DataFrame:
+        """Raw qualifying classification (pre-penalty pace order) via FastF1."""
+        from .data.fastf1_backend import get_session_classification
+        s_int = int(season) if str(season) != "current" else datetime.now().year
+        r_int = int(rnd)
+        fast_q = None
+        for q_name in session_names:
+            fast_q = get_session_classification(s_int, r_int, q_name)
             if fast_q is not None and not fast_q.empty:
-                fast_rows = []
-                for _, r in fast_q.iterrows():
-                    abbr = str(r.get("Abbreviation", "")).upper()
-                    pos = r.get("Position")
-                    if abbr and pos and not pd.isna(pos):
-                        match = roster[roster["code"] == abbr]
-                        if not match.empty:
-                            fast_rows.append({
-                                "driverId": match.iloc[0]["driverId"],
-                                "grid": int(pos),
-                                "current_quali_pos": int(pos)
-                            })
-                if fast_rows:
-                    grid_df = pd.DataFrame(fast_rows)[["driverId", "grid"]]
-                    quali_pos_df = pd.DataFrame(fast_rows)[["driverId", "current_quali_pos"]]
-                    logger.info(f"[features] Fetched actual grid and current_quali_pos from FastF1 Qualifying for {len(grid_df)} drivers")
-            else:
-                logger.info("[features] FastF1 Qualifying classification not available or empty.")
+                break
+        rows = []
+        if fast_q is not None and not fast_q.empty:
+            for _, r in fast_q.iterrows():
+                abbr = str(r.get("Abbreviation", "")).upper()
+                pos = r.get("Position")
+                if abbr and pos and not pd.isna(pos):
+                    match = roster[roster["code"] == abbr]
+                    if not match.empty:
+                        rows.append({
+                            "driverId": match.iloc[0]["driverId"],
+                            "current_quali_pos": int(pos),
+                        })
+        return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["driverId", "current_quali_pos"])
 
-        except Exception as e:
-            logger.info(f"[features] Could not fetch grid/quali from FastF1: {e}")
-    elif session_type == "sprint" and not roster.empty:
+    if session_type in ("race", "sprint") and not roster.empty:
+        # 1. Penalty-adjusted grid from the results endpoint (available once the
+        #    session has run — i.e. for backtests/calibration and finished events).
         try:
-            from .data.fastf1_backend import get_session_classification
-            s_int = int(season) if str(season) != "current" else datetime.now().year
-            r_int = int(rnd)
-            
-            # Fetch Sprint Qualifying Results via FastF1
-            fast_sq = None
-            for sq_name in ("Sprint Qualifying", "SQ", "Sprint Shootout"):
-                fast_sq = get_session_classification(s_int, r_int, sq_name)
-                if fast_sq is not None and not fast_sq.empty:
-                    break
-
-            if fast_sq is not None and not fast_sq.empty:
-                fast_rows = []
-                for _, r in fast_sq.iterrows():
-                    abbr = str(r.get("Abbreviation", "")).upper()
-                    pos = r.get("Position")
-                    if abbr and pos and not pd.isna(pos):
-                        match = roster[roster["code"] == abbr]
-                        if not match.empty:
-                            fast_rows.append({
-                                "driverId": match.iloc[0]["driverId"],
-                                "grid": int(pos),
-                                "current_quali_pos": int(pos)
-                            })
-                if fast_rows:
-                    grid_df = pd.DataFrame(fast_rows)[["driverId", "grid"]]
-                    quali_pos_df = pd.DataFrame(fast_rows)[["driverId", "current_quali_pos"]]
-                    logger.info(f"[features] Fetched actual grid from FastF1 Sprint Qualifying for {len(grid_df)} drivers")
+            if session_type == "race":
+                res_block = jc.get_race_results(str(season), str(rnd))
             else:
-                logger.info("[features] FastF1 Sprint Qualifying classification not available or empty.")
-
+                res_block = jc.get_sprint_results(str(season), str(rnd))
+            grid_df = _grid_from_results(res_block)
+            if not grid_df.empty:
+                logger.info(f"[features] Fetched penalty-adjusted grid from results for {len(grid_df)} drivers")
         except Exception as e:
-            logger.info(f"[features] Could not fetch grid from FastF1 Sprint Qualifying: {e}")
+            logger.info(f"[features] Could not fetch grid from results endpoint: {e}")
+
+        # 2. Raw qualifying order from FastF1 (pure one-lap pace signal).
+        try:
+            q_names = ["Q"] if session_type == "race" else ["Sprint Qualifying", "SQ", "Sprint Shootout"]
+            quali_pos_df = _quali_from_fastf1(q_names)
+            if not quali_pos_df.empty:
+                logger.info(f"[features] Fetched current_quali_pos from FastF1 for {len(quali_pos_df)} drivers")
+                # 3. Pre-race fallback: when the results-endpoint grid is not yet
+                #    available, the qualifying order is the best grid estimate.
+                if grid_df.empty:
+                    grid_df = quali_pos_df.rename(columns={"current_quali_pos": "grid"})
+        except Exception as e:
+            logger.info(f"[features] Could not fetch quali order from FastF1: {e}")
 
 
     # Historical results (optimized, cached, roster-aware)
@@ -1535,27 +1682,20 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
                 X[col] = X[col].fillna(default_val)
                 
         wt = wagg or {}
-        
-        # Calculate weather effect safely (treating missing as 0.0)
-        t_mean = float(wt.get("temp_mean", 0.0))
-        p_mean = float(wt.get("pressure_mean", 0.0))
-        w_mean = float(wt.get("wind_mean", 0.0))
-        r_sum = float(wt.get("rain_sum", 0.0))
-        
-        if t_mean != t_mean:
-            t_mean = 0.0
-        if p_mean != p_mean:
-            p_mean = 0.0
-        if w_mean != w_mean:
-            w_mean = 0.0
-        if r_sum != r_sum:
-            r_sum = 0.0
+
+        # Weather effect = driver sensitivity x standardized condition anomaly.
+        # Anomalies (not raw readings) keep the four terms on comparable scales;
+        # see normalize_weather_conditions for why this matters (pressure units).
+        t_anom, p_anom, w_anom, r_anom = normalize_weather_conditions(
+            wt.get("temp_mean"), wt.get("pressure_mean"),
+            wt.get("wind_mean"), wt.get("rain_sum"),
+        )
 
         X["weather_effect"] = (
-            X.get("weather_beta_temp", 0.0) * t_mean +
-            X.get("weather_beta_pressure", 0.0) * p_mean +
-            X.get("weather_beta_wind", 0.0) * w_mean +
-            X.get("weather_beta_rain", 0.0) * r_sum
+            X.get("weather_beta_temp", 0.0) * t_anom +
+            X.get("weather_beta_pressure", 0.0) * p_anom +
+            X.get("weather_beta_wind", 0.0) * w_anom +
+            X.get("weather_beta_rain", 0.0) * r_anom
         )
 
     X["session_type"] = session_type

@@ -115,17 +115,12 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     races_pts = races["points"].values.astype(float)
     races_val_base = -races_pos
 
-    # Pre-calculate DNF status from races_full
+    # Pre-calculate DNF status from races_full (shared finish-status detection)
     if "is_dnf" in races_full.columns:
         r_full_dnf = races_full["is_dnf"].astype(float).values
     else:
-        rf_pos = races_full["position"].values
-        rf_status = races_full["status"].astype(str).str.lower().values if "status" in races_full.columns else np.array(["finished"] * len(races_full))
-        # Use a vectorized check for DNF status matching features.py
-        is_dnf_status = pd.Series(rf_status).str.contains(
-            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
-        ).values
-        r_full_dnf = ((pd.isna(rf_pos.astype(float))) | is_dnf_status).astype(float)
+        from .features import compute_dnf_flags
+        r_full_dnf = compute_dnf_flags(races_full).astype(float).values
 
 
     # Extract keys and other required data
@@ -166,7 +161,13 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     qual_delta = qual["q_delta"].values.astype(float)
     qual_dates = pd.to_datetime(qual["date"], utc=True).values
     qual_seasons = qual["season"].values
+    qual_rounds = qual["round"].values
     qual_sessions = qual["session"].values
+    qual_t_codes = (
+        pd.Series(range(n_teams), index=t_uniques).reindex(qual["constructorId"]).fillna(-1).astype(int).values
+        if "constructorId" in qual.columns
+        else np.full(len(qual), -1, dtype=int)
+    )
 
     # Handle NaN grids gracefully in numpy arrays
     races_grid = races["grid"].values
@@ -192,7 +193,11 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
     _evt_weather_cache: Dict[Tuple[int, int], Optional[Tuple[float, float, float, float]]] = {}
 
     def _event_weather_conditions(season_i, round_i):
-        """(temp_mean, pressure_mean, wind_mean, rain_sum) for an event, or None."""
+        """Standardized (temp, pressure, wind, rain) anomalies for an event, or None.
+
+        Uses the same normalization as the inference-side weather_effect so the
+        GBM sees the feature on an identical scale in training and prediction.
+        """
         if not weather_beta_map:
             return None
         key = (int(season_i), int(round_i))
@@ -200,14 +205,13 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
             return _evt_weather_cache[key]
         conditions = None
         try:
-            from .features import _load_weather_cache
+            from .features import _load_weather_cache, normalize_weather_conditions
             wt = _load_weather_cache(cache_dir, key[0], key[1])
             if wt:
-                def _f(v):
-                    fv = float(v) if v is not None else 0.0
-                    return 0.0 if fv != fv else fv  # NaN -> 0.0
-                conditions = (_f(wt.get("temp_mean")), _f(wt.get("pressure_mean")),
-                              _f(wt.get("wind_mean")), _f(wt.get("rain_sum")))
+                conditions = normalize_weather_conditions(
+                    wt.get("temp_mean"), wt.get("pressure_mean"),
+                    wt.get("wind_mean"), wt.get("rain_sum"),
+                )
         except Exception:
             conditions = None
         _evt_weather_cache[key] = conditions
@@ -330,18 +334,25 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
 
 
         # --- Calculate qualifying_form_index & teammate_delta ---
-        q_form_index = np.zeros(n_drivers, dtype=float)
-        tm_delta_index = np.zeros(n_drivers, dtype=float)
-        sprint_q_form_index = np.zeros(n_drivers, dtype=float)
-        valid_sq = np.zeros(n_drivers, dtype=bool)
-
-        prior_q_mask = qual_dates < d_val
-        if np.any(prior_q_mask):
-            pq_dates = qual_dates[prior_q_mask]
-            pq_season = qual_seasons[prior_q_mask]
-            pq_pos = qual_pos[prior_q_mask]
-            pq_qdelta = qual_delta[prior_q_mask]
-            pq_dcodes_sub = q_dcodes[prior_q_mask]
+        # Two variants are needed:
+        #   * race-visible: all qualifying sessions before the race date,
+        #     INCLUDING this weekend's qualifying (known before the race);
+        #   * pre-event: excluding this weekend entirely, used as features for
+        #     the qualifying training samples so their own outcome (the target)
+        #     never leaks into their features.
+        def _quali_form_stats(mask):
+            qf = np.zeros(n_drivers, dtype=float)
+            tmd = np.zeros(n_drivers, dtype=float)
+            sqf = np.zeros(n_drivers, dtype=float)
+            v_sq = np.zeros(n_drivers, dtype=bool)
+            if not np.any(mask):
+                return qf, tmd, sqf, v_sq
+            pq_dates = qual_dates[mask]
+            pq_season = qual_seasons[mask]
+            pq_pos = qual_pos[mask]
+            pq_qdelta = qual_delta[mask]
+            pq_dcodes_sub = q_dcodes[mask]
+            pq_sessions = qual_sessions[mask]
 
             # Remove any drivers not in our main unique set
             valid_pq = pq_dcodes_sub >= 0
@@ -350,49 +361,53 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
             pq_pos = pq_pos[valid_pq]
             pq_qdelta = pq_qdelta[valid_pq]
             pq_dcodes_sub = pq_dcodes_sub[valid_pq]
+            pq_sessions = pq_sessions[valid_pq]
 
-            if len(pq_pos) > 0:
-                diff_q = d_val - pq_dates
-                ages_q = diff_q.astype('timedelta64[ns]').astype(float) / 86400000000000.0
-                wq = np.exp2(-ages_q / max(1.0, float(half_life_days)))
+            if len(pq_pos) == 0:
+                return qf, tmd, sqf, v_sq
 
-                # Apply qual boost for current season
-                boost_q_mask = pq_season == s
-                wq[boost_q_mask] *= qual_boost_factor
+            diff_q = d_val - pq_dates
+            ages_q = diff_q.astype('timedelta64[ns]').astype(float) / 86400000000000.0
+            wq = np.exp2(-ages_q / max(1.0, float(half_life_days)))
 
-                wqval = -pq_pos * wq
-                wqval_delta = pq_qdelta * wq
-                wq_sum = np.bincount(pq_dcodes_sub, weights=wq, minlength=n_drivers)
-                wqval_sum = np.bincount(pq_dcodes_sub, weights=wqval, minlength=n_drivers)
-                wqdelta_sum = np.bincount(pq_dcodes_sub, weights=wqval_delta, minlength=n_drivers)
+            # Apply qual boost for current season
+            boost_q_mask = pq_season == s
+            wq[boost_q_mask] *= qual_boost_factor
 
+            wqval = -pq_pos * wq
+            wqval_delta = pq_qdelta * wq
+            wq_sum = np.bincount(pq_dcodes_sub, weights=wq, minlength=n_drivers)
+            wqval_sum = np.bincount(pq_dcodes_sub, weights=wqval, minlength=n_drivers)
+            wqdelta_sum = np.bincount(pq_dcodes_sub, weights=wqval_delta, minlength=n_drivers)
 
-                valid_q = wq_sum > 0
-                q_form_index[valid_q] = wqval_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
-                tm_delta_index[valid_q] = wqdelta_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
+            valid_q = wq_sum > 0
+            qf[valid_q] = wqval_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
+            tmd[valid_q] = wqdelta_sum[valid_q] / np.maximum(wq_sum[valid_q], 1e-6)
 
-                # --- Calculate sprint_qualifying_form_index ---
-                pq_sessions = qual_sessions[prior_q_mask][valid_pq]
-                is_sq = (pq_sessions == "sprint_qualifying")
-                sprint_q_form_index = np.zeros(n_drivers, dtype=float)
-                valid_sq = np.zeros(n_drivers, dtype=bool)
-                if np.any(is_sq):
-                    sqw_sum = np.bincount(pq_dcodes_sub[is_sq], weights=wq[is_sq], minlength=n_drivers)
-                    sqwval_sum = np.bincount(pq_dcodes_sub[is_sq], weights=wqval[is_sq], minlength=n_drivers)
-                    valid_sq = sqw_sum > 0
-                    sprint_q_form_index[valid_sq] = sqwval_sum[valid_sq] / np.maximum(sqw_sum[valid_sq], 1e-6)
+            is_sq = (pq_sessions == "sprint_qualifying")
+            if np.any(is_sq):
+                sqw_sum = np.bincount(pq_dcodes_sub[is_sq], weights=wq[is_sq], minlength=n_drivers)
+                sqwval_sum = np.bincount(pq_dcodes_sub[is_sq], weights=wqval[is_sq], minlength=n_drivers)
+                v_sq = sqw_sum > 0
+                sqf[v_sq] = sqwval_sum[v_sq] / np.maximum(sqw_sum[v_sq], 1e-6)
+            return qf, tmd, sqf, v_sq
 
+        prior_q_mask = qual_dates < d_val
+        q_form_index, tm_delta_index, sprint_q_form_index, valid_sq = _quali_form_stats(prior_q_mask)
 
-        # Build samples for the current event
-        evt_indices = np.where(evt_mask)[0]
+        same_evt_q_mask = (qual_seasons == s) & (qual_rounds == r)
+        evt_q_indices = np.where(same_evt_q_mask)[0]
+        if len(evt_q_indices) > 0:
+            q_form_pre, tm_delta_pre, sq_form_pre, valid_sq_pre = _quali_form_stats(
+                prior_q_mask & ~same_evt_q_mask
+            )
+        else:
+            q_form_pre = tm_delta_pre = sq_form_pre = None
+            valid_sq_pre = None
 
-        for idx in evt_indices:
-            code = d_codes[idx]
-            if not valid[code]:
-                continue
-
-            t_code = t_codes[idx]
-            sample = {
+        def _base_sample(code, t_code):
+            """Feature fields shared by race and qualifying samples."""
+            return {
                 "driverId": uniques[code],
                 "constructorId": t_uniques[t_code] if t_code >= 0 else None,
                 "form_index": float(form_index[code]),
@@ -406,21 +421,86 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                     if evt_weather_cond is not None and str(uniques[code]) in weather_beta_map
                     else {}
                 ),
-                "qualifying_form_index": float(q_form_index[code]),
                 "team_form_index": float(team_form_index[t_code]) if t_code >= 0 else 0.0,
                 "sprint_form_index": float(sprint_form_index[code]) if valid_sprint[code] else float(form_index[code]),
-                "sprint_qualifying_form_index": float(sprint_q_form_index[code]) if valid_sq[code] else float(q_form_index[code]),
                 "grid_finish_delta": float(gf_index[code]),
-                "teammate_delta": float(tm_delta_index[code]),
                 "circuit_avg_pos": float(c_avg_pos[code]),
                 "circuit_dnf_rate": float(c_dnf_rate[code]),
                 "circuit_experience": float(c_exp[code]),
+            }
+
+        # Build race/sprint samples for the current event.
+        # The target (y_pace) is the ACTUAL outcome: the classified finishing
+        # position z-scored within the event+session, so the GBM learns the
+        # mapping from pre-event features to real results (lower = better).
+        evt_indices = np.where(evt_mask)[0]
+
+        y_pace_map: Dict[int, float] = {}
+        for sess_name in ("race", "sprint"):
+            sub = evt_indices[races_sessions[evt_indices] == sess_name]
+            if len(sub) >= 1:
+                pos_sub = races_pos[sub]
+                mu_y = float(pos_sub.mean())
+                sd_y = float(pos_sub.std())
+                if sd_y < 1e-9:
+                    sd_y = 1.0  # single/uniform result -> neutral target 0.0
+                for ii, pz in zip(sub, (pos_sub - mu_y) / sd_y):
+                    y_pace_map[int(ii)] = float(pz)
+
+        for idx in evt_indices:
+            code = d_codes[idx]
+            if not valid[code]:
+                continue
+            if int(idx) not in y_pace_map:
+                continue
+
+            t_code = t_codes[idx]
+            sample = _base_sample(code, t_code)
+            sample.update({
+                "qualifying_form_index": float(q_form_index[code]),
+                "sprint_qualifying_form_index": float(sprint_q_form_index[code]) if valid_sq[code] else float(q_form_index[code]),
+                "teammate_delta": float(tm_delta_index[code]),
                 "grid": float(races_grid_float[idx]),
                 "is_race": 1 if races_sessions[idx] == "race" else 0,
                 "is_qualifying": 0,
                 "is_sprint": 1 if races_sessions[idx] == "sprint" else 0,
-            }
+                "y_pace": y_pace_map[int(idx)],
+            })
             rows.append(sample)
+
+        # Build qualifying/sprint-qualifying samples for the current event so
+        # the GBM also learns one-lap outcomes.  Features use the pre-event
+        # qualifying form (this event excluded) to avoid target leakage.
+        if len(evt_q_indices) > 0 and q_form_pre is not None:
+            for q_sess_name in ("qualifying", "sprint_qualifying"):
+                sub_q = evt_q_indices[qual_sessions[evt_q_indices] == q_sess_name]
+                sub_q = sub_q[q_dcodes[sub_q] >= 0]
+                if len(sub_q) < 2:
+                    continue
+                qpos_sub = qual_pos[sub_q]
+                mu_q = float(qpos_sub.mean())
+                sd_q = float(qpos_sub.std())
+                if sd_q < 1e-9:
+                    sd_q = 1.0
+                z_q = (qpos_sub - mu_q) / sd_q
+
+                for ii, zq in zip(sub_q, z_q):
+                    code = q_dcodes[ii]
+                    if not valid[code]:
+                        continue
+                    t_code = int(qual_t_codes[ii])
+                    sample = _base_sample(code, t_code)
+                    sample.update({
+                        "qualifying_form_index": float(q_form_pre[code]),
+                        "sprint_qualifying_form_index": float(sq_form_pre[code]) if valid_sq_pre[code] else float(q_form_pre[code]),
+                        "teammate_delta": float(tm_delta_pre[code]),
+                        "grid": np.nan,
+                        "is_race": 0,
+                        "is_qualifying": 1,
+                        "is_sprint": 1 if q_sess_name == "sprint_qualifying" else 0,
+                        "y_pace": float(zq),
+                    })
+                    rows.append(sample)
 
     if not rows:
         return None
@@ -448,7 +528,8 @@ def _split_feature_columns(X: 'pd.DataFrame', exclude: List[str]) -> Tuple[List[
 
 
 def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
-                     hist_X: Optional['pd.DataFrame'] = None) -> Tuple[Any, 'np.ndarray', list]:
+                     hist_X: Optional['pd.DataFrame'] = None
+                     ) -> Tuple[Any, 'np.ndarray', list, Optional[List[Dict[str, float]]]]:
     """
     Train a model producing a "pace index" (lower is better/faster) per driver.
 
@@ -477,49 +558,86 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
 
     # Determine training data: use historical data when available to avoid
     # fitting and predicting on the same event (train/predict leakage).
-    if hist_X is not None and not hist_X.empty and "form_index" in hist_X.columns:
+    #
+    # Preferred path: outcome training.  When hist_X carries the y_pace column
+    # (actual event results, z-scored within each event), the GBM learns the
+    # mapping from pre-event features to REAL outcomes.  The legacy fallback
+    # (form-index target) only applies to historical matrices without y_pace
+    # and to the in-event fit, where no out-of-sample outcome exists.
+    outcome_training = False
+    target_col = None
+    if hist_X is not None and not hist_X.empty and "y_pace" in hist_X.columns \
+            and hist_X["y_pace"].notna().any():
+        labelled = hist_X[hist_X["y_pace"].notna()]
+
+        def _flag(col: str) -> 'pd.Series':
+            if col in labelled.columns:
+                return labelled[col].fillna(0).astype(int)
+            return pd.Series(0, index=labelled.index)
+
+        if session_type in ("qualifying", "sprint_qualifying"):
+            sess_mask = _flag("is_qualifying") == 1
+        elif session_type == "sprint":
+            sess_mask = (_flag("is_sprint") == 1) & (_flag("is_qualifying") == 0)
+        else:
+            sess_mask = _flag("is_race") == 1
+        selected = labelled[sess_mask]
+        # Too few session-specific samples: train on all outcome rows and let
+        # the is_race/is_qualifying/is_sprint flags differentiate session types.
+        if len(selected) < 40:
+            selected = labelled
+        X_train = selected
+        outcome_training = True
+        logger.info("[models] Training GBM on %d outcome-labelled samples (%s)",
+                    len(X_train), session_type)
+    elif hist_X is not None and not hist_X.empty and "form_index" in hist_X.columns:
         X_train = hist_X
-        logger.info("[models] Training GBM on %d historical samples (out-of-sample)", len(hist_X))
+        logger.info("[models] Training GBM on %d historical samples (legacy form target)", len(hist_X))
     else:
         X_train = X
         logger.info("[models] Training GBM on current event (%d rows, no historical X available)", len(X))
 
-
-    # Target: use appropriate form index for the session type
-    # form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
-    if session_type == "sprint":
-        target_col = "sprint_form_index"
-    elif session_type == "sprint_qualifying":
-        target_col = "sprint_qualifying_form_index"
+    if outcome_training:
+        # Actual outcome, already lower-is-better (z-scored finishing position)
+        y = X_train["y_pace"].astype(float).values
     else:
-        is_quali_session = session_type in ("qualifying", "sprint_qualifying")
-        target_col = "qualifying_form_index" if is_quali_session else "form_index"
-
-    if target_col not in X_train.columns:
-        # Fallback to general form if specific form is missing
-        if target_col == "sprint_form_index":
-            target_col = "form_index"
-        elif target_col == "sprint_qualifying_form_index":
-            target_col = "qualifying_form_index"
-            if target_col not in X_train.columns:
-                target_col = "form_index"
-        elif target_col == "qualifying_form_index":
-            target_col = "form_index"
+        # Legacy target: use appropriate form index for the session type
+        # form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
+        if session_type == "sprint":
+            target_col = "sprint_form_index"
+        elif session_type == "sprint_qualifying":
+            target_col = "sprint_qualifying_form_index"
         else:
-            target_col = "qualifying_form_index"
+            is_quali_session = session_type in ("qualifying", "sprint_qualifying")
+            target_col = "qualifying_form_index" if is_quali_session else "form_index"
 
+        if target_col not in X_train.columns:
+            # Fallback to general form if specific form is missing
+            if target_col == "sprint_form_index":
+                target_col = "form_index"
+            elif target_col == "sprint_qualifying_form_index":
+                target_col = "qualifying_form_index"
+                if target_col not in X_train.columns:
+                    target_col = "form_index"
+            elif target_col == "qualifying_form_index":
+                target_col = "form_index"
+            else:
+                target_col = "qualifying_form_index"
 
-    if target_col not in X_train.columns:
-        y = np.zeros(len(X_train), dtype=float)
-    else:
-        y = -X_train[target_col].astype(float).values
+        if target_col not in X_train.columns:
+            y = np.zeros(len(X_train), dtype=float)
+        else:
+            y = -X_train[target_col].astype(float).values
 
-    # Features (exclude identifiers, session meta, and target to prevent leakage)
-    # Note: we only exclude the current target column so the other index can be used as a feature
+    # Features (exclude identifiers, session meta, and the target to prevent leakage).
+    # With outcome training the form indices all remain features; with the legacy
+    # form target only the target's own column is excluded.
     exclude_cols = [
         "driverId", "name", "code", "constructorId", "constructorName", "number",
-        "session_type", target_col, "current_quali_pos"
+        "session_type", "current_quali_pos", "y_pace",
     ]
+    if target_col is not None:
+        exclude_cols.append(target_col)
     
     # Also exclude columns that are entirely NaN in the training set
     all_nan_cols = [c for c in X_train.columns if c not in exclude_cols and X_train[c].isna().all()]
@@ -786,12 +904,6 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
         logger.info(
             "[models] Applied dynamic Anchor-Delta grid stickiness modified by circuit and driver"
         )
-        
-        # DEBUG PRINTS FOR UNDERSTANDING
-        if "driverId" in X.columns and session_type == "race":
-            for i, drv in enumerate(X["driverId"]):
-                if drv in ("antonelli", "hadjar", "piastri"):
-                    logger.info(f"[DEBUG] {drv} | Grid: {grid_vals[i]} | PaceZ: {pace_z[i]:.2f} | Delta: {pace_delta[i]:.2f} | Final PaceHat: {pace_hat[i]:.2f}")
 
     # Compute SHAP values for explainability
     shap_per_driver = None
@@ -1026,15 +1138,12 @@ def estimate_dnf_probabilities(
     if races.empty or current_X is None or current_X.empty:
         return np.full(len(current_X) if current_X is not None else 0, 0.08, dtype=float)
 
-    # Detect DNF status
+    # Detect DNF status (shared finish-status detection from features.py)
     if "is_dnf" in races.columns:
         races["dnf"] = races["is_dnf"].astype(int)
     else:
-        status = races["status"].astype(str).str.lower()
-        dnf = (~races["position"].notna()) | status.str.contains(
-            "accident|engine|gear|suspension|electrical|hydraulics|dnf|brake|clutch|collision|spin|damage"
-        )
-        races["dnf"] = dnf.astype(int)
+        from .features import compute_dnf_flags
+        races["dnf"] = compute_dnf_flags(races).astype(int)
 
     # Determine if current session is wet (rain > 1mm threshold)
     WET_THRESHOLD = 1.0  # mm of rain
