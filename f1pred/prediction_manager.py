@@ -749,7 +749,7 @@ class PredictionManager:
                     w = weather.get("wind_mean", 0) or 0
                     embed["fields"].append({
                         "name": "Conditions",
-                        "value": f"🌡️ {t:.0f}°C 💧 {r:.1f}mm 🌬️ {w:.0f}km/h",
+                        "value": f"🌡️ {t:.0f}°C  ·  💧 {r:.1f}mm  ·  🌬️ {w:.0f}km/h",
                         "inline": False
                     })
 
@@ -760,7 +760,7 @@ class PredictionManager:
                                   key=lambda m: m.direction)[:3]
                 mover_field_count = 0
                 if top_gains:
-                    movers_text = "\n".join([f"⬆️ **{m.code}** (+{m.direction} positions)" for m in top_gains])
+                    movers_text = "\n".join([f"▲ **{m.code}** +{m.direction}" for m in top_gains])
                     embed["fields"].append({
                         "name": "🚀 Movers & Shakers",
                         "value": movers_text,
@@ -768,7 +768,7 @@ class PredictionManager:
                     })
                     mover_field_count += 1
                 if top_drops:
-                    drops_text = "\n".join([f"⬇️ **{m.code}** ({m.direction} positions)" for m in top_drops])
+                    drops_text = "\n".join([f"▼ **{m.code}** {m.direction}" for m in top_drops])
                     embed["fields"].append({
                         "name": "📉 Sliding Back",
                         "value": drops_text,
@@ -800,13 +800,12 @@ class PredictionManager:
 
                         m = movements.get(d_id)
                         if m:
-                            icon = "⬆️" if m.direction > 0 else "⬇️"
-                            diff_val = f"{icon}{abs(m.direction)}"
+                            move = f" ▲{m.direction}" if m.direction > 0 else f" ▼{abs(m.direction)}"
                         else:
-                            diff_val = " "  # en space keeps unchanged rows tidy
+                            move = ""
 
-                        lines.append(f"{prefix} `P{pos_str}` **{code}** {diff_val}")
-                    return "\n".join(lines) or "No data"
+                        lines.append(f"{prefix} `P{pos_str}` **{code}**{move}")
+                    return "\n".join(lines) or "*No data*"
 
                 embed["fields"].append({
                     "name": "Top 10",
