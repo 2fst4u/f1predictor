@@ -135,3 +135,15 @@ jobs:
           labels: ${{ steps.version.outputs.is_release == 'true' && steps.meta-release.outputs.labels || steps.meta-dev.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Comment on commit with dev build info
+        if: steps.version.outputs.is_release == 'false'
+        uses: peter-evans/commit-comment@v3
+        with:
+          sha: ${{ github.sha }}
+          body: |
+            :package: Dev build [`v${{ steps.version.outputs.version }}`](https://github.com/${{ github.repository }}/pkgs/container/${{ github.event.repository.name }}) published.
+
+            ```
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ```
