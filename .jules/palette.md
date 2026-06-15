@@ -8,3 +8,6 @@
 ## 2026-06-08 - Accessible Tooltips for Disabled States
 **Learning:** `pointer-events-none` on parent wrappers completely blocks pointer events, making it impossible for users to interact with or even see tooltips (like `title` attributes) on disabled elements nested inside.
 **Action:** Remove `pointer-events-none` from parent wrappers and apply `disabled:cursor-not-allowed` and dynamic `title` attributes directly to the interactive elements (buttons/inputs) themselves so screen readers and mouse users get context on why the element is disabled.
+## 2024-06-15 - Disabled States Accessibility
+**Learning:** Applying `pointer-events-none` to a parent container blocks pointer events on all children. This prevents disabled child elements from showing `cursor-not-allowed` and makes `title` tooltips inaccessible on hover, ruining the UX for users trying to understand why an element is disabled. Also, applying opacity to a parent compounds with child opacity, leading to poor contrast.
+**Action:** Remove `pointer-events-none` and `opacity-50` from parent wrappers of disabled groups. Apply `disabled:opacity-50`, `disabled:cursor-not-allowed`, and informative `title` attributes directly to the interactive child elements to preserve tooltip accessibility and clear interaction feedback.
