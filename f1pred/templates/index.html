@@ -207,7 +207,7 @@
                     </div>
 
                     <div>
-                        <div role="group" aria-labelledby="round-label" tabindex="0" class="flex space-x-3 overflow-x-auto no-scrollbar pb-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded" :class="{'opacity-50 pointer-events-none': scheduleLoading}">
+                        <div role="group" aria-labelledby="round-label" tabindex="0" class="flex space-x-3 overflow-x-auto no-scrollbar pb-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded">
                             <template x-if="scheduleLoading">
                                 <span class="flex items-center text-xs text-gray-500 italic mt-1.5 pt-1">
                                     <i class="fas fa-circle-notch fa-spin mr-1.5" aria-hidden="true"></i>Loading schedule...
@@ -217,8 +217,9 @@
                                 <button @click="selectRound(r.round)"
                                     :disabled="scheduleLoading || loading"
                                     :aria-current="params.round === r.round ? 'true' : 'false'"
+                                    :title="(scheduleLoading || loading) ? 'Loading...' : 'Select Round ' + (r.round || index + 1)"
                                     :class="params.round === r.round ? 'bg-red-600 text-white border-red-500' : 'bg-gray-800 text-gray-400 border-gray-700 hover:border-gray-500 hover:bg-gray-700 hover:text-gray-300'"
-                                    class="flex-shrink-0 text-xs px-3 py-1.5 rounded border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 flex flex-col items-center justify-center min-w-[70px] disabled:cursor-not-allowed">
+                                    class="flex-shrink-0 text-xs px-3 py-1.5 rounded border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 flex flex-col items-center justify-center min-w-[70px] disabled:opacity-50 disabled:cursor-not-allowed">
                                     <span class="font-bold mb-0.5 whitespace-nowrap" x-text="'Round ' + (r.round || index + 1)"></span>
                                     <span class="text-[10px] uppercase tracking-tighter w-full max-w-[90px] truncate text-center" :class="params.round === r.round ? 'opacity-100' : 'opacity-75'" x-text="r.raceName.replace(' Grand Prix', '')"></span>
                                 </button>
