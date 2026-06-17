@@ -48,10 +48,10 @@ The app fetches data from free, public APIs:
 2. **Feature engineering** – Driver form, team performance, weather conditions, teammate comparisons, starting grid
 3. **Grid position handling** – Uses actual grid from race results when available; for pre-race predictions, runs a qualifying simulation to estimate starting positions
 4. **Model training** – An ensemble of four specialized models is trained fresh on historical data:
-    - **GBM (AI Brain)**: Analyzes patterns like weather and recent momentum to predict raw speed.
-    - **Elo (Skill Score)**: A Chess-style rating that tracks a driver's talent relative to their rivals.
-    - **BT (Head-to-Head)**: Determines strength by seeing who consistently finishes ahead of whom.
-    - **Mix (Talent Separator)**: Mathematically separates a driver's skill from the car's performance.
+   - **GBM (AI Brain)**: Analyzes patterns like weather and recent momentum to predict raw speed.
+   - **Elo (Skill Score)**: A Chess-style rating that tracks a driver's talent relative to their rivals.
+   - **BT (Head-to-Head)**: Determines strength by seeing who consistently finishes ahead of whom.
+   - **Mix (Talent Separator)**: Mathematically separates a driver's skill from the car's performance.
 5. **DNF estimation** – Separate classifier for retirement probability
 6. **Monte Carlo simulation** – 5000 draws to get win probability, podium chances, and expected position
 
@@ -70,6 +70,7 @@ This allows accurate race predictions even before the grid is known, and account
 The model uses a variety of engineered features to capture driver talent, car performance, and track conditions. These factors are categorized as follows:
 
 ### Performance & Form
+
 - **Race Form (`form_index`)**: A recency-weighted score of a driver's finishing positions and points. Higher values indicate better current form.
 - **Qualifying Form (`qualifying_form_index`)**: A recency-weighted index of a driver's qualifying performance.
 - **Sprint Form (`sprint_form_index`)**: A recency-weighted score of a driver's sprint finishing positions and points.
@@ -77,10 +78,12 @@ The model uses a variety of engineered features to capture driver talent, car pe
 - **Team Strength (`team_form_index`)**: The recent performance level of the constructor, representing the car's competitive ceiling.
 
 ### Comparative Metrics
+
 - **vs Teammate (`teammate_delta`)**: The average qualifying advantage over their teammate. A positive value means they consistently out-qualify their peer.
 - **Overtaking Skill (`grid_finish_delta`)**: The average number of positions a driver gains (or loses) between their starting grid and final finish, measuring racecraft.
 
 ### Track-Specific Factors
+
 - **Circuit History (`circuit_avg_pos`)**: The driver's historical average finishing position at this specific track.
 - **Circuit Experience (`circuit_experience`)**: Total number of starts the driver has at this circuit.
 - **Circuit DNF Rate (`circuit_dnf_rate`)**: The driver's personal retirement rate at this track.
@@ -88,6 +91,7 @@ The model uses a variety of engineered features to capture driver talent, car pe
 - **Track DNF Rate (`global_circuit_dnf_rate`)**: The overall historical retirement rate for all drivers at this circuit.
 
 ### Session & Grid
+
 - **Race Session (`is_race`)**: A boolean flag indicating if the session is a race.
 - **Quali Session (`is_qualifying`)**: A boolean flag indicating if the session is qualifying.
 - **Sprint Session (`is_sprint`)**: A boolean flag indicating if the session is a sprint.
@@ -96,6 +100,7 @@ The model uses a variety of engineered features to capture driver talent, car pe
 - **Constructor (`constructorId`)**: The constructor (team) identifier for the given entry.
 
 ### Weather & Conditions
+
 - **Weather Impact (`weather_effect`)**: The total predicted influence of atmospheric conditions on a driver's performance.
 - **Condition Sensitivities (`weather_beta_temp`, `weather_beta_pressure`, `weather_beta_wind`, `weather_beta_rain`)**: Driver-specific sensitivity coefficients used to calculate the overall weather impact.
 - **Condition Skills (`temp_skill`, `rain_skill`, `wind_skill`, `pressure_skill`)**: Driver-specific proficiency scores for various weather conditions, derived from historical performance correlations.
@@ -107,10 +112,12 @@ All settings live in `config.yaml`. The main things you might want to tweak:
 
 ```yaml
 app:
-  live_refresh_seconds: 600   # Live mode poll interval (seconds)
-  auto_refresh_seconds: 3600  # Background prediction refresh interval (seconds)
-  timezone: "UTC"             # System timezone for session times
-  log_level: "WARNING"        # DEBUG, INFO, WARNING, ERROR
+  model_version: "v1.2" # Current model version indicator
+  random_seed: 42 # Random seed for reproducibility
+  timezone: "UTC" # System timezone for session times
+  live_refresh_seconds: 600 # Live mode poll interval (seconds)
+  auto_refresh_seconds: 3600 # Background prediction refresh interval (seconds)
+  log_level: "WARNING" # DEBUG, INFO, WARNING, ERROR
 
 modelling:
   # Model weights (including recency, blending, ensemble, DNF)
