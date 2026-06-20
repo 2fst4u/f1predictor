@@ -183,8 +183,9 @@ def test_build_hist_training_X_boost_factors_are_wired_through(boost_kwarg, affe
         f"{boost_kwarg} did not change {affected_col} — boost not wired to its index"
     )
     for col in boosted.select_dtypes("number").columns:
-        if col == "grid":
-            # Qualifying samples intentionally have no grid (imputed downstream)
+        if col in ("grid", "current_quali_pos"):
+            # Qualifying samples intentionally have no grid / current_quali_pos
+            # (both are race-only pre-race signals, imputed downstream).
             continue
         assert np.all(np.isfinite(boosted[col].values))
     # Outcome targets must be present and labelled for every sample.
@@ -260,6 +261,72 @@ def test_build_hist_training_X_none_history():
     X_current = pd.DataFrame({"driverId": ["driver_1"], "form_index": [0.0]})
     assert build_hist_training_X(None, X_current, datetime.now(timezone.utc)) is None
     assert build_hist_training_X(pd.DataFrame(), X_current, datetime.now(timezone.utc)) is None
+
+
+def test_current_quali_pos_is_a_learned_feature():
+    """current_quali_pos must be plumbed into the training matrix (race rows only)
+    and consumed by the GBM as a feature, rather than blended via a hard-coded weight.
+
+    This is part of making the model fully self-learning: the weekend's raw
+    qualifying order is an input variable whose importance the model learns.
+    """
+    from f1pred.models import build_hist_training_X, train_pace_model
+
+    hist, X_current, ref = _two_season_history()
+    hist_X = build_hist_training_X(hist, X_current, ref)
+    assert hist_X is not None
+
+    # Column must exist and be populated for race/sprint samples (from that
+    # weekend's qualifying), while qualifying samples stay NaN.
+    assert "current_quali_pos" in hist_X.columns
+    race_rows = hist_X[hist_X["is_race"] == 1]
+    quali_rows = hist_X[hist_X["is_qualifying"] == 1]
+    assert race_rows["current_quali_pos"].notna().any(), \
+        "current_quali_pos should be populated for race samples"
+    assert quali_rows["current_quali_pos"].isna().all(), \
+        "current_quali_pos must be absent (NaN) for qualifying samples"
+
+    # And it must be picked up as a model feature (not excluded).
+    X_infer = X_current.copy()
+    X_infer["current_quali_pos"] = list(range(1, len(X_infer) + 1))
+    _, pace_hat, features, _ = train_pace_model(
+        X_infer, session_type="race", hist_X=hist_X,
+    )
+    assert "current_quali_pos" in features
+    assert np.all(np.isfinite(pace_hat))
+
+
+def test_grid_is_not_a_hardcoded_anchor():
+    """Grid must influence pace only through what the model *learns*, not via a
+    hard-coded anchor.  When grid carries no signal in training, varying it at
+    inference must NOT reorder the predictions — the old grid-stickiness code
+    (pace = grid + delta) would have forced the order to follow grid regardless.
+    """
+    from f1pred.models import build_hist_training_X, train_pace_model
+
+    hist, X_current, ref = _two_season_history()
+    hist_X = build_hist_training_X(hist, X_current, ref)
+    assert hist_X is not None
+
+    # Strip grid of any learnable signal in the training matrix.
+    hist_X = hist_X.copy()
+    hist_X["grid"] = 1.0
+
+    X_infer = X_current.copy()
+    X_infer["form_index"] = np.linspace(5, -5, len(X_infer))
+
+    # Two inference frames identical except for grid (ascending vs reversed).
+    X_a = X_infer.copy()
+    X_a["grid"] = list(range(1, len(X_a) + 1))
+    X_b = X_infer.copy()
+    X_b["grid"] = list(range(len(X_b), 0, -1))
+
+    _, pace_a, _, _ = train_pace_model(X_a, session_type="race", hist_X=hist_X)
+    _, pace_b, _, _ = train_pace_model(X_b, session_type="race", hist_X=hist_X)
+
+    # Grid had no training signal, so it cannot move the predictions.
+    assert np.allclose(pace_a, pace_b), \
+        "grid changed the prediction despite carrying no learned signal — anchor still present"
 
 
 def test_train_pace_model_with_hist_X(sample_features):
