@@ -1191,27 +1191,16 @@ class CalibrationManager:
                 arr_bt = _h_team_at(arr_bt_grid)
                 arr_mixed = _h_team_at(arr_mixed_grid)
 
-                # Production baseline: base = -form - w_team * team_form,
-                # then pace = w_gbm * gbm + w_base * base.
-                base = form_pace + wb_tm * arr_base_team
-                raw_pace = wb_gbm * arr_gbm_raw + wb_form * base
-
-                p_z = _event_z(raw_pace, event_indices, n_unique)
-
-                # Current-weekend qualifying blend (mirrors models.py): for drivers
-                # with a current-quali result, blend their z-scored pace with the
-                # z-scored qualifying position using current_quali_factor (param 10).
-                # Applied before grid stickiness, exactly as in production.
-                p_z = np.where(
-                    quali_blend_mask,
-                    (1.0 - w_quali) * p_z + w_quali * q_z_precomputed,
-                    p_z,
-                )
-
-                # Grid anchor-delta, the actual production formula in models.py:
-                # final = grid + pace_z * (1 - stickiness) * MAX_DELTA
-                pace_pos = grid_filled + p_z * (1.0 - wb_grid) * 10.0
-                a_z = _event_z(pace_pos, event_indices, n_unique)
+                # Self-learning model: the race pace IS the GBM's learned output
+                # (arr_gbm_raw), trained on real outcomes with grid,
+                # current_quali_pos, circuit proficiency, weather, form, etc. as
+                # features.  Production no longer applies a hand-coded form blend,
+                # qualifying blend, or grid anchor-delta, so the calibration
+                # surrogate must not either — otherwise the ensemble/DNF/noise
+                # weights would be tuned against a model that no longer runs.
+                # (wb_gbm/wb_form/wb_tm/wb_grid/w_quali therefore no longer drive
+                # the race objective; they are anchored to defaults by the L2 reg.)
+                a_z = _event_z(arr_gbm_raw, event_indices, n_unique)
 
                 # Normalise race ensemble weights
                 race_wsum = we_pace + we_elo + we_bt + we_mixed
@@ -1270,9 +1259,9 @@ class CalibrationManager:
                         (arr_q_s_pre + w_q_season * arr_q_s_cur) / np.maximum(q_denom, 1e-9),
                         0.0,
                     )
-                    q_base = -q_form_idx + wb_tm * arr_q_team
-                    raw_q = wb_gbm * arr_q_gbm + wb_form * q_base
-                    q_z = _event_z(raw_q, q_event_indices, n_q_unique)
+                    # Qualifying pace is likewise the GBM's learned output directly
+                    # (no form blend), matching the self-learning production path.
+                    q_z = _event_z(arr_q_gbm, q_event_indices, n_q_unique)
 
                     q_wsum = we_q_pace + we_q_elo + we_q_bt + we_q_mixed
                     if q_wsum < 1e-9:

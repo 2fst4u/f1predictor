@@ -397,6 +397,20 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
 
         same_evt_q_mask = (qual_seasons == s) & (qual_rounds == r)
         evt_q_indices = np.where(same_evt_q_mask)[0]
+
+        # This weekend's raw qualifying order (current_quali_pos), known before
+        # the race.  Mirrors the inference feature so the GBM can learn how much
+        # the actual one-lap result drives the finishing order.  Prefer the main
+        # qualifying session, falling back to sprint qualifying.
+        cur_quali_pos = np.full(n_drivers, np.nan, dtype=float)
+        if len(evt_q_indices) > 0:
+            for _q_sess in ("qualifying", "sprint_qualifying"):
+                sel = evt_q_indices[qual_sessions[evt_q_indices] == _q_sess]
+                for qi in sel:
+                    c = q_dcodes[qi]
+                    if c >= 0 and np.isnan(cur_quali_pos[c]):
+                        cur_quali_pos[c] = float(qual_pos[qi])
+
         if len(evt_q_indices) > 0:
             q_form_pre, tm_delta_pre, sq_form_pre, valid_sq_pre = _quali_form_stats(
                 prior_q_mask & ~same_evt_q_mask
@@ -461,6 +475,7 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
                 "sprint_qualifying_form_index": float(sprint_q_form_index[code]) if valid_sq[code] else float(q_form_index[code]),
                 "teammate_delta": float(tm_delta_index[code]),
                 "grid": float(races_grid_float[idx]),
+                "current_quali_pos": float(cur_quali_pos[code]) if not np.isnan(cur_quali_pos[code]) else np.nan,
                 "is_race": 1 if races_sessions[idx] == "race" else 0,
                 "is_qualifying": 0,
                 "is_sprint": 1 if races_sessions[idx] == "sprint" else 0,
@@ -632,9 +647,13 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
     # Features (exclude identifiers, session meta, and the target to prevent leakage).
     # With outcome training the form indices all remain features; with the legacy
     # form target only the target's own column is excluded.
+    # Note: current_quali_pos (this weekend's raw qualifying order) is deliberately
+    # NOT excluded — it is a legitimate pre-race input variable and is now learned
+    # by the model rather than blended in with a hand-coded weight.  It is only
+    # populated for race/sprint feature rows, so it stays NaN (imputed) elsewhere.
     exclude_cols = [
         "driverId", "name", "code", "constructorId", "constructorName", "number",
-        "session_type", "current_quali_pos", "y_pace",
+        "session_type", "y_pace",
     ]
     if target_col is not None:
         exclude_cols.append(target_col)
@@ -752,158 +771,40 @@ def train_pace_model(X: 'pd.DataFrame', session_type: str, cfg: Any = None,
 
         yhat = pipe.predict(X_infer)
 
-    # Build baseline from form indices (for robustness)
-    # Use appropriate form index as the baseline for this session type
-    base = np.zeros(len(X), dtype=float)
-    is_inference_quali = session_type in ("qualifying", "sprint_qualifying")
-    infer_base_col = "qualifying_form_index" if is_inference_quali else "form_index"
+    # The GBM is trained on REAL outcomes (y_pace) with every available input
+    # variable as a feature — form indices, grid, current_quali_pos, circuit
+    # proficiency, weather effect, teammate/grid-finish deltas, team form, etc.
+    # Its output therefore *is* the learned pace: the model decides, from data,
+    # how much each variable matters for this session type.  No hand-coded
+    # blending weights, qualifying overrides, or grid-anchoring constants are
+    # applied — those would impose fixed assumptions the data should determine.
+    pace_hat = np.asarray(yhat, dtype=float)
 
-    if infer_base_col not in X.columns:
-         infer_base_col = "form_index" if infer_base_col == "qualifying_form_index" else "qualifying_form_index"
+    # Robustness guard ONLY (not a weighting choice): if the model could not
+    # learn any signal — degenerate or empty training data — fall back to a
+    # data-derived ordering from the strongest available form signal so the
+    # downstream ranking is still meaningful instead of uniform.
+    if not np.isfinite(np.nanstd(pace_hat)) or np.nanstd(pace_hat) < 1e-6:
+        is_inference_quali = session_type in ("qualifying", "sprint_qualifying")
+        infer_base_col = "qualifying_form_index" if is_inference_quali else "form_index"
+        if infer_base_col not in X.columns:
+            infer_base_col = "form_index" if infer_base_col == "qualifying_form_index" else "qualifying_form_index"
 
-    if infer_base_col in X.columns:
-        base = -X[infer_base_col].astype(float).values
-    
-    # Blending weights from config or defaults
-    w_base_team = 0.3
-    w_grid = 0.8
-    w_gbm = 0.75
-    w_base = 0.25
-    w_quali = 0.5
-    
-    if cfg:
-        try:
-            w_gbm = cfg.modelling.blending.gbm_weight
-            w_base = cfg.modelling.blending.baseline_weight
-            w_base_team = cfg.modelling.blending.baseline_team_factor
-            w_grid = getattr(cfg.modelling.blending, "grid_factor", 0.8)
-            w_quali = getattr(cfg.modelling.blending, "current_quali_factor", 0.5)
-        except AttributeError:
-            pass
+        base = np.zeros(len(X), dtype=float)
+        if infer_base_col in X.columns:
+            # form_index is HIGHER = BETTER, so negate for pace (LOWER = FASTER)
+            base = -X[infer_base_col].astype(float).values
 
-    if "team_form_index" in X.columns:
-        # team_form_index is points-based, HIGHER = BETTER, so negate
-        base = base - w_base_team * X["team_form_index"].astype(float).values
+        # Tie-break deterministically if even the fallback form is flat.
+        if np.nanstd(base) < 1e-9 and "driverId" in X.columns:
+            try:
+                h = pd.util.hash_pandas_object(X["driverId"], index=False).astype(np.uint64) % 997
+                base = base + (h.astype(float) / 1e6)
+            except Exception:
+                pass
 
-    # Add small jitter if baseline is flat (for tie-breaking)
-    if np.nanstd(base) < 1e-9 and "driverId" in X.columns:
-        try:
-            h = pd.util.hash_pandas_object(X["driverId"], index=False).astype(np.uint64) % 997
-            base = base + (h.astype(float) / 1e6)
-        except Exception:
-            pass
-
-    # Blend model predictions with baseline
-    yhat_std = float(np.nanstd(yhat))
-    base_std = float(np.nanstd(base))
-
-    if yhat_std < 1e-6 and base_std > 1e-6:
-        # Model failed to learn, use baseline only
+        logger.info("[models] GBM produced no signal; using data-derived form fallback (%s)", infer_base_col)
         pace_hat = base
-    elif base_std < 1e-6 and yhat_std > 1e-6:
-        # Baseline is flat (e.g., all same form), use model only
-        pace_hat = yhat
-    elif yhat_std > 1e-6 and base_std > 1e-6:
-        # Both have signal - weight heavily towards trained model
-        pace_hat = w_gbm * yhat + w_base * base
-    else:
-        # Both flat - use baseline with small noise for tie-breaking
-        # ⚡ Bolt: standard_normal is slightly faster than normal(0, scale) due to less C overhead
-        pace_hat = base + np.random.RandomState(42).standard_normal(len(base)) * 0.01
-
-    # Stage 1.5: Blend current weekend qualifying position if available
-    # This is a direct, high-weight signal from THIS weekend's qualifying
-    # Applied before grid stickiness so both qualifying pace and grid influence the result
-    if session_type in ("race", "sprint") and "current_quali_pos" in X.columns:
-        quali_vals = X["current_quali_pos"].astype(float).values
-        has_quali = ~np.isnan(quali_vals)
-        if has_quali.any():
-            # Normalize pace_hat to z-score for fair blending
-            p_mu = float(np.nanmean(pace_hat))
-            p_sd = float(np.nanstd(pace_hat))
-            if p_sd > 1e-6:
-                pace_z = (pace_hat - p_mu) / p_sd
-            else:
-                pace_z = pace_hat - p_mu
-
-            # Normalize qualifying positions to z-score (lower position = faster = lower z)
-            q_mu = float(np.nanmean(quali_vals[has_quali]))
-            q_sd = float(np.nanstd(quali_vals[has_quali]))
-            if q_sd > 1e-6:
-                quali_z = (quali_vals - q_mu) / q_sd
-            else:
-                quali_z = quali_vals - q_mu
-
-            # Blend: w_quali controls how much current qualifying overrides historical form
-            blended_z = np.where(
-                has_quali,
-                (1.0 - w_quali) * pace_z + w_quali * quali_z,
-                pace_z  # Keep original for drivers without qualifying data
-            )
-
-            # Rescale back to original pace scale
-            if p_sd > 1e-6:
-                pace_hat = blended_z * p_sd + p_mu
-            else:
-                pace_hat = blended_z + p_mu
-
-            logger.info(
-                "[models] Blended current_quali_pos (factor=%.2f) for %d/%d drivers",
-                w_quali, has_quali.sum(), len(X)
-            )
-
-    # Second Stage: Incorporate grid "stickiness" for race sessions
-    # This ensures starting position acts as a strong anchor for the prediction.
-    if session_type in ("race", "sprint") and "grid" in X.columns:
-        # Dynamic stickiness based on circuit passability and driver skill.
-        # The base w_grid is calibrated; circuit and driver adjustments scale
-        # proportionally to the flexibility budget (1 - w_grid) so they
-        # automatically adapt when the calibrated grid factor changes.
-        dynamic_w_grid = w_grid
-        flexibility = max(1.0 - w_grid, 0.05)  # how much non-grid signal is allowed
-
-        # 1. Circuit overtake difficulty
-        if "circuit_overtake_difficulty" in X.columns:
-            avg_circuit_diff = float(np.nanmean(X["circuit_overtake_difficulty"]))
-            if not np.isnan(avg_circuit_diff):
-                # Negative = hard to pass -> increase stickiness
-                circuit_modifier = -avg_circuit_diff * flexibility * 0.15
-                dynamic_w_grid = dynamic_w_grid + circuit_modifier
-
-        # 2. Driver overtake propensity
-        if "grid_finish_delta" in X.columns:
-            # Positive = driver gains positions -> decrease stickiness
-            driver_gfd = X["grid_finish_delta"].astype(float).values
-            driver_modifier = -np.nan_to_num(driver_gfd) * flexibility * 0.08
-            dynamic_w_grid = dynamic_w_grid + driver_modifier
-
-        dynamic_w_grid = np.clip(dynamic_w_grid, 0.4, 0.95)
-
-        # 1. Grid is the absolute anchor
-        # Use actual grid if available, otherwise fallback to index/average
-        grid_fallback = float(len(X)) if len(X) > 0 else 20.0
-        grid_vals = X["grid"].astype(float).fillna(grid_fallback).values
-        
-        # 2. Normalize pace_hat to determine pace relative advantage (z-score)
-        mu = float(np.nanmean(pace_hat))
-        sd = float(np.nanstd(pace_hat))
-        if sd > 1e-6:
-            pace_z = (pace_hat - mu) / sd
-        else:
-            pace_z = pace_hat - mu
-            
-        # 3. Apply pace advantage as a Delta to the anchor
-        # Max reasonable delta bounded to 10 positions (a 2 sigma pace advantage = ~5 grid slots)
-        MAX_DELTA = 10.0
-        pace_multiplier = 1.0 - dynamic_w_grid
-        pace_delta = pace_z * pace_multiplier * MAX_DELTA
-        
-        # 4. Final simulated baseline is Grid + Expected Delta
-        pace_hat = grid_vals + pace_delta
-        
-        logger.info(
-            "[models] Applied dynamic Anchor-Delta grid stickiness modified by circuit and driver"
-        )
 
     # Compute SHAP values for explainability
     shap_per_driver = None

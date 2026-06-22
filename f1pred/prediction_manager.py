@@ -807,16 +807,46 @@ class PredictionManager:
                         lines.append(f"{prefix} `P{pos_str}` **{code}**{move}")
                     return "\n".join(lines) or "*No data*"
 
-                embed["fields"].append({
-                    "name": "Top 10",
-                    "value": format_grid_lines(sorted_preds[:10]),
-                    "inline": True
-                })
-                embed["fields"].append({
-                    "name": "Bottom 10",
-                    "value": format_grid_lines(sorted_preds[10:20]),
-                    "inline": True
-                })
+                # Split the full field into two balanced columns so every driver
+                # is shown, even when the grid has more than 20 entries (reserve
+                # drivers, expanded rosters, etc.). Discord caps a field value at
+                # 1024 chars, so chunk further if a column would overflow.
+                half = (len(sorted_preds) + 1) // 2
+                columns = [sorted_preds[:half], sorted_preds[half:]] if sorted_preds else []
+
+                def chunk_for_discord(preds):
+                    """Yield (label_suffix, lines) chunks under Discord's 1024 char field limit."""
+                    chunks: list[list[dict]] = []
+                    current: list[dict] = []
+                    current_len = 0
+                    for p in preds:
+                        # Approximate rendered length; format_grid_lines joins with newlines.
+                        line_len = len(format_grid_lines([p])) + 1
+                        if current and current_len + line_len > 1024:
+                            chunks.append(current)
+                            current = []
+                            current_len = 0
+                        current.append(p)
+                        current_len += line_len
+                    if current:
+                        chunks.append(current)
+                    return chunks
+
+                for col_idx, column in enumerate(columns):
+                    if not column:
+                        continue
+                    for chunk in chunk_for_discord(column):
+                        first_pos = chunk[0].get("predicted_position")
+                        last_pos = chunk[-1].get("predicted_position")
+                        if first_pos is not None and last_pos is not None:
+                            name = f"P{first_pos}–P{last_pos}"
+                        else:
+                            name = "Top half" if col_idx == 0 else "Bottom half"
+                        embed["fields"].append({
+                            "name": name,
+                            "value": format_grid_lines(chunk),
+                            "inline": True
+                        })
 
                 embeds.append(embed)
 

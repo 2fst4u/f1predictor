@@ -713,20 +713,20 @@ class TestPredictionManagerDiscord:
 
                     # Check race embed
                     r_embed = next(e for e in payload["embeds"] if "🏁 Test GP 2024 R1 (Race)" in e["title"])
-                    top10_field = next(f for f in r_embed["fields"] if f["name"] == "Top 10")
-                    assert "HAM" in top10_field["value"]
-                    assert "VER" in top10_field["value"]
-                    assert "▲" in top10_field["value"] # HAM moved up (from P2 to P1)
-                    assert "▼" in top10_field["value"] # VER moved down (from P1 to P2)
+                    # Grid fields are the position columns (names like "P1–P1").
+                    grid_fields = [f for f in r_embed["fields"] if "`P" in f["value"]]
+                    grid_text = "\n".join(f["value"] for f in grid_fields)
+                    assert "HAM" in grid_text
+                    assert "VER" in grid_text
+                    assert "▲" in grid_text  # HAM moved up (from P2 to P1)
+                    assert "▼" in grid_text  # VER moved down (from P1 to P2)
 
-                    # Check order in Top 10 field
-                    lines = top10_field["value"].split("\n")
-                    # Find lines with P01 and P02
+                    # Check order across the grid: P01 (HAM) before P02 (VER)
+                    lines = grid_text.split("\n")
                     p1_line = next(l for l in lines if "`P01`" in l)
                     p2_line = next(l for l in lines if "`P02`" in l)
                     assert "HAM" in p1_line
                     assert "VER" in p2_line
-                    # P1 should come before P2 in the lines
                     assert lines.index(p1_line) < lines.index(p2_line)
 
                     # Check "Movers & Shakers" field
@@ -734,6 +734,71 @@ class TestPredictionManagerDiscord:
                     assert "HAM" in movers_field["value"]
                     assert "+1" in movers_field["value"]
 
-                    # Check two-column grid layout (Bottom 10 exists)
-                    bottom10_field = next(f for f in r_embed["fields"] if f["name"] == "Bottom 10")
-                    assert bottom10_field["inline"] is True
+                    # Check two-column grid layout (both columns inline)
+                    assert len(grid_fields) >= 2
+                    assert all(f["inline"] is True for f in grid_fields)
+
+    def test_discord_webhook_handles_more_than_20_drivers(self):
+        """Regression: every driver must appear in the grid, even beyond P20."""
+        import pandas as pd
+        from unittest.mock import MagicMock, patch
+        from f1pred.prediction_manager import PredictionManager, _fingerprint_predictions
+
+        cfg = MagicMock()
+        cfg.modelling.targets.session_types = ["race"]
+        cfg.paths.cache_dir = "cache"
+
+        manager = PredictionManager(cfg, poll_interval=60)
+        manager._latest_results = {"season": 2024, "rounds": {}}
+
+        # 24-driver grid (more than the classic 20).
+        n_drivers = 24
+        new_rows = []
+        for i in range(1, n_drivers + 1):
+            new_rows.append({
+                "driverId": f"d{i}",
+                "predicted_position": i,
+                "code": f"D{i:02}",
+                "name": f"Driver {i}",
+                "constructorName": "Team",
+                "p_win": 0.0,
+                "p_top3": 0.0,
+                "mean_pos": float(i),
+            })
+        df_new = pd.DataFrame(new_rows)
+
+        # Seed previous state so a diff fires.
+        old_preds = [dict(r, predicted_position=n_drivers + 1 - r["predicted_position"]) for r in new_rows]
+        old_fp = _fingerprint_predictions(old_preds)
+        manager._previous_fingerprints = {"1_race": old_fp}
+        manager._previous_predictions = {"1_race": old_preds}
+        manager._previous_weather = {"1_race": {"temp_mean": 20}}
+
+        fake_results = {
+            "season": 2024,
+            "round": 1,
+            "sessions": {
+                "race": {"ranked": df_new, "meta": {"weather": {"temp_mean": 25}}},
+            },
+        }
+
+        with patch('f1pred.predict.run_predictions_for_event', return_value=fake_results):
+            with patch.object(manager, '_get_setting', return_value="https://discord.com/api/webhooks/test"):
+                with patch('httpx.post') as mock_post:
+                    jc = MagicMock()
+                    jc.get_race_results.return_value = []
+                    jc.get_qualifying_results.return_value = []
+                    manager._predict_round(jc, 2024, 1, {"raceName": "Test GP", "round": 1})
+
+                    assert mock_post.called
+                    payload = mock_post.call_args.kwargs['json']
+                    r_embed = payload["embeds"][0]
+                    grid_text = "\n".join(
+                        f["value"] for f in r_embed["fields"] if "`P" in f["value"]
+                    )
+                    # All 24 drivers must be present, including those past P20.
+                    for i in range(1, n_drivers + 1):
+                        assert f"D{i:02}" in grid_text, f"Driver D{i:02} missing from Discord grid"
+                    # Discord field values must stay under the 1024 char limit.
+                    for f in r_embed["fields"]:
+                        assert len(f["value"]) <= 1024
