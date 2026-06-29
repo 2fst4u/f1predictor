@@ -658,8 +658,16 @@
                             </div>
                             <div>
                                 <label for="login-password" class="block text-sm font-medium text-gray-300">Password <span class="text-red-500">*</span></label>
-                                <input id="login-password" type="password" x-model="authPassword" required
-                                    class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                <div class="relative mt-1">
+                                    <input id="login-password" :type="showAuthPassword ? 'text' : 'password'" x-model="authPassword" required
+                                        class="block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 pl-3 pr-10 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                    <button type="button" @click="showAuthPassword = !showAuthPassword"
+                                        :aria-label="showAuthPassword ? 'Hide password' : 'Show password'"
+                                        :title="showAuthPassword ? 'Hide password' : 'Show password'"
+                                        class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-md">
+                                        <i class="fas" :class="showAuthPassword ? 'fa-eye-slash' : 'fa-eye'" aria-hidden="true"></i>
+                                    </button>
+                                </div>
                             </div>
                             <button type="submit" :disabled="authLoading" :title="authLoading ? 'Logging in...' : 'Login'" class="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2 px-4 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex justify-center items-center">
                                 <span x-show="!authLoading">Login</span>
@@ -686,13 +694,29 @@
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div>
                                             <label for="current-password" class="block text-xs font-medium text-gray-400 mb-1">Current Password <span class="text-red-500">*</span></label>
-                                            <input id="current-password" type="password" x-model="passChange.current" required
-                                                class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                            <div class="relative">
+                                                <input id="current-password" :type="showCurrentPassword ? 'text' : 'password'" x-model="passChange.current" required
+                                                    class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 pl-3 pr-10 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                                <button type="button" @click="showCurrentPassword = !showCurrentPassword"
+                                                    :aria-label="showCurrentPassword ? 'Hide current password' : 'Show current password'"
+                                                    :title="showCurrentPassword ? 'Hide current password' : 'Show current password'"
+                                                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-md">
+                                                    <i class="fas" :class="showCurrentPassword ? 'fa-eye-slash' : 'fa-eye'" aria-hidden="true"></i>
+                                                </button>
+                                            </div>
                                         </div>
                                         <div>
                                             <label for="new-password" class="block text-xs font-medium text-gray-400 mb-1">New Password <span class="text-red-500">*</span></label>
-                                            <input id="new-password" type="password" x-model="passChange.new" required
-                                                class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                            <div class="relative">
+                                                <input id="new-password" :type="showNewPassword ? 'text' : 'password'" x-model="passChange.new" required
+                                                    class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 pl-3 pr-10 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
+                                                <button type="button" @click="showNewPassword = !showNewPassword"
+                                                    :aria-label="showNewPassword ? 'Hide new password' : 'Show new password'"
+                                                    :title="showNewPassword ? 'Hide new password' : 'Show new password'"
+                                                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-md">
+                                                    <i class="fas" :class="showNewPassword ? 'fa-eye-slash' : 'fa-eye'" aria-hidden="true"></i>
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                     <button type="submit" :disabled="passChangeLoading" :title="passChangeLoading ? 'Updating password...' : 'Update Password'"
@@ -791,6 +815,7 @@
                 isLoggedIn: false,
                 authUsername: '',
                 authPassword: '',
+                showAuthPassword: false,
                 authError: '',
                 authLoading: false,
                 settings: {
@@ -804,6 +829,8 @@
                     current: '',
                     new: ''
                 },
+                showCurrentPassword: false,
+                showNewPassword: false,
                 passChangeLoading: false,
                 passwordChangeError: '',
                 passwordChangeSuccess: false,
