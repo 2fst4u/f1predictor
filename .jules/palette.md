@@ -14,3 +14,7 @@
 ## 2024-05-18 - Disabled Input Tooltips and Opacity
 **Learning:** When a parent wrapper has `opacity-50`, it compounds with the opacity of disabled child elements (like inputs and labels), resulting in poor contrast and unreadable tooltips. It also makes the container look inconsistent with sibling containers.
 **Action:** Remove `opacity-50` from parent wrappers of disabled groups. Instead, apply `disabled:opacity-50` directly to interactive elements (like inputs) and standard `opacity-50` to non-interactive associated elements (like labels) to preserve contrast and accessibility.
+
+## 2024-06-29 - Password Visibility Toggles
+**Learning:** Password fields without visibility toggles are an accessibility hurdle, especially on mobile devices. Adding a toggle reduces user anxiety and entry errors. When implementing a toggle using Alpine.js and absolute positioning within a relative container, it's critical to add sufficient padding (e.g., `pr-10`) to the input to prevent text from overlapping the toggle icon. Furthermore, the toggle button itself must be fully accessible with `aria-label`, `title`, and `focus-visible` styles.
+**Action:** When adding password fields, always consider implementing a visibility toggle. Ensure proper input padding to accommodate the absolute positioned icon, and verify the toggle button is accessible.
