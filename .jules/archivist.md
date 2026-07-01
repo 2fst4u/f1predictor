@@ -25,3 +25,6 @@
 ## 2026-06-10 - Undocumented Feature Flags in Configuration
 **Learning:** Feature toggles in the `modelling.features` section of `config.yaml` (such as `include_fastf1_fill`, `include_circuit_elevation`, and `include_weather_ensemble`) often drift from the `README.md` documentation. When new modeling features are introduced, developers update `config.py` and `config.yaml` but forget to document these flags in the `README.md` Configuration section.
 **Action:** When adding new feature flags or modeling configurations, always update the Configuration section in `README.md` to match the actual `config.yaml` defaults and provide visibility to users.
+## $(date +%Y-%m-%d) - Feature Flag Documentation Drift
+**Learning:** The feature flags in `config.yaml` (`include_fastf1_fill`, `include_circuit_elevation`, `include_weather_ensemble`) were present but missing from the Configuration section in `README.md`.
+**Action:** Always verify that newly added feature flags or modelling variables in `config.yaml` are also documented accurately in `README.md`.
