@@ -126,9 +126,9 @@ modelling:
   monte_carlo:
     draws: 5000 # Simulation iterations (more = slower but smoother)
   features:
-    include_fastf1_fill: true
-    include_circuit_elevation: true
-    include_weather_ensemble: true
+    include_fastf1_fill: true # Use FastF1 telemetry to fill missing timing data
+    include_circuit_elevation: true # Include track elevation changes in features
+    include_weather_ensemble: true # Enable multi-model weather forecasts
 
 data_sources:
   open_meteo:
