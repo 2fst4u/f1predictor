@@ -625,8 +625,56 @@ def _run_single_prediction(
     ranked["p_win"] = p_win[order]
     ranked["p_dnf"] = dnf_prob[order]
     ranked["predicted_position"] = np.arange(1, len(ranked) + 1)
-    
+
     return ranked
+
+
+def _intra_weekend_history_row(row: 'pd.Series', sess: str, ref_date: datetime) -> Dict[str, Any]:
+    """Build one intra-weekend history row from a ranked prediction row.
+
+    The row is tagged with ``predicted``: False when the session has finished
+    and the position is a real result, True when it is only the model's own
+    forecast for a session that has not run yet.  Predicted rows must never be
+    treated as observed results (see _real_intra_weekend_rows).
+    points stays NaN so these rows never distort the points-based
+    team_form_index (which drops NaN-points rows).
+    """
+    import pandas as pd
+
+    is_actual = pd.notna(row.get("actual_position"))
+    if is_actual:
+        hist_pos = int(row["actual_position"])
+    elif pd.notna(row["predicted_position"]):
+        hist_pos = int(row["predicted_position"])
+    else:
+        hist_pos = None
+    return {
+        "driverId": row["driverId"],
+        "position": hist_pos,
+        "date": ref_date,
+        "session": sess,
+        "constructorId": row.get("constructorId"),
+        "points": np.nan,
+        "grid": row.get("grid"),
+        "qpos": hist_pos if sess in ("qualifying", "sprint_qualifying") and hist_pos is not None else np.nan,
+        "predicted": not is_actual,
+    }
+
+
+def _real_intra_weekend_rows(accumulated_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Only rows carrying real (completed-session) results.
+
+    Rows tagged ``predicted`` are the model's own output.  Feeding them back
+    into feature history would let the form indices "observe" the model's
+    forecasts as if they were results — dated the same day, they receive the
+    maximum recency weight times the current-season boost, so they dominate
+    every form index and create a self-reinforcing feedback loop where tiny
+    input changes (e.g. an hourly weather refresh) amplify into huge
+    prediction swings with no new session data.  Predicted rows are still
+    used for the explicit grid-estimate chain, which is an input estimate,
+    not an observed result.
+    """
+    return [r for r in accumulated_history if not r.get("predicted")]
 
 
 def run_predictions_for_event(
@@ -846,7 +894,14 @@ def run_predictions_for_event(
                 # Need to run full prediction pipeline if actual_positions is None (either not finished, or missed cache)
                 if actual_positions is None:
                     # 2. Build features (Expensive operation)
-                    extra_hist_df = pd.DataFrame(accumulated_history) if accumulated_history else None
+                    # Only REAL intra-weekend results feed the feature history;
+                    # the model's own predictions for unrun sessions must not
+                    # masquerade as observed results (feedback amplification).
+                    real_rows = _real_intra_weekend_rows(accumulated_history)
+                    extra_hist_df = (
+                        pd.DataFrame(real_rows).drop(columns=["predicted"])
+                        if real_rows else None
+                    )
                     spinner.update(f"Predicting {event_title} - {sess}: Building features...")
                     X, meta, roster = build_session_features(
                         jc, om, season_i, round_i, sess, ref_date, cfg,
@@ -1266,28 +1321,13 @@ def run_predictions_for_event(
                 )
                 
                 # Add to accumulated history for subsequent sessions in this run.
-                # Prefer the ACTUAL result when the session has finished; only fall
-                # back to the prediction for sessions that have not run yet.  Feeding
-                # predictions back in as if they were results lets one session's error
-                # amplify into the next (especially with the current-season boost).
-                # points stays NaN so synthetic rows never distort the points-based
-                # team_form_index (which drops NaN-points rows).
-                if pd.notna(row.get("actual_position")):
-                    hist_pos = int(row["actual_position"])
-                elif pd.notna(row["predicted_position"]):
-                    hist_pos = int(row["predicted_position"])
-                else:
-                    hist_pos = None
-                accumulated_history.append({
-                    "driverId": row["driverId"],
-                    "position": hist_pos,
-                    "date": ref_date,
-                    "session": sess,
-                    "constructorId": row.get("constructorId"),
-                    "points": np.nan,
-                    "grid": row.get("grid"),
-                    "qpos": hist_pos if sess in ("qualifying", "sprint_qualifying") and hist_pos is not None else np.nan
-                })
+                # Real results are tagged predicted=False and flow into feature
+                # history; unrun sessions' rows carry the model's own forecast,
+                # are tagged predicted=True, and are used ONLY as a grid
+                # estimate for the following session — never as form input.
+                accumulated_history.append(
+                    _intra_weekend_history_row(row, sess, ref_date)
+                )
 
                 # Check for wet session via FastF1 (only if session happened)
                 is_wet = False
