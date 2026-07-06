@@ -653,13 +653,13 @@
                         <form @submit.prevent="login" class="space-y-5">
                             <div>
                                 <label for="login-username" class="block text-sm font-medium text-gray-300">Username <span class="text-red-500">*</span></label>
-                                <input id="login-username" type="text" x-model="authUsername" required
+                                <input id="login-username" type="text" x-model="authUsername" autocomplete="username" required
                                     class="mt-1 block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                             </div>
                             <div>
                                 <label for="login-password" class="block text-sm font-medium text-gray-300">Password <span class="text-red-500">*</span></label>
                                 <div class="relative mt-1">
-                                    <input id="login-password" :type="showAuthPassword ? 'text' : 'password'" x-model="authPassword" required
+                                    <input id="login-password" :type="showAuthPassword ? 'text' : 'password'" x-model="authPassword" autocomplete="current-password" required
                                         class="block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 pl-3 pr-10 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                     <button type="button" @click="showAuthPassword = !showAuthPassword"
                                         :aria-label="showAuthPassword ? 'Hide password' : 'Show password'"
@@ -671,7 +671,7 @@
                             </div>
                             <button type="submit" :disabled="authLoading" :title="authLoading ? 'Logging in...' : 'Login'" class="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2 px-4 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex justify-center items-center">
                                 <span x-show="!authLoading">Login</span>
-                                <span x-show="authLoading" x-cloak><i class="fas fa-circle-notch fa-spin mr-2"></i>Logging in...</span>
+                                <span x-show="authLoading" x-cloak><i class="fas fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Logging in...</span>
                             </button>
                         </form>
                     </div>
@@ -695,7 +695,7 @@
                                         <div>
                                             <label for="current-password" class="block text-xs font-medium text-gray-400 mb-1">Current Password <span class="text-red-500">*</span></label>
                                             <div class="relative">
-                                                <input id="current-password" :type="showCurrentPassword ? 'text' : 'password'" x-model="passChange.current" required
+                                                <input id="current-password" :type="showCurrentPassword ? 'text' : 'password'" x-model="passChange.current" autocomplete="current-password" required
                                                     class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 pl-3 pr-10 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                                 <button type="button" @click="showCurrentPassword = !showCurrentPassword"
                                                     :aria-label="showCurrentPassword ? 'Hide current password' : 'Show current password'"
@@ -708,7 +708,7 @@
                                         <div>
                                             <label for="new-password" class="block text-xs font-medium text-gray-400 mb-1">New Password <span class="text-red-500">*</span></label>
                                             <div class="relative">
-                                                <input id="new-password" :type="showNewPassword ? 'text' : 'password'" x-model="passChange.new" required
+                                                <input id="new-password" :type="showNewPassword ? 'text' : 'password'" x-model="passChange.new" autocomplete="new-password" required
                                                     class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 pl-3 pr-10 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                                 <button type="button" @click="showNewPassword = !showNewPassword"
                                                     :aria-label="showNewPassword ? 'Hide new password' : 'Show new password'"
@@ -722,7 +722,7 @@
                                     <button type="submit" :disabled="passChangeLoading" :title="passChangeLoading ? 'Updating password...' : 'Update Password'"
                                          class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs py-1.5 px-4 rounded-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white hover:scale-[1.02] active:scale-[0.98] flex justify-center items-center">
                                         <span x-show="!passChangeLoading">Update Password</span>
-                                        <span x-show="passChangeLoading" x-cloak><i class="fas fa-circle-notch fa-spin mr-2"></i>Updating...</span>
+                                        <span x-show="passChangeLoading" x-cloak><i class="fas fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Updating...</span>
                                     </button>
                                 </form>
                             </div>
@@ -740,7 +740,7 @@
                                             :title="webhookTesting ? 'Testing webhook...' : (!settings.discord_webhook_url ? 'Please enter a webhook URL first' : 'Test webhook')"
                                             class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs py-1 px-4 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex-shrink-0">
                                             <span x-show="!webhookTesting">Test</span>
-                                            <span x-show="webhookTesting"><i class="fas fa-circle-notch fa-spin"></i></span>
+                                            <span x-show="webhookTesting"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i></span>
                                         </button>
                                     </div>
                                     <p class="mt-1 text-xs text-gray-500">Used to send alerts when prediction diffs occur.</p>
@@ -768,7 +768,7 @@
                             <div class="flex items-center space-x-4 pt-4 border-t border-gray-700">
                                 <button type="submit" :disabled="settingsSaving" :title="settingsSaving ? 'Saving settings...' : 'Save Settings'" class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2 px-6 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white flex justify-center items-center">
                                     <span x-show="!settingsSaving">Save Settings</span>
-                                    <span x-show="settingsSaving" x-cloak><i class="fas fa-circle-notch fa-spin mr-2"></i>Saving...</span>
+                                    <span x-show="settingsSaving" x-cloak><i class="fas fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Saving...</span>
                                 </button>
                                 <span x-show="settingsSaved" x-transition.opacity role="status" class="text-sm text-green-400">Settings saved successfully!</span>
                             </div>
