@@ -10,19 +10,20 @@ Python ML application for Formula 1 race predictions. Uses `setuptools-scm` for 
 
 - **Source of truth**: Git tags in `v{major}.{minor}.{patch}` format (e.g. `v0.1.0`)
 - **`setuptools-scm`** reads the latest tag to set the Python package version at build time
-- **Prerelease images** use `{next-patch}-pre.{N}` format (numerically increasing for Flux)
+- **Prerelease images** use `{next-patch}-dev.{N}` format (numerically increasing for Flux)
 
 ### Prerelease Builds (automatic)
 
 Every push to **any branch** triggers `build.yml`, which runs `Tests` (reusing `tests.yml`) → `Build`. Code review is **not** part of CI — it is invoked manually by commenting `/oc-review` on a PR or issue (handled by `opencode-review.yml`). This keeps CI fast and inexpensive; reviewers ask for a review only when wanted.
 
 The build job produces a Docker image tagged with:
-- `{next-patch}-pre.{run_number}` — numerically increasing (e.g. `0.1.1-pre.42`)
-- `prerelease` — static tag that always points to the latest dev build
+
+- `{next-patch}-dev.{DEV_NUM}` — numerically increasing (e.g. `0.1.1-dev.42`)
+- `dev` — static tag that always points to the latest dev build
 - Branch name (e.g. `main`, `feature-xyz`)
 - Commit SHA (e.g. `sha-abc1234`)
 
-The `prerelease` tag is automatically pulled by Flux for continuous deployment.
+The `dev` tag is automatically pulled by Flux for continuous deployment.
 
 ### Stable Releases (manual)
 
@@ -34,19 +35,19 @@ All stable releases are **manual** via GitHub Actions UI:
 
 ## CI/CD Workflows
 
-| Workflow | File | Triggers | Purpose |
-|----------|------|----------|---------|
-| Tests | `tests.yml` | `workflow_call` | Reusable workflow to run pytest suite |
-| Build | `build.yml` | `push`, `workflow_call`, `release` | Tests → Build Docker image |
+| Workflow      | File                  | Triggers                                       | Purpose                                   |
+| ------------- | --------------------- | ---------------------------------------------- | ----------------------------------------- |
+| Tests         | `tests.yml`           | `workflow_call`                                | Reusable workflow to run pytest suite     |
+| Build         | `build.yml`           | `push`, `workflow_call`, `release`             | Tests → Build Docker image                |
 | Manual Review | `opencode-review.yml` | `issue_comment`, `pull_request_review_comment` | AI code review on demand via `/oc-review` |
-| Release | `release.yml` | Manual dispatch only | Creates semver tag + GitHub Release |
+| Release       | `release.yml`         | Manual dispatch only                           | Creates semver tag + GitHub Release       |
 
 ### Docker Image Tags
 
-| Source | Tags on `ghcr.io/2fst4u/f1predictor` |
-|--------|------|
-| Prerelease (dev branches & direct main pushes) | `0.1.1-pre.42`, `prerelease`, `branch-name`, `sha-abc1234` |
-| Stable release (manual) | `0.1.1`, `0.1`, `sha-abc1234` |
+| Source                                         | Tags on `ghcr.io/2fst4u/f1predictor`                |
+| ---------------------------------------------- | --------------------------------------------------- |
+| Prerelease (dev branches & direct main pushes) | `0.1.1-dev.42`, `dev`, `branch-name`, `sha-abc1234` |
+| Stable release (manual)                        | `0.1.1`, `0.1`, `sha-abc1234`                       |
 
 ## Key Files
 
@@ -65,6 +66,7 @@ python -m pytest tests/test_release_config.py -v  # Validate release infrastruct
 ### Release Infrastructure Tests
 
 `tests/test_release_config.py` enforces that release tooling stays consistent:
+
 - setuptools-scm is configured in `pyproject.toml`
 - Dockerfile copies `.git/` directory
 - Tests workflow runs as a reusable component via `workflow_call`
