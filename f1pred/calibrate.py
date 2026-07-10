@@ -735,6 +735,7 @@ class CalibrationManager:
                 # the objective can recompute estimate_dnf_probabilities exactly
                 # for any (alpha, beta, driver_weight, team_weight) candidate.
                 from .features import compute_dnf_flags
+                from .models import _fast_agg
                 races_h = hist_subset[hist_subset["session"] == "race"]
                 if not races_h.empty:
                     if "is_dnf" in races_h.columns:
@@ -742,11 +743,17 @@ class CalibrationManager:
                     else:
                         h_dnf = compute_dnf_flags(races_h).astype(float).values
                     h_tmp = races_h.assign(_dnf=h_dnf)
-                    drv_stats = h_tmp.groupby("driverId")["_dnf"].agg(["sum", "count"])
-                    team_stats = (
-                        h_tmp.dropna(subset=["constructorId"]).groupby("constructorId")["_dnf"].agg(["sum", "count"])
-                        if "constructorId" in h_tmp.columns else None
-                    )
+
+                    # ⚡ Bolt: Use _fast_agg and pure Python dictionary mapping for O(1) lookups
+                    # significantly reducing inner loop overhead inside X_evt.itertuples()
+                    drv_stats_df = _fast_agg(h_tmp, "driverId", "_dnf")
+                    drv_stats = drv_stats_df.to_dict("index") if not drv_stats_df.empty else {}
+
+                    team_stats = None
+                    if "constructorId" in h_tmp.columns:
+                        team_stats_df = _fast_agg(h_tmp, "constructorId", "_dnf")
+                        team_stats = team_stats_df.to_dict("index") if not team_stats_df.empty else {}
+
                     dnf_gk, dnf_gn = float(h_tmp["_dnf"].sum()), int(len(h_tmp))
                 else:
                     drv_stats = team_stats = None
@@ -785,12 +792,12 @@ class CalibrationManager:
                     drv_id = row.driverId
                     team_id = getattr(row, "constructorId", None)
                     d_k, d_n = (
-                        (float(drv_stats.loc[drv_id, "sum"]), float(drv_stats.loc[drv_id, "count"]))
-                        if drv_stats is not None and drv_id in drv_stats.index else (0.0, 0.0)
+                        (float(drv_stats[drv_id]["k"]), float(drv_stats[drv_id]["n"]))
+                        if drv_stats is not None and drv_id in drv_stats else (0.0, 0.0)
                     )
                     t_k, t_n = (
-                        (float(team_stats.loc[team_id, "sum"]), float(team_stats.loc[team_id, "count"]))
-                        if team_stats is not None and team_id in team_stats.index else (0.0, 0.0)
+                        (float(team_stats[team_id]["k"]), float(team_stats[team_id]["n"]))
+                        if team_stats is not None and team_id in team_stats else (0.0, 0.0)
                     )
                     sample = {
                         "driverId": drv_id,

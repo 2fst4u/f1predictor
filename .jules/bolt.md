@@ -28,3 +28,11 @@
 ## 2024-05-18 - Readability vs Micro-optimization
 **Learning:** Replaced `races.groupby("driverId")["pos_inv_z"].count()` with `pd.factorize()` and `np.bincount()` for a micro-optimization. The result was rejected in code review because it sacrificed code readability for negligible gains, and more importantly, it introduced a subtle bug. Pandas `.count()` counts non-null values, whereas the `np.bincount` implementation counted total rows per driver, altering the logic if there were `NaN`s.
 **Action:** Do not sacrifice code readability for unmeasured micro-optimizations. Always ensure that optimizations preserve the exact original behavior, especially regarding the handling of `NaN`s in pandas.
+
+## 2025-02-24 - Pandas iterrows/.loc lookup bottleneck
+**Learning:** Iterating row-by-row (e.g., using `itertuples()` or `iterrows()`) and repeatedly querying a Pandas DataFrame with `.loc` introduces massive overhead due to Pandas type checking and index validation mechanisms on every single lookup.
+**Action:** When a loop requires row-level lookups against a reference DataFrame, convert the lookup DataFrame to a standard Python dictionary before the loop (e.g., via `df.to_dict("index")`). This enables O(1) pure Python lookups that bypass Pandas entirely, yielding orders-of-magnitude speedups.
+
+## 2025-02-24 - Drop-in replacement quirks
+**Learning:** The `_fast_agg` function in `f1pred.models` is designed to be a high-performance alternative to `groupby().agg(["sum", "count"])`. However, its return columns are explicitly named `"k"` and `"n"` (standard Bayesian parameter naming) rather than the standard `"sum"` and `"count"`. Attempting a blind drop-in replacement without adapting the lookup keys will result in `KeyError` crashes.
+**Action:** Always verify the precise signature and return structures of internal helper functions when using them to replace standard Pandas operations.
