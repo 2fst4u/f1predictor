@@ -608,6 +608,7 @@ class PredictionManager:
 
         all_diffs: List[PredictionDiff] = []
         webhook_updates = {}  # sess_key -> (diff, predictions, weather)
+        has_live_session = False  # any non-frozen (still-upcoming) session in this round
 
         for sess, data in results["sessions"].items():
             ranked_df = data["ranked"]
@@ -645,6 +646,20 @@ class PredictionManager:
 
             cache_key = f"{round_i}_{sess}"
             new_fp = _fingerprint_predictions(ranked_list)
+
+            # --- Frozen Gate ---
+            # Once a session has official results it is read-only historical
+            # data. It is still re-predicted (recalibration, newly ingested
+            # results, etc.) so the stored state stays fresh for the UI/API,
+            # but it must never emit a notification. Refresh the cached state
+            # and skip diff detection, webhooks, and SSE broadcasts entirely.
+            if is_frozen:
+                self._previous_fingerprints[cache_key] = new_fp
+                self._previous_predictions[cache_key] = ranked_list
+                self._previous_weather[cache_key] = weather
+                continue
+
+            has_live_session = True
             old_fp = self._previous_fingerprints.get(cache_key)
 
             # --- Diff Detection (Immediate, shared by SSE and webhooks) ---
@@ -694,12 +709,17 @@ class PredictionManager:
                 "data": diff.to_dict(),
                 "timestamp": now,
             })
-            
-        self._broadcast({
-            "type": "prediction_round",
-            "data": output,
-            "timestamp": now,
-        })
+
+        # Only broadcast a prediction update for rounds that still have at
+        # least one upcoming (non-frozen) session. A fully-frozen round is
+        # read-only backtest data: its stored state was refreshed above for
+        # the UI/API, but it must not surface as a live notification.
+        if has_live_session:
+            self._broadcast({
+                "type": "prediction_round",
+                "data": output,
+                "timestamp": now,
+            })
 
     def _send_discord_webhook(self, event_title: str, session_updates: dict[str, tuple[PredictionDiff, list[dict[str, Any]], dict[str, Any]]]) -> None:
         """Send a consolidated notification to Discord for all changed sessions in a round."""
