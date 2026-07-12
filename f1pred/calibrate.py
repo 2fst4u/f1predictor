@@ -105,8 +105,15 @@ N_PARAMS = len(PARAM_NAMES)
 # between grid points, giving half_life_base/half_life_team/elo_k genuine
 # gradients without re-fitting models inside the optimiser.  Bounds for these
 # parameters must stay within their grids so interpolation always brackets.
-H_BASE_GRID = (60.0, 120.0, 240.0, 480.0)
-H_TEAM_GRID = (120.0, 240.0, 480.0)
+#
+# The half-life grids extend to 960 days (~32 months) so the optimiser can
+# choose a long-memory weighting when it scores better — i.e. it is free to
+# damp single-race reactivity by looking further back, rather than being pinned
+# to a short ceiling.  The spacing stays geometric (×2) for uniform log-interp,
+# and the top point stays comfortably inside the ~3-year calibration window so
+# there is real data beyond the half-life to distinguish it.
+H_BASE_GRID = (60.0, 120.0, 240.0, 480.0, 960.0)
+H_TEAM_GRID = (120.0, 240.0, 480.0, 960.0)
 ELO_K_GRID = (10.0, 25.0, 50.0)
 
 # Bounds for L-BFGS-B  (lower, upper) per parameter
@@ -140,8 +147,8 @@ PARAM_BOUNDS = [
     (0.0, 0.5),     # 20 ens_bt_quali    (capped lower — race-only model)
     (0.0, 0.5),     # 21 ens_mixed_quali (capped lower — race-only model)
     (1.0, 50.0),    # 22 current_season_sprint_weight
-    (60.0, 480.0),  # 23 half_life_base  (within H_BASE_GRID)
-    (120.0, 480.0), # 24 half_life_team  (within H_TEAM_GRID)
+    (60.0, 960.0),  # 23 half_life_base  (within H_BASE_GRID)
+    (120.0, 960.0), # 24 half_life_team  (within H_TEAM_GRID)
     (10.0, 50.0),   # 25 elo_k           (within ELO_K_GRID)
     (0.0, 0.8),     # 26 team_correlation
 ]
