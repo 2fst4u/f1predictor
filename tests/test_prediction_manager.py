@@ -411,6 +411,65 @@ class TestPredictionManagerCycle:
         assert len(diff["movements"]) == 2
         assert "🚥 Grid positions changed" in diff["changed_variables"]
 
+    def test_frozen_round_does_not_notify(self):
+        """A completed (frozen) round must refresh stored state for the UI but
+        never emit a diff, Discord webhook, or prediction_round broadcast, even
+        when its numbers shift between runs (e.g. recalibration)."""
+        import pandas as pd
+
+        cfg = MagicMock()
+        cfg.modelling.targets.session_types = ["race"]
+        cfg.paths.cache_dir = "cache"
+
+        manager = PredictionManager(cfg, poll_interval=60)
+        manager._latest_results = {"season": 2024, "rounds": {}}
+
+        df1 = pd.DataFrame([
+            {"driverId": "ver01", "predicted_position": 1, "mean_pos": 1.1, "grid": 1, "p_win": 0.9, "p_top3": 0.9, "code": "VER", "name": "Max Verstappen", "constructorName": "Red Bull"},
+            {"driverId": "ham44", "predicted_position": 2, "mean_pos": 2.1, "grid": 2, "p_win": 0.1, "p_top3": 0.5, "code": "HAM", "name": "Lewis", "constructorName": "Mercedes"},
+        ])
+        fake_results1 = {
+            "season": 2024, "round": 1,
+            "sessions": {"race": {"ranked": df1, "meta": {"weather": {"temp_mean": 25.0}}}},
+        }
+
+        # Official results are present -> the round is frozen.
+        jc = MagicMock()
+        jc.get_race_results.return_value = [
+            {"Driver": {"driverId": "ver01"}, "position": "1"},
+            {"Driver": {"driverId": "ham44"}, "position": "2"},
+        ]
+
+        with patch('f1pred.predict.run_predictions_for_event', return_value=fake_results1):
+            manager._predict_round(jc, 2024, 1, {"raceName": "Bahrain Grand Prix", "round": 1})
+
+        # A shift in the numbers that would normally trigger a diff.
+        df2 = pd.DataFrame([
+            {"driverId": "ham44", "predicted_position": 1, "mean_pos": 1.2, "grid": 1, "p_win": 0.6, "p_top3": 0.9, "code": "HAM", "name": "Lewis", "constructorName": "Mercedes"},
+            {"driverId": "ver01", "predicted_position": 2, "mean_pos": 1.8, "grid": 2, "p_win": 0.4, "p_top3": 0.8, "code": "VER", "name": "Max Verstappen", "constructorName": "Red Bull"},
+        ])
+        fake_results2 = {
+            "season": 2024, "round": 1,
+            "sessions": {"race": {"ranked": df2, "meta": {"weather": {"temp_mean": 30.0}}}},
+        }
+
+        broadcasts = []
+        with patch('f1pred.predict.run_predictions_for_event', return_value=fake_results2):
+            with patch.object(manager, '_send_discord_webhook') as mock_discord:
+                with patch.object(manager, '_broadcast', side_effect=lambda ev: broadcasts.append(ev)):
+                    manager._predict_round(jc, 2024, 1, {"raceName": "Bahrain Grand Prix", "round": 1})
+
+        # No notifications of any kind for a frozen round.
+        assert len(manager.latest_diffs) == 0
+        assert mock_discord.call_count == 0
+        assert not any(b.get("type") == "diff" for b in broadcasts)
+        assert not any(b.get("type") == "prediction_round" for b in broadcasts)
+
+        # ...but the stored state is still refreshed for the UI/API.
+        stored = manager.latest_results["rounds"]["1"]["sessions"]["race"]
+        assert stored["frozen"] is True
+        assert stored["predictions"][0]["driverId"] == "ham44"
+
     def test_run_loop(self):
         import threading
         import time
