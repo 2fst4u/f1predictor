@@ -414,6 +414,7 @@ class BradleyTerryModel:
         self, X: "pd.DataFrame", session_type: str = "race"
     ) -> "np.ndarray":
         import numpy as np
+        import pandas as pd
 
         if X is None or X.empty:
             return np.zeros(0, dtype=float)
@@ -429,8 +430,10 @@ class BradleyTerryModel:
         if not strength:
             strength = self.race_strength_
 
-        vals = [strength.get(str(d), 0.0) for d in ids]
-        arr = np.asarray(vals, dtype=float)
+        # ⚡ Bolt: Fast vectorized dictionary lookups
+        ids_series = pd.Series(ids, dtype=str) if not isinstance(ids, pd.Series) else ids.astype(str)
+        arr = ids_series.map(strength).fillna(0.0).to_numpy(dtype=float)
+
         if arr.size == 0:
             return arr
 
@@ -589,6 +592,7 @@ class MixedEffectsLikeModel:
         self, X: "pd.DataFrame", session_type: str = "race"
     ) -> "np.ndarray":
         import numpy as np
+        import pandas as pd
 
         if X is None or X.empty:
             return np.zeros(0, dtype=float)
@@ -602,15 +606,13 @@ class MixedEffectsLikeModel:
             driver_effect = self.race_driver_effect_
             team_effect = self.race_team_effect_
 
-        vals = []
-        for _, row in X.iterrows():
-            d = str(row.get("driverId"))
-            t = str(row.get("constructorId"))
-            de = driver_effect.get(d, 0.0)
-            te = team_effect.get(t, 0.0)
-            vals.append(de + te)
+        # ⚡ Bolt: Fast vectorized dictionary lookups instead of slow iterrows
+        d_series = X.get("driverId", pd.Series(index=X.index, dtype=str)).astype(str)
+        t_series = X.get("constructorId", pd.Series(index=X.index, dtype=str)).astype(str)
+        de_vals = d_series.map(driver_effect).fillna(0.0)
+        te_vals = t_series.map(team_effect).fillna(0.0)
 
-        arr = np.asarray(vals, dtype=float)
+        arr = (de_vals + te_vals).to_numpy(dtype=float)
         if arr.size == 0:
             return arr
 

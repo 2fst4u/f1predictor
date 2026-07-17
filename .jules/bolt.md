@@ -36,3 +36,7 @@
 ## 2025-02-24 - Drop-in replacement quirks
 **Learning:** The `_fast_agg` function in `f1pred.models` is designed to be a high-performance alternative to `groupby().agg(["sum", "count"])`. However, its return columns are explicitly named `"k"` and `"n"` (standard Bayesian parameter naming) rather than the standard `"sum"` and `"count"`. Attempting a blind drop-in replacement without adapting the lookup keys will result in `KeyError` crashes.
 **Action:** Always verify the precise signature and return structures of internal helper functions when using them to replace standard Pandas operations.
+
+## 2024-05-18 - Local imports in `f1pred/ensemble.py`
+**Learning:** Many prediction/model methods in `f1pred/ensemble.py` use local imports (e.g. `import pandas as pd` inside the method definition) rather than global module imports. Adding pandas methods like `pd.Series` to an existing function without checking the local imports leads to immediate `NameError` failures in tests.
+**Action:** When vectorizing `iterrows` or applying any other pandas logic to methods in this codebase, always verify if `import pandas as pd` is present in the local method scope or module header, and add it if missing before testing.
