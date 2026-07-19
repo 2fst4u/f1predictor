@@ -46,7 +46,7 @@ The app fetches data from free, public APIs:
 
 1. **Roster inference** – For future races, the entry list comes from the most recent completed event
 2. **Feature engineering** – Driver form, team performance, weather conditions, teammate comparisons, starting grid
-3. **Grid position handling** – Uses actual grid from race results when available; for pre-race predictions, runs a qualifying simulation to estimate starting positions
+3. **Grid position handling** – Uses the penalty-adjusted starting grid whenever it exists: the post-race results grid for finished events, and the official FIA starting grid from FastF1 (which reflects grid penalties) once it is published after qualifying. Only when no penalty-adjusted grid is available yet does it fall back to raw qualifying order, or a qualifying simulation before qualifying has run
 4. **Model training** – An ensemble of four specialized models is trained fresh on historical data:
    - **GBM (AI Brain)**: Analyzes patterns like weather and recent momentum to predict raw speed.
    - **Elo (Skill Score)**: A Chess-style rating that tracks a driver's talent relative to their rivals.
@@ -195,7 +195,7 @@ make test
 - **Weather is approximate** – Forecasts are aggregated around session windows
 - **DNF model is basic** – Uses historical base rates, not detailed reliability analysis
 - **First race of season** – Limited data for brand new driver/team combinations
-- **Grid penalties** – Only reflected if race results are available (post-qualifying predictions may not account for all penalties)
+- **Grid penalties** – Reflected as soon as the official FIA starting grid is published to FastF1 after qualifying (and always for finished races). In the short window between qualifying ending and that grid being published, predictions fall back to raw qualifying order and do not yet reflect penalties
 
 ## Project Structure
 

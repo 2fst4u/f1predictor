@@ -1015,6 +1015,38 @@ def compute_circuit_globals(hist: pd.DataFrame, circuit_id: str, ref_date: datet
     }
 
 
+def official_grid_from_classification(cls: Optional[pd.DataFrame], roster: pd.DataFrame) -> pd.DataFrame:
+    """Extract the penalty-adjusted starting grid from a FastF1 classification.
+
+    Reads the ``GridPosition`` column of a FastF1 race/sprint session results
+    frame (the official FIA starting grid, which already reflects grid penalties)
+    and maps each driver to a ``driverId`` via the roster's three-letter code.
+    Returns a ``(driverId, grid)`` frame, or an empty one when the grid is not
+    published yet (all ``GridPosition`` unset / zero) or inputs are missing.
+    """
+    empty = pd.DataFrame(columns=["driverId", "grid"])
+    if cls is None or getattr(cls, "empty", True):
+        return empty
+    if "GridPosition" not in cls.columns or roster is None or "code" not in getattr(roster, "columns", []):
+        return empty
+
+    rows = []
+    for _, r in cls.iterrows():
+        abbr = str(r.get("Abbreviation", "")).upper()
+        gp = r.get("GridPosition")
+        try:
+            gp_int = int(gp) if gp is not None and not pd.isna(gp) else 0
+        except (TypeError, ValueError):
+            gp_int = 0
+        # GridPosition 0 means pit-lane start OR simply not-yet-published; treat as
+        # unknown here (pit-lane is rare and handled by the raw-quali fallback).
+        if abbr and gp_int > 0:
+            match = roster[roster["code"] == abbr]
+            if not match.empty:
+                rows.append({"driverId": match.iloc[0]["driverId"], "grid": gp_int})
+    return pd.DataFrame(rows) if rows else empty
+
+
 def compute_grid_finish_delta(
     hist: pd.DataFrame,
     ref_date: datetime,
@@ -1400,6 +1432,24 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
                         })
         return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["driverId", "current_quali_pos"])
 
+    def _official_grid_from_fastf1(session_names: List[str]) -> pd.DataFrame:
+        """Official FIA starting grid via FastF1 (``GridPosition``, penalty-adjusted).
+
+        FastF1 exposes the official starting grid on the race/sprint session
+        results as soon as the FIA publishes it after qualifying — this already
+        reflects grid penalties, so it is the canonical pre-race grid. Returns an
+        empty frame when the grid has not been published yet (GridPosition unset).
+        """
+        from .data.fastf1_backend import get_session_classification
+        s_int = int(season) if str(season) != "current" else datetime.now().year
+        r_int = int(rnd)
+        cls = None
+        for name in session_names:
+            cls = get_session_classification(s_int, r_int, name)
+            if cls is not None and not cls.empty:
+                break
+        return official_grid_from_classification(cls, roster)
+
     if session_type in ("race", "sprint") and not roster.empty:
         # 1. Penalty-adjusted grid from the results endpoint (available once the
         #    session has run — i.e. for backtests/calibration and finished events).
@@ -1414,15 +1464,30 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         except Exception as e:
             logger.info(f"[features] Could not fetch grid from results endpoint: {e}")
 
-        # 2. Raw qualifying order from FastF1 (pure one-lap pace signal).
+        # 2. Official FIA starting grid from FastF1 (penalty-adjusted). Published
+        #    after qualifying, so this fills the post-quali/pre-race window that
+        #    the results endpoint leaves empty and that raw quali order can't
+        #    account for (it does not reflect grid penalties).
+        if grid_df.empty:
+            try:
+                grid_names = ["Race", "R"] if session_type == "race" else ["Sprint", "S"]
+                official_grid = _official_grid_from_fastf1(grid_names)
+                if not official_grid.empty:
+                    grid_df = official_grid
+                    logger.info(f"[features] Fetched official penalty-adjusted starting grid from FastF1 for {len(grid_df)} drivers")
+            except Exception as e:
+                logger.info(f"[features] Could not fetch official grid from FastF1: {e}")
+
+        # 3. Raw qualifying order from FastF1 (pure one-lap pace signal). Always
+        #    computed for the current_quali_pos feature; only used as the grid as a
+        #    last resort when no penalty-adjusted grid is available yet.
         try:
             q_names = ["Q"] if session_type == "race" else ["Sprint Qualifying", "SQ", "Sprint Shootout"]
             quali_pos_df = _quali_from_fastf1(q_names)
             if not quali_pos_df.empty:
                 logger.info(f"[features] Fetched current_quali_pos from FastF1 for {len(quali_pos_df)} drivers")
-                # 3. Pre-race fallback: when the results-endpoint grid is not yet
-                #    available, the qualifying order is the best grid estimate.
                 if grid_df.empty:
+                    logger.info("[features] No penalty-adjusted grid yet; falling back to raw qualifying order (penalties not reflected)")
                     grid_df = quali_pos_df.rename(columns={"current_quali_pos": "grid"})
         except Exception as e:
             logger.info(f"[features] Could not fetch quali order from FastF1: {e}")
