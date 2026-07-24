@@ -324,7 +324,8 @@ def _roster_entries_from_fastf1_results(
     c_map = (mapping or {}).get("constructors", {})
 
     entries: List[Dict] = []
-    for _, r in results.iterrows():
+    # OPTIMIZATION: Avoid yielding Pandas Series objects by using to_dict("records")
+    for r in results.to_dict("records"):
         abbr = _clean_str(r.get("Abbreviation"))
         num = _clean_str(r.get("DriverNumber"))
         gn = _clean_str(r.get("FirstName"))

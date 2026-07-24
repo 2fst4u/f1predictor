@@ -1031,7 +1031,9 @@ def official_grid_from_classification(cls: Optional[pd.DataFrame], roster: pd.Da
         return empty
 
     rows = []
-    for _, r in cls.iterrows():
+    # OPTIMIZATION: O(1) pure Python dict lookup instead of O(N) Pandas boolean lookup in iterrows loop
+    roster_map = dict(zip(roster["code"], roster["driverId"]))
+    for r in cls.to_dict("records"):
         abbr = str(r.get("Abbreviation", "")).upper()
         gp = r.get("GridPosition")
         try:
@@ -1041,9 +1043,9 @@ def official_grid_from_classification(cls: Optional[pd.DataFrame], roster: pd.Da
         # GridPosition 0 means pit-lane start OR simply not-yet-published; treat as
         # unknown here (pit-lane is rare and handled by the raw-quali fallback).
         if abbr and gp_int > 0:
-            match = roster[roster["code"] == abbr]
-            if not match.empty:
-                rows.append({"driverId": match.iloc[0]["driverId"], "grid": gp_int})
+            did = roster_map.get(abbr)
+            if did:
+                rows.append({"driverId": did, "grid": gp_int})
     return pd.DataFrame(rows) if rows else empty
 
 
@@ -1420,14 +1422,15 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
                 break
         rows = []
         if fast_q is not None and not fast_q.empty:
-            for _, r in fast_q.iterrows():
+            roster_map = dict(zip(roster["code"], roster["driverId"]))
+            for r in fast_q.to_dict("records"):
                 abbr = str(r.get("Abbreviation", "")).upper()
                 pos = r.get("Position")
                 if abbr and pos and not pd.isna(pos):
-                    match = roster[roster["code"] == abbr]
-                    if not match.empty:
+                    did = roster_map.get(abbr)
+                    if did:
                         rows.append({
-                            "driverId": match.iloc[0]["driverId"],
+                            "driverId": did,
                             "current_quali_pos": int(pos),
                         })
         return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["driverId", "current_quali_pos"])
