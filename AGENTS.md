@@ -14,13 +14,13 @@ Python ML application for Formula 1 race predictions. Uses `setuptools-scm` for 
 
 ### Prerelease Builds (automatic)
 
-Every push to **any branch** triggers `build.yml`, which runs `Tests` (reusing `tests.yml`) → `Build`. Code review is **not** part of CI — it is invoked manually by commenting `/oc-review` on a PR or issue (handled by `opencode-review.yml`). This keeps CI fast and inexpensive; reviewers ask for a review only when wanted.
+Every push to **any branch (except `main`)** triggers `build.yml` (ignoring changes to markdown and workflow files), which runs `Tests` (reusing `tests.yml`) → `Build`. Code review is **not** part of CI — it is invoked manually by commenting `/oc-review` on a PR or issue (handled by `opencode-review.yml`). This keeps CI fast and inexpensive; reviewers ask for a review only when wanted.
 
 The build job produces a Docker image tagged with:
 
 - `{next-patch}-dev.{DEV_NUM}` — numerically increasing (e.g. `0.1.1-dev.42`)
 - `dev` — static tag that always points to the latest dev build
-- Branch name (e.g. `main`, `feature-xyz`)
+- Branch name (e.g. `feature-xyz`)
 - Commit SHA (e.g. `sha-abc1234`)
 
 The `dev` tag is automatically pulled by Flux for continuous deployment.
@@ -44,10 +44,10 @@ All stable releases are **manual** via GitHub Actions UI:
 
 ### Docker Image Tags
 
-| Source                                         | Tags on `ghcr.io/2fst4u/f1predictor`                |
-| ---------------------------------------------- | --------------------------------------------------- |
-| Prerelease (dev branches & direct main pushes) | `0.1.1-dev.42`, `dev`, `branch-name`, `sha-abc1234` |
-| Stable release (manual)                        | `0.1.1`, `0.1`, `sha-abc1234`                       |
+| Source                    | Tags on `ghcr.io/2fst4u/f1predictor`                |
+| ------------------------- | --------------------------------------------------- |
+| Prerelease (dev branches) | `0.1.1-dev.42`, `dev`, `branch-name`, `sha-abc1234` |
+| Stable release (manual)   | `0.1.1`, `0.1`, `sha-abc1234`                       |
 
 ## Key Files
 
