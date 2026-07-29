@@ -33,7 +33,7 @@
 **Learning:** Feature toggles in the `modelling.features` section of `config.yaml` (such as `include_fastf1_fill`, `include_circuit_elevation`, and `include_weather_ensemble`) often drift from the `README.md` documentation. When new modeling features are introduced, developers update `config.py` and `config.yaml` but forget to document these flags in the `README.md` Configuration section.
 **Action:** When adding new feature flags or modeling configurations, always update the Configuration section in `README.md` to match the actual `config.yaml` defaults and provide visibility to users.
 
-## $(date +%Y-%m-%d) - Feature Flag Documentation Drift
+## 2026-07-29 - Feature Flag Documentation Drift
 
 **Learning:** The feature flags in `config.yaml` (`include_fastf1_fill`, `include_circuit_elevation`, `include_weather_ensemble`) were present but missing from the Configuration section in `README.md`.
 **Action:** Always verify that newly added feature flags or modelling variables in `config.yaml` are also documented accurately in `README.md`.
@@ -42,3 +42,8 @@
 
 **Learning:** The `AGENTS.md` file incorrectly stated that dev builds use `-pre` and `prerelease` tags, while the actual GitHub Actions workflow (`build.yml`) generates `-dev` and `dev` tags. The documentation drifted from the CI configuration.
 **Action:** When inspecting CI/CD or deployment documentation, explicitly cross-reference the stated artifact tags against the actual workflow YAML files (like `build.yml`) to ensure consistency.
+
+## 2026-07-29 - CI Trigger Documentation Drift
+
+**Learning:** `AGENTS.md` incorrectly claimed that dev builds run on "any branch" (including `main`), but the CI configuration (`build.yml`) explicitly ignores the `main` branch. This led to inaccurate documentation about what triggers automatic prerelease builds and what branch tags exist.
+**Action:** Always verify GitHub Actions trigger conditions (like `branches-ignore`) in `.github/workflows/` before trusting written claims in documentation about CI execution.
