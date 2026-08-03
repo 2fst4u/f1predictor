@@ -663,9 +663,9 @@
                                     <input id="login-password" :type="showAuthPassword ? 'text' : 'password'" x-model="authPassword" autocomplete="current-password" required
                                         class="block w-full bg-gray-900 border border-gray-700 rounded-md shadow-sm py-2 pl-3 pr-10 text-sm focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                     <button type="button" @click="showAuthPassword = !showAuthPassword"
-                                        :aria-label="showAuthPassword ? 'Hide password' : 'Show password'"
                                         :title="showAuthPassword ? 'Hide password' : 'Show password'"
                                         class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-md">
+                                        <span class="sr-only" x-text="showAuthPassword ? 'Hide password' : 'Show password'"></span>
                                         <i class="fas" :class="showAuthPassword ? 'fa-eye-slash' : 'fa-eye'" aria-hidden="true"></i>
                                     </button>
                                 </div>
@@ -699,9 +699,9 @@
                                                 <input id="current-password" :type="showCurrentPassword ? 'text' : 'password'" x-model="passChange.current" autocomplete="current-password" required
                                                     class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 pl-3 pr-10 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                                 <button type="button" @click="showCurrentPassword = !showCurrentPassword"
-                                                    :aria-label="showCurrentPassword ? 'Hide current password' : 'Show current password'"
                                                     :title="showCurrentPassword ? 'Hide current password' : 'Show current password'"
                                                     class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-md">
+                                                    <span class="sr-only" x-text="showCurrentPassword ? 'Hide current password' : 'Show current password'"></span>
                                                     <i class="fas" :class="showCurrentPassword ? 'fa-eye-slash' : 'fa-eye'" aria-hidden="true"></i>
                                                 </button>
                                             </div>
@@ -712,9 +712,9 @@
                                                 <input id="new-password" :type="showNewPassword ? 'text' : 'password'" x-model="passChange.new" autocomplete="new-password" required
                                                     class="block w-full bg-gray-800 border border-gray-600 rounded-md shadow-sm py-1.5 pl-3 pr-10 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 text-white">
                                                 <button type="button" @click="showNewPassword = !showNewPassword"
-                                                    :aria-label="showNewPassword ? 'Hide new password' : 'Show new password'"
                                                     :title="showNewPassword ? 'Hide new password' : 'Show new password'"
                                                     class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-md">
+                                                    <span class="sr-only" x-text="showNewPassword ? 'Hide new password' : 'Show new password'"></span>
                                                     <i class="fas" :class="showNewPassword ? 'fa-eye-slash' : 'fa-eye'" aria-hidden="true"></i>
                                                 </button>
                                             </div>
