@@ -808,6 +808,10 @@ def run_predictions_for_event(
     
     all_preds: List[Dict[str, Any]] = []
     session_results: Dict[str, Dict[str, Any]] = {}
+    # Why each requested session produced no ranking. Surfaced to the caller
+    # (and from there to the API/UI) so a failed run is visible instead of
+    # silently rendering as an empty event.
+    session_errors: Dict[str, str] = {}
 
     # Accumulate results from sessions within this run to feed into subsequent sessions
     accumulated_history: List[Dict[str, Any]] = []
@@ -921,7 +925,14 @@ def run_predictions_for_event(
                         msg = f"Skipping {sess} (no data)"
                         spinner.update(msg)
                         spinner.set_status("skipped")
-                        logger.info(f"[predict] {msg}")
+                        # WARNING, not INFO: an empty roster/feature matrix means
+                        # this session cannot be predicted at all, which is the
+                        # difference between a populated UI and a blank one.
+                        logger.warning(f"[predict] {msg}")
+                        session_errors[sess] = (
+                            "No driver/feature data available "
+                            "(roster or feature build returned nothing)"
+                        )
                         continue
 
                     # Ensure history and calibration are ready if we actually need to predict
@@ -1296,6 +1307,12 @@ def run_predictions_for_event(
                 "pairwise": pairwise,
                 "meta": meta,
             }
+            session_errors.pop(sess, None)
+
+            # Set before the per-driver loop below (which is where it may be
+            # refined) so an empty ranking can't leave it undefined for the
+            # console renderer.
+            is_wet = False
 
             for row in ranked.to_dict("records"):
                 # Add to flat list for reporting/backtesting
@@ -1367,18 +1384,31 @@ def run_predictions_for_event(
             )
 
         except Exception as e:
-                logger.info(f"[predict] Session {sess} failed with exception:")
                 # Sentinel: Sanitize exception message to prevent log injection
-                logger.info(f"{type(e).__name__}: {sanitize_for_console(str(e))}")
+                detail = f"{type(e).__name__}: {sanitize_for_console(str(e))}"
+                # A session that raises produces no prediction at all, so this
+                # is a real failure and must be visible at the default log
+                # level (WARNING) rather than buried at INFO.
+                logger.warning(f"[predict] Session {sess} failed with exception: {detail}")
                 import traceback
                 logger.debug(traceback.format_exc())
+                if sess not in session_results:
+                    session_errors[sess] = detail
                 continue
+
+    if not session_results and sessions:
+        logger.warning(
+            "[predict] No sessions could be predicted for %s: %s",
+            event_title,
+            "; ".join(f"{k}: {v}" for k, v in session_errors.items()) or "unknown reason",
+        )
 
     if return_results:
         return {
             "season": season_i,
             "round": round_i,
             "sessions": session_results,
+            "errors": session_errors,
         }
 
 

@@ -1,10 +1,21 @@
 from __future__ import annotations
+import threading
+import time
 from typing import Dict, Any
 from datetime import datetime, timezone
 
 from ..util import session_with_retries, http_get_json, get_logger
 
 logger = get_logger(__name__)
+
+# When Open-Meteo is unreachable, every request still burns its full urllib3
+# retry budget (seconds each) before failing.  A prediction cycle issues
+# hundreds of weather requests across the season, so an outage turns an hourly
+# cycle into an all-day retry storm and predictions appear to stop.  After a
+# few consecutive failures we stop calling out for a cooldown and let the
+# pipeline run with unknown weather, which it already handles.
+_BREAKER_FAILURE_THRESHOLD = 3
+_BREAKER_COOLDOWN_SECONDS = 300
 
 
 def _valid_lat_lon(lat: float, lon: float) -> bool:
@@ -33,6 +44,11 @@ class OpenMeteoClient:
         self.windspeed_unit = windspeed_unit
         self.precipitation_unit = precipitation_unit
         self.session = session_with_retries()
+
+        # Circuit breaker state (shared across the threads that build features)
+        self._breaker_lock = threading.Lock()
+        self._consecutive_failures = 0
+        self._breaker_open_until = 0.0
 
     @staticmethod
     def _validate_timezone(tz: str) -> str:
@@ -64,9 +80,39 @@ class OpenMeteoClient:
                 norm[k] = v
         return norm
 
+    def _breaker_is_open(self) -> bool:
+        """True while the client is in its post-failure cooldown."""
+        with self._breaker_lock:
+            if self._breaker_open_until and time.monotonic() < self._breaker_open_until:
+                return True
+            if self._breaker_open_until:
+                # Cooldown elapsed: allow traffic again and re-arm the counter.
+                self._breaker_open_until = 0.0
+                self._consecutive_failures = 0
+                logger.info("OpenMeteoClient: cooldown elapsed, retrying weather requests")
+            return False
+
+    def _record_success(self) -> None:
+        with self._breaker_lock:
+            self._consecutive_failures = 0
+            self._breaker_open_until = 0.0
+
+    def _record_failure(self) -> None:
+        with self._breaker_lock:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= _BREAKER_FAILURE_THRESHOLD and not self._breaker_open_until:
+                self._breaker_open_until = time.monotonic() + _BREAKER_COOLDOWN_SECONDS
+                logger.warning(
+                    "OpenMeteoClient: %d consecutive failures; skipping weather requests "
+                    "for %ds. Predictions continue with unknown weather.",
+                    self._consecutive_failures, _BREAKER_COOLDOWN_SECONDS,
+                )
+
     def _fetch_hourly_df(self, base_url: str, params: Dict[str, Any]) -> 'pd.DataFrame':  # noqa: F821
         """Fetch hourly data; return empty DataFrame on any HTTP/shape error (never raise)."""
         import pandas as pd
+        if self._breaker_is_open():
+            return pd.DataFrame(columns=["time"])
         try:
             js = http_get_json(self.session, base_url, params=self._normalize_params(params), timeout=self.timeout)
             if not isinstance(js, dict):
@@ -81,9 +127,11 @@ class OpenMeteoClient:
                 if k == "time":
                     continue
                 df[k] = v
+            self._record_success()
             return df
         except Exception as e:
             logger.info(f"OpenMeteoClient: hourly fetch failed for {base_url}: {e}")
+            self._record_failure()
             return pd.DataFrame(columns=["time"])
 
     def get_forecast(self, lat: float, lon: float, start: datetime, end: datetime, tz: str = "UTC") -> 'pd.DataFrame':  # noqa: F821

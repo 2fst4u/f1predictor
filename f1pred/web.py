@@ -322,7 +322,8 @@ async def get_predictions(
         output = {
             "season": results["season"],
             "round": results["round"],
-            "sessions": {}
+            "sessions": {},
+            "errors": dict(results.get("errors") or {}),
         }
 
         for sess, data in results["sessions"].items():
@@ -383,7 +384,8 @@ async def get_predictions_stream(
             output = {
                 "season": results["season"],
                 "round": results["round"],
-                "sessions": {}
+                "sessions": {},
+                "errors": dict(results.get("errors") or {}),
             }
 
             for sess, data in results["sessions"].items():
@@ -454,8 +456,9 @@ async def predictions_live():
             for diff in diffs[-5:]:  # Last 5 diffs
                 yield f"data: {json.dumps({'type': 'diff', 'data': diff, 'timestamp': diff.get('timestamp', '')})}\n\n"
 
-            # Send current status
-            yield f"data: {json.dumps({'type': 'status', 'status': _prediction_manager.status, 'last_update': _prediction_manager.last_update})}\n\n"
+            # Send current status (including the last pipeline failure, so a
+            # client that connects after a failed cycle can still explain it)
+            yield f"data: {json.dumps({'type': 'status', 'status': _prediction_manager.status, 'last_update': _prediction_manager.last_update, 'last_error': _prediction_manager.last_error})}\n\n"
 
             # Stream updates
             while True:
@@ -484,6 +487,7 @@ async def predictions_latest():
         "diffs": _prediction_manager.latest_diffs,
         "last_update": _prediction_manager.last_update,
         "status": _prediction_manager.status,
+        "last_error": _prediction_manager.last_error,
     }
 
 # --- Settings and Auth Endpoints ---
