@@ -13,7 +13,7 @@ from unittest.mock import patch
 def client():
     # Use real config for simple init
     cfg = load_config("config.yaml")
-    init_web(cfg)
+    init_web(cfg, start_manager=False)
     yield TestClient(app)
     if web_module._prediction_manager:
         web_module._prediction_manager.stop()

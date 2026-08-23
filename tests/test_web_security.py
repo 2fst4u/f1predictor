@@ -27,7 +27,7 @@ def reset_login_attempts():
 def client():
     # Use real config for simple init
     cfg = load_config("config.yaml")
-    fweb.init_web(cfg)
+    fweb.init_web(cfg, start_manager=False)
     yield TestClient(fweb.app)
     if fweb._prediction_manager:
         fweb._prediction_manager.stop()

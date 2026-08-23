@@ -105,7 +105,15 @@ async def add_security_headers(request: Request, call_next):
 # Templates
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
-def init_web(cfg: AppConfig):
+def init_web(cfg: AppConfig, start_manager: bool = True):
+    """Wire up the app.
+
+    Args:
+        start_manager: Start the background prediction loop. Tests pass False:
+            the loop makes live API calls and runs the full ML pipeline, and a
+            suite that builds the app per test would otherwise leave a thread
+            per test grinding through the season in the background.
+    """
     global _config, _prediction_manager
     _config = cfg
 
@@ -142,8 +150,11 @@ def init_web(cfg: AppConfig):
     # Start background prediction manager
     poll_interval = getattr(cfg.app, 'auto_refresh_seconds', 3600)
     _prediction_manager = PredictionManager(cfg, poll_interval=poll_interval, db_session_factory=_db_session_factory)
-    _prediction_manager.start()
-    logger.info("Background prediction manager started (interval=%ds)", poll_interval)
+    if start_manager:
+        _prediction_manager.start()
+        logger.info("Background prediction manager started (interval=%ds)", poll_interval)
+    else:
+        logger.info("Background prediction manager created but not started")
 
 
 @app.on_event("shutdown")
