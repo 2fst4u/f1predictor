@@ -46,10 +46,12 @@ def test_predict_logs_sanitized_exception(mock_logger):
                         ["race"]
                     )
 
-            # Verify logger was called with sanitized message
+            # Verify logger was called with sanitized message. Session failures
+            # are logged at WARNING (they are the difference between a populated
+            # and an empty prediction), so that is where the payload would land.
             found = False
             logged_messages = []
-            for call in mock_logger.info.call_args_list:
+            for call in mock_logger.warning.call_args_list:
                 args, _ = call
                 msg = args[0]
                 logged_messages.append(msg)
@@ -62,3 +64,39 @@ def test_predict_logs_sanitized_exception(mock_logger):
                     break
 
             assert found, f"Logger did not receive sanitized exception message. Logged: {logged_messages}"
+
+
+@patch("f1pred.predict.logger")
+def test_predict_reports_failed_session_in_results(mock_logger):
+    """A session that raises must be reported back to the caller.
+
+    Without this the API stores an event with zero sessions and the UI renders
+    a blank page, with no way to tell a failed run from "nothing to predict".
+    """
+    with patch("f1pred.predict.resolve_event") as mock_resolve:
+        mock_resolve.return_value = (2025, 1, {"raceName": "Test GP", "date": "2025-01-01", "time": "12:00:00Z"})
+
+        with patch("f1pred.features.build_roster") as mock_roster:
+            mock_roster.side_effect = RuntimeError("upstream unavailable")
+
+            with patch("f1pred.predict.JolpicaClient"), \
+                 patch("f1pred.predict.OpenMeteoClient"), \
+                 patch("f1pred.predict.ensure_dirs"), \
+                 patch("f1pred.predict.init_fastf1"), \
+                 patch("f1pred.calibrate.CalibrationManager") as mock_cm, \
+                 patch("f1pred.predict.StatusSpinner"):
+
+                mock_cm_instance = MagicMock()
+                mock_cm_instance.check_calibration_needed.return_value = False
+                mock_cm_instance.load_weights.return_value = {}
+                mock_cm.return_value = mock_cm_instance
+
+                with patch("f1pred.predict._filter_sessions_for_round", return_value=["race"]):
+                    results = f1pred.predict.run_predictions_for_event(
+                        MagicMock(), "2025", "1", ["race"], return_results=True
+                    )
+
+    assert results["sessions"] == {}
+    assert "race" in results["errors"]
+    assert "upstream unavailable" in results["errors"]["race"]
+    assert "RuntimeError" in results["errors"]["race"]

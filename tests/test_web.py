@@ -13,7 +13,7 @@ from unittest.mock import patch
 def client():
     # Use real config for simple init
     cfg = load_config("config.yaml")
-    init_web(cfg)
+    init_web(cfg, start_manager=False)
     yield TestClient(app)
     if web_module._prediction_manager:
         web_module._prediction_manager.stop()
@@ -275,7 +275,25 @@ def test_predictions_latest(client):
     assert response.status_code == 200
     data = response.json()
     # Keys are always present even before the first prediction cycle
-    assert set(["results", "diffs", "last_update", "status"]).issubset(data.keys())
+    assert set(["results", "diffs", "last_update", "status", "last_error"]).issubset(data.keys())
+
+
+def test_predictions_latest_exposes_last_error(client):
+    """A failed prediction run must be visible to the UI, not silent."""
+    pm = web_module._prediction_manager
+    pm._last_error = {
+        "season": 2024,
+        "round": 12,
+        "event_name": "Dutch Grand Prix",
+        "errors": {"race": "RuntimeError: upstream unavailable"},
+        "timestamp": "2024-08-24T12:00:00+00:00",
+    }
+    try:
+        data = client.get("/api/predictions/latest").json()
+        assert data["last_error"]["round"] == 12
+        assert data["last_error"]["errors"]["race"] == "RuntimeError: upstream unavailable"
+    finally:
+        pm._last_error = None
 
 
 def test_predictions_latest_no_manager(client):

@@ -152,6 +152,14 @@
                                 class="text-xs font-bold text-yellow-300 uppercase tracking-tighter">Reconnecting</span>
                         </span>
                     </template>
+                    <template x-if="lastPipelineError">
+                        <span class="flex items-center space-x-1 bg-black bg-opacity-30 px-2 py-1 rounded"
+                            role="status"
+                            :title="'Last prediction run failed for round ' + (lastPipelineError.round || '?') + ' (' + (lastPipelineError.event_name || 'unknown event') + ')'">
+                            <i class="fas fa-triangle-exclamation text-yellow-300 text-xs" aria-hidden="true"></i>
+                            <span class="text-xs font-bold text-yellow-300 uppercase tracking-tighter">Run failed</span>
+                        </span>
+                    </template>
                     <span
                         class="text-xs font-bold text-white text-opacity-60 uppercase tracking-tighter truncate max-w-[80px] sm:max-w-none inline-block">
                         <span class="sr-only">Model Version </span><span aria-hidden="true">M:</span><span
@@ -630,6 +638,63 @@
                         </div>
                     </div>
                 </template>
+
+                <!-- Nothing predictable for this round -->
+                <template x-if="getAvailableSessions().length === 0">
+                    <div class="card border-l-4 border-yellow-500 p-5" role="status">
+                        <div class="flex items-start gap-3">
+                            <i class="fas fa-triangle-exclamation text-yellow-500 mt-1" aria-hidden="true"></i>
+                            <div class="min-w-0">
+                                <h3 class="font-bold uppercase tracking-widest text-xs text-yellow-500 mb-2">
+                                    No race prediction for this round
+                                </h3>
+                                <p class="text-sm text-gray-300 mb-3">
+                                    The prediction run for this event finished without producing a race or
+                                    sprint ranking, so there is nothing to show yet.
+                                </p>
+
+                                <template x-if="sessionErrorEntries().length > 0">
+                                    <div class="mb-3">
+                                        <p class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">Reported reasons</p>
+                                        <ul class="text-sm text-gray-300 space-y-1">
+                                            <template x-for="[sess, reason] in sessionErrorEntries()" :key="sess">
+                                                <li class="flex gap-2">
+                                                    <span class="font-bold text-gray-400 whitespace-nowrap"
+                                                        x-text="formatSessionLabel(sess) + ':'"></span>
+                                                    <span class="break-words" x-text="reason"></span>
+                                                </li>
+                                            </template>
+                                        </ul>
+                                    </div>
+                                </template>
+
+                                <template x-if="predictedSessionNames().length > 0">
+                                    <p class="text-sm text-gray-400 mb-3">
+                                        Sessions that were predicted but are not shown here:
+                                        <span class="text-gray-300"
+                                            x-text="predictedSessionNames().map(s => formatSessionLabel(s)).join(', ')"></span>.
+                                    </p>
+                                </template>
+
+                                <p class="text-xs text-gray-500">
+                                    Prediction status: <span x-text="liveStatus || 'unknown'"></span>
+                                    <template x-if="liveLastUpdate">
+                                        <span> &bull; last update <span x-text="liveLastUpdate"></span></span>
+                                    </template>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Stale: last good predictions kept after a failed refresh -->
+                <template x-if="results?.stale && getAvailableSessions().length > 0">
+                    <div class="card border-l-4 border-yellow-500 p-4 mt-6 text-sm text-gray-300" role="status">
+                        <i class="fas fa-clock-rotate-left text-yellow-500 mr-2" aria-hidden="true"></i>
+                        These are the last predictions that completed successfully &mdash; the most recent
+                        refresh for this round failed, so they may be out of date.
+                    </div>
+                </template>
             </div>
 
             <!-- Empty State -->
@@ -845,6 +910,8 @@
                 liveConnected: false,
                 liveReconnecting: false,
                 liveLastUpdate: null,
+                liveStatus: null,        // 'idle' | 'running' | 'error'
+                lastPipelineError: null, // { season, round, event_name, errors, timestamp }
                 _liveEventSource: null,
                 _liveReconnectTimer: null,
                 recentChanges: [],       // Array of DriverMovement objects
@@ -1085,6 +1152,10 @@
                                     this.liveLastUpdate = new Date(latest.last_update).toLocaleTimeString();
                                 }
                             }
+                            if (latest) {
+                                this.liveStatus = latest.status || null;
+                                this.lastPipelineError = latest.last_error || null;
+                            }
                         }
 
                         if (!hasLoadedState) {
@@ -1245,9 +1316,22 @@
                     }
 
                     if (payload.type === 'status') {
+                        if (payload.status) {
+                            this.liveStatus = payload.status;
+                        }
                         if (payload.last_update) {
                             this.liveLastUpdate = new Date(payload.last_update).toLocaleTimeString();
                         }
+                        if (payload.last_error !== undefined) {
+                            this.lastPipelineError = payload.last_error;
+                        }
+                    }
+
+                    if (payload.type === 'prediction_error' && payload.data) {
+                        this.lastPipelineError = {
+                            ...payload.data,
+                            timestamp: payload.timestamp || new Date().toISOString(),
+                        };
                     }
                 },
 
@@ -1266,6 +1350,26 @@
                 filteredRecentChanges() {
                     if (!this.activeSession) return this.recentChanges;
                     return this.recentChanges.filter(c => c.session === this.activeSession);
+                },
+
+                // Human label for a session key. Pipeline-level failures are
+                // reported under keys like "_run" / "_round".
+                formatSessionLabel(sess) {
+                    if (!sess) return 'pipeline';
+                    return sess.startsWith('_') ? 'pipeline' : sess.replace('_', ' ');
+                },
+
+                // Sessions that were requested but produced nothing, with the
+                // reason reported by the pipeline.
+                sessionErrorEntries() {
+                    const errs = (this.results && this.results.errors) || {};
+                    return Object.entries(errs);
+                },
+
+                // Sessions that WERE predicted (including ones this view does
+                // not render, e.g. qualifying).
+                predictedSessionNames() {
+                    return Object.keys((this.results && this.results.sessions) || {});
                 },
 
                 getAvailableSessions() {

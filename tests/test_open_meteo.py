@@ -313,3 +313,68 @@ def test_compute_past_forecast_days_naive_to_aware():
     past, forecast = client._compute_past_forecast_days(start, end)
     assert isinstance(past, int)
     assert isinstance(forecast, int)
+
+
+def _client():
+    return OpenMeteoClient(
+        forecast_url="https://example.invalid/forecast",
+        historical_weather_url="https://example.invalid/era5",
+        historical_forecast_url="https://example.invalid/hist",
+        geocoding_url="https://example.invalid/geo",
+    )
+
+
+def test_breaker_opens_after_repeated_failures():
+    """A dead upstream must stop being called, not retried indefinitely.
+
+    Every failed request burns its full retry budget; across a season's worth of
+    weather lookups that turns an hourly prediction cycle into an all-day retry
+    storm, which looks from the outside like predictions having stopped.
+    """
+    from f1pred.data import open_meteo as om
+
+    client = _client()
+    with patch.object(om, "http_get_json", side_effect=OSError("connection refused")) as mock_get:
+        for _ in range(om._BREAKER_FAILURE_THRESHOLD):
+            assert client._fetch_hourly_df(client.forecast_url, {}).empty
+        assert mock_get.call_count == om._BREAKER_FAILURE_THRESHOLD
+
+        # Breaker is now open: further calls short-circuit without hitting HTTP.
+        assert client._fetch_hourly_df(client.forecast_url, {}).empty
+        assert client._fetch_hourly_df(client.historical_weather_url, {}).empty
+        assert mock_get.call_count == om._BREAKER_FAILURE_THRESHOLD
+
+
+def test_breaker_resets_after_cooldown():
+    from f1pred.data import open_meteo as om
+
+    client = _client()
+    with patch.object(om, "http_get_json", side_effect=OSError("connection refused")):
+        for _ in range(om._BREAKER_FAILURE_THRESHOLD):
+            client._fetch_hourly_df(client.forecast_url, {})
+
+    assert client._breaker_is_open()
+    client._breaker_open_until = 0.0  # simulate the cooldown elapsing
+    assert not client._breaker_is_open()
+
+    payload = {"hourly": {"time": ["2024-01-01T00:00"], "temperature_2m": [20.0]}}
+    with patch.object(om, "http_get_json", return_value=payload) as mock_get:
+        df = client._fetch_hourly_df(client.forecast_url, {})
+        assert mock_get.call_count == 1
+        assert not df.empty
+        assert client._consecutive_failures == 0
+
+
+def test_success_resets_failure_count():
+    from f1pred.data import open_meteo as om
+
+    client = _client()
+    with patch.object(om, "http_get_json", side_effect=OSError("boom")):
+        client._fetch_hourly_df(client.forecast_url, {})
+    assert client._consecutive_failures == 1
+
+    payload = {"hourly": {"time": ["2024-01-01T00:00"], "temperature_2m": [20.0]}}
+    with patch.object(om, "http_get_json", return_value=payload):
+        client._fetch_hourly_df(client.forecast_url, {})
+    assert client._consecutive_failures == 0
+    assert not client._breaker_is_open()

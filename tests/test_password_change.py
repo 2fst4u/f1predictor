@@ -9,7 +9,7 @@ from f1pred.auth import get_password_hash
 def auth_client():
     # Use real config for simple init
     cfg = load_config("config.yaml")
-    init_web(cfg)
+    init_web(cfg, start_manager=False)
 
     # Ensure admin user has known password
     with web_module._db_session_factory() as db:

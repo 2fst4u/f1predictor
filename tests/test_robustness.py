@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client():
     cfg = load_config("config.yaml")
-    init_web(cfg)
+    init_web(cfg, start_manager=False)
     yield TestClient(app)
     import f1pred.web as web_module
     if web_module._prediction_manager:

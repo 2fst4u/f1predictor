@@ -105,7 +105,15 @@ async def add_security_headers(request: Request, call_next):
 # Templates
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
-def init_web(cfg: AppConfig):
+def init_web(cfg: AppConfig, start_manager: bool = True):
+    """Wire up the app.
+
+    Args:
+        start_manager: Start the background prediction loop. Tests pass False:
+            the loop makes live API calls and runs the full ML pipeline, and a
+            suite that builds the app per test would otherwise leave a thread
+            per test grinding through the season in the background.
+    """
     global _config, _prediction_manager
     _config = cfg
 
@@ -142,8 +150,11 @@ def init_web(cfg: AppConfig):
     # Start background prediction manager
     poll_interval = getattr(cfg.app, 'auto_refresh_seconds', 3600)
     _prediction_manager = PredictionManager(cfg, poll_interval=poll_interval, db_session_factory=_db_session_factory)
-    _prediction_manager.start()
-    logger.info("Background prediction manager started (interval=%ds)", poll_interval)
+    if start_manager:
+        _prediction_manager.start()
+        logger.info("Background prediction manager started (interval=%ds)", poll_interval)
+    else:
+        logger.info("Background prediction manager created but not started")
 
 
 @app.on_event("shutdown")
@@ -322,7 +333,8 @@ async def get_predictions(
         output = {
             "season": results["season"],
             "round": results["round"],
-            "sessions": {}
+            "sessions": {},
+            "errors": dict(results.get("errors") or {}),
         }
 
         for sess, data in results["sessions"].items():
@@ -383,7 +395,8 @@ async def get_predictions_stream(
             output = {
                 "season": results["season"],
                 "round": results["round"],
-                "sessions": {}
+                "sessions": {},
+                "errors": dict(results.get("errors") or {}),
             }
 
             for sess, data in results["sessions"].items():
@@ -454,8 +467,9 @@ async def predictions_live():
             for diff in diffs[-5:]:  # Last 5 diffs
                 yield f"data: {json.dumps({'type': 'diff', 'data': diff, 'timestamp': diff.get('timestamp', '')})}\n\n"
 
-            # Send current status
-            yield f"data: {json.dumps({'type': 'status', 'status': _prediction_manager.status, 'last_update': _prediction_manager.last_update})}\n\n"
+            # Send current status (including the last pipeline failure, so a
+            # client that connects after a failed cycle can still explain it)
+            yield f"data: {json.dumps({'type': 'status', 'status': _prediction_manager.status, 'last_update': _prediction_manager.last_update, 'last_error': _prediction_manager.last_error})}\n\n"
 
             # Stream updates
             while True:
@@ -484,6 +498,7 @@ async def predictions_latest():
         "diffs": _prediction_manager.latest_diffs,
         "last_update": _prediction_manager.last_update,
         "status": _prediction_manager.status,
+        "last_error": _prediction_manager.last_error,
     }
 
 # --- Settings and Auth Endpoints ---

@@ -30,6 +30,12 @@ Issues = "https://github.com/2fst4u/f1predictor/issues"
 [tool.setuptools_scm]
 write_to = "f1pred/_version.py"
 
+[tool.pytest.ini_options]
+# Dump every thread's stack if a single test runs longer than this, so a hung
+# test reports where it is stuck instead of silently burning the CI job limit.
+# Diagnostic only: it does not fail or kill the test.
+faulthandler_timeout = 600
+
 [tool.coverage.run]
 omit = [
     "tests/*",

@@ -343,6 +343,9 @@ class PredictionManager:
 
         self._last_update: Optional[str] = None
         self._status: str = "idle"  # idle, running, error
+        # Details of the most recent round that produced no predictions at
+        # all, exposed via the API so a stalled pipeline is diagnosable.
+        self._last_error: Optional[Dict[str, Any]] = None
 
         # SSE subscriber management
         self._subscribers: Set[asyncio.Queue] = set()
@@ -380,6 +383,12 @@ class PredictionManager:
     def status(self) -> str:
         with self._lock:
             return self._status
+
+    @property
+    def last_error(self) -> Optional[Dict[str, Any]]:
+        """Most recent round that yielded no predictions, if any."""
+        with self._lock:
+            return self._last_error
 
     def subscribe(self) -> asyncio.Queue:
         """Register a new SSE subscriber. Returns a queue for receiving events."""
@@ -506,8 +515,26 @@ class PredictionManager:
                     if has_data:
                         continue  # skip to save time
 
-            self._predict_round(jc, season, round_i, r_info)
-            
+            try:
+                self._predict_round(jc, season, round_i, r_info)
+            except Exception as e:
+                # One round failing must not abort the remaining rounds:
+                # without this, a single bad event silently costs a whole
+                # cycle (an hour by default) of predictions.
+                logger.warning(
+                    "[PredictionManager] Round %s failed: %s: %s",
+                    round_i, type(e).__name__, e,
+                )
+                logger.debug("[PredictionManager] Round %s traceback", round_i, exc_info=True)
+                with self._lock:
+                    self._last_error = {
+                        "season": season,
+                        "round": round_i,
+                        "event_name": r_info.get("raceName", ""),
+                        "errors": {"_round": f"{type(e).__name__}: {e}"},
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self._status = "idle"
@@ -567,7 +594,28 @@ class PredictionManager:
         )
 
         if not results:
-            logger.info("[PredictionManager] No results generated for %s", event_title)
+            # No structured result at all — treat it like a failed run so the
+            # UI and API can say why nothing is being shown.
+            logger.warning("[PredictionManager] No results generated for %s", event_title)
+            now = datetime.now(timezone.utc).isoformat()
+            with self._lock:
+                self._last_error = {
+                    "season": season_i,
+                    "round": round_i,
+                    "event_name": race_info.get("raceName", ""),
+                    "errors": {"_run": "Prediction run returned no results"},
+                    "timestamp": now,
+                }
+            self._broadcast({
+                "type": "prediction_error",
+                "data": {
+                    "season": season_i,
+                    "round": round_i,
+                    "event_name": race_info.get("raceName", ""),
+                    "errors": {"_run": "Prediction run returned no results"},
+                },
+                "timestamp": now,
+            })
             return
 
         # Fetch actual results to determine if round is frozen and calculate deltas
@@ -588,11 +636,18 @@ class PredictionManager:
         except Exception as e:
             logger.warning("Failed to fetch actual results for %s: %s", event_title, e)
 
+        session_errors = dict(results.get("errors") or {})
+
         output = {
             "season": results["season"],
             "round": results["round"],
             "event_name": race_info.get("raceName", ""),
             "sessions": {},
+            # Why a requested session is missing from "sessions". Kept in the
+            # payload so the UI can explain an empty event instead of
+            # rendering a blank page.
+            "errors": session_errors,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         def _sanitize(v):
@@ -688,11 +743,53 @@ class PredictionManager:
                 webhook_updates[sess] = (diff, ranked_list, weather)
 
         now = datetime.now(timezone.utc).isoformat()
+
+        if not output["sessions"]:
+            reason = "; ".join(f"{k}: {v}" for k, v in session_errors.items()) or "unknown reason"
+            logger.warning(
+                "[PredictionManager] %s produced no predictable sessions (%s)",
+                event_title, reason,
+            )
+            with self._lock:
+                self._last_error = {
+                    "season": season_i,
+                    "round": round_i,
+                    "event_name": output["event_name"],
+                    "errors": session_errors,
+                    "timestamp": now,
+                }
+            self._broadcast({
+                "type": "prediction_error",
+                "data": {
+                    "season": season_i,
+                    "round": round_i,
+                    "event_name": output["event_name"],
+                    "errors": session_errors,
+                },
+                "timestamp": now,
+            })
+        else:
+            with self._lock:
+                self._last_error = None
+
         with self._lock:
             if not self._latest_results:
                 self._latest_results = {"season": season_i, "rounds": {}}
-            self._latest_results["rounds"][str(round_i)] = output
-            
+
+            previous = self._latest_results["rounds"].get(str(round_i))
+            if not output["sessions"] and previous and previous.get("sessions"):
+                # A run that predicted nothing is almost always an upstream
+                # data outage, not "there is nothing to predict". Keep the
+                # last good predictions on display and flag them as stale
+                # rather than replacing them with an empty event.
+                previous["errors"] = session_errors
+                previous["stale"] = True
+                previous["last_attempt"] = now
+            else:
+                output["stale"] = False
+                output["last_attempt"] = now
+                self._latest_results["rounds"][str(round_i)] = output
+
             self._latest_diffs.extend(all_diffs)
             if len(self._latest_diffs) > 50:
                 self._latest_diffs = self._latest_diffs[-50:]
@@ -714,7 +811,7 @@ class PredictionManager:
         # least one upcoming (non-frozen) session. A fully-frozen round is
         # read-only backtest data: its stored state was refreshed above for
         # the UI/API, but it must not surface as a live notification.
-        if has_live_session:
+        if has_live_session and output["sessions"]:
             self._broadcast({
                 "type": "prediction_round",
                 "data": output,

@@ -228,6 +228,21 @@ rm -rf cache/ .cache/
 python main.py --round next
 ```
 
+**Web UI shows an event heading but no predictions?**
+The round was predicted but produced no race/sprint ranking. The UI now says so
+explicitly, listing the reason per session, and the header shows a "Run failed"
+chip when the most recent background run failed. The same detail is available
+from the API:
+
+```bash
+curl -s localhost:8000/api/predictions/latest | jq '.status, .last_error'
+```
+
+Failed sessions are logged at `WARNING`, so they appear with the default
+`app.log_level` (e.g. `docker logs <container>`). The last predictions that
+completed successfully are kept on display and flagged as possibly out of date
+rather than being replaced by an empty event.
+
 **Missing actuals for sprint qualifying?**
 Enable FastF1 in `config.yaml`.
 

@@ -861,3 +861,123 @@ class TestPredictionManagerDiscord:
                     # Discord field values must stay under the 1024 char limit.
                     for f in r_embed["fields"]:
                         assert len(f["value"]) <= 1024
+
+
+class TestEmptyPredictionRun:
+    """A run that predicts nothing must be visible and must not destroy state.
+
+    A silently-empty round renders as a blank page in the UI, which is
+    indistinguishable from "the app stopped working" — so the manager records
+    the failure and keeps the last good predictions on display.
+    """
+
+    def _manager(self):
+        cfg = MagicMock()
+        cfg.modelling.targets.session_types = ["qualifying", "race"]
+        cfg.paths.cache_dir = "cache"
+        manager = PredictionManager(cfg, poll_interval=60)
+        manager._latest_results = {"season": 2024, "rounds": {}}
+        return manager
+
+    def _good_results(self):
+        import pandas as pd
+        df = pd.DataFrame([
+            {"driverId": "ver01", "predicted_position": 1, "mean_pos": 1.1, "grid": 1,
+             "p_win": 0.9, "p_top3": 0.9, "code": "VER", "name": "Max Verstappen",
+             "constructorName": "Red Bull"},
+        ])
+        return {
+            "season": 2024,
+            "round": 1,
+            "sessions": {"race": {"ranked": df, "meta": {"weather": {}}}},
+            "errors": {},
+        }
+
+    def _jc(self):
+        jc = MagicMock()
+        jc.get_race_results.return_value = []
+        jc.get_qualifying_results.return_value = []
+        jc.get_sprint_results.return_value = []
+        return jc
+
+    def test_errors_are_stored_in_round_payload(self):
+        manager = self._manager()
+        empty = {"season": 2024, "round": 1, "sessions": {},
+                 "errors": {"race": "RuntimeError: upstream down"}}
+
+        with patch('f1pred.predict.run_predictions_for_event', return_value=empty):
+            manager._predict_round(self._jc(), 2024, 1, {"raceName": "Test GP", "round": 1})
+
+        stored = manager.latest_results["rounds"]["1"]
+        assert stored["sessions"] == {}
+        assert stored["errors"]["race"] == "RuntimeError: upstream down"
+
+    def test_last_error_is_recorded_and_cleared(self):
+        manager = self._manager()
+        empty = {"season": 2024, "round": 1, "sessions": {},
+                 "errors": {"race": "RuntimeError: upstream down"}}
+
+        with patch('f1pred.predict.run_predictions_for_event', return_value=empty):
+            manager._predict_round(self._jc(), 2024, 1, {"raceName": "Test GP", "round": 1})
+
+        assert manager.last_error is not None
+        assert manager.last_error["round"] == 1
+        assert manager.last_error["errors"]["race"] == "RuntimeError: upstream down"
+
+        with patch('f1pred.predict.run_predictions_for_event', return_value=self._good_results()):
+            manager._predict_round(self._jc(), 2024, 1, {"raceName": "Test GP", "round": 1})
+
+        assert manager.last_error is None
+
+    def test_empty_run_keeps_previous_predictions(self):
+        manager = self._manager()
+
+        with patch('f1pred.predict.run_predictions_for_event', return_value=self._good_results()):
+            manager._predict_round(self._jc(), 2024, 1, {"raceName": "Test GP", "round": 1})
+
+        assert "race" in manager.latest_results["rounds"]["1"]["sessions"]
+
+        empty = {"season": 2024, "round": 1, "sessions": {}, "errors": {"race": "boom"}}
+        with patch('f1pred.predict.run_predictions_for_event', return_value=empty):
+            manager._predict_round(self._jc(), 2024, 1, {"raceName": "Test GP", "round": 1})
+
+        stored = manager.latest_results["rounds"]["1"]
+        assert "race" in stored["sessions"], "last good predictions must survive a failed run"
+        assert stored["stale"] is True
+        assert stored["errors"]["race"] == "boom"
+
+    def test_empty_run_does_not_broadcast_prediction_round(self):
+        manager = self._manager()
+        empty = {"season": 2024, "round": 1, "sessions": {}, "errors": {"race": "boom"}}
+        broadcasts = []
+
+        with patch.object(manager, '_broadcast', side_effect=broadcasts.append):
+            with patch('f1pred.predict.run_predictions_for_event', return_value=empty):
+                manager._predict_round(self._jc(), 2024, 1, {"raceName": "Test GP", "round": 1})
+
+        types = [b["type"] for b in broadcasts]
+        assert "prediction_round" not in types
+        assert "prediction_error" in types
+
+    def test_failing_round_does_not_abort_the_cycle(self):
+        """A round raising must not cost the remaining rounds their update."""
+        manager = self._manager()
+        predicted = []
+
+        def _predict(jc, season, round_i, race_info):
+            if round_i == 1:
+                raise RuntimeError("round 1 exploded")
+            predicted.append(round_i)
+
+        schedule = [{"round": "1", "season": "2024"}, {"round": "2", "season": "2024"}]
+        manager._running = True
+        with patch.object(manager, '_predict_round', side_effect=_predict):
+            with patch('f1pred.data.jolpica.JolpicaClient') as mock_jc_cls:
+                mock_jc = mock_jc_cls.return_value
+                mock_jc.get_season_schedule.return_value = schedule
+                with patch('f1pred.predict.resolve_event', return_value=(2024, 1, {})):
+                    manager._run_season_cycle(0)
+
+        assert predicted == [2]
+        assert manager.last_error is not None
+        assert manager.last_error["round"] == 1
