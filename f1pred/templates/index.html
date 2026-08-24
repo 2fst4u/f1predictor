@@ -128,7 +128,7 @@
     </style>
 </head>
 
-<body x-data="f1App()" x-init="init()" @resize.window.throttle.100ms="windowWidth = window.innerWidth">
+<body x-data="f1App()" x-init="init()" @resize.window.throttle.100ms="windowWidth = window.innerWidth" @keydown.escape.window="error = null">
     <div class="min-h-screen">
         <!-- Header -->
         <header class="f1-red shadow-lg px-4 py-3">
@@ -238,8 +238,9 @@
                         <p class="font-bold">Error</p>
                         <p x-text="error"></p>
                     </div>
-                    <button @click="error = null" aria-label="Dismiss error" title="Dismiss error"
+                    <button @click="error = null" title="Dismiss error (Esc)"
                         class="text-red-300 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white rounded p-1 transition">
+                        <span class="sr-only">Dismiss error</span>
                         <i class="fas fa-times" aria-hidden="true"></i>
                     </button>
                 </div>

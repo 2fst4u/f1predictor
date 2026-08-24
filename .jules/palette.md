@@ -12,3 +12,7 @@
 ## 2025-02-18 - Accessibility for Icon-only Buttons
 **Learning:** For dynamic icon-only buttons (like password visibility toggles with Alpine `x-text`), standard `:aria-label` bindings can be problematic as screen readers may not consistently announce their state changes, and automated translation tools often ignore them. Using an inner visually hidden `<span class="sr-only">` element whose text changes dynamically is a more robust accessibility pattern.
 **Action:** When implementing icon-only buttons with dynamic states, prefer using an inner `.sr-only` text span rather than relying solely on `aria-label` attributes to ensure robust screen reader announcements and better internationalization support.
+
+## 2024-08-24 - Global Error Dismissal & Translation Robustness
+**Learning:** Found that the global error banner lacked a keyboard shortcut. Implementing `Esc` (via `@keydown.escape.window`) to dismiss global errors improves accessibility for keyboard users and provides a noticeable UX delight. Adding the shortcut hint to the tooltip (`(Esc)`) effectively teaches this pattern. Additionally, applying the `.sr-only` span pattern instead of a static `aria-label` to the static "Dismiss Error" icon button improves robustness for automated translation tools.
+**Action:** When adding global dismissal or modal-like elements, always consider mapping the `Escape` key and indicating it in the tooltip. Default to inner `.sr-only` spans for icon buttons, even if their state is static, to ensure correct translation parsing.
