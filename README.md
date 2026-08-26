@@ -131,6 +131,10 @@ modelling:
     include_weather_ensemble: true # Enable multi-model weather forecasts
 
 data_sources:
+  jolpica:
+    enabled: true # Enable/disable Jolpica Ergast API integration
+  fastf1:
+    enabled: true # Enable/disable FastF1 telemetry integration
   open_meteo:
     temperature_unit: "celsius" # celsius | fahrenheit
     windspeed_unit: "kmh" # kmh | ms | mph | kn
