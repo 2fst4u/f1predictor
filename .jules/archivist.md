@@ -47,3 +47,8 @@
 
 **Learning:** `AGENTS.md` incorrectly claimed that dev builds run on "any branch" (including `main`), but the CI configuration (`build.yml`) explicitly ignores the `main` branch. This led to inaccurate documentation about what triggers automatic prerelease builds and what branch tags exist.
 **Action:** Always verify GitHub Actions trigger conditions (like `branches-ignore`) in `.github/workflows/` before trusting written claims in documentation about CI execution.
+
+## 2026-08-26 - Configuration Documentation Drift
+
+**Learning:** The configuration for data sources in `config.yaml` frequently drifts from what is documented in `README.md`. Specifically, the `jolpica` and `fastf1` `enabled` toggles were entirely omitted from the README's `data_sources` section.
+**Action:** When updating the application configuration or reviewing documentation, ensure that all sub-blocks under `data_sources` in `config.yaml` are explicitly listed in the `README.md` Configuration section so users know how to toggle API dependencies.
