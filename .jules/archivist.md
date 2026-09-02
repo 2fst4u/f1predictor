@@ -52,3 +52,8 @@
 
 **Learning:** The configuration for data sources in `config.yaml` frequently drifts from what is documented in `README.md`. Specifically, the `jolpica` and `fastf1` `enabled` toggles were entirely omitted from the README's `data_sources` section.
 **Action:** When updating the application configuration or reviewing documentation, ensure that all sub-blocks under `data_sources` in `config.yaml` are explicitly listed in the `README.md` Configuration section so users know how to toggle API dependencies.
+
+## 2026-09-02 - Configuration Drift for open_meteo
+
+**Learning:** The `enabled` configuration flag for `data_sources.open_meteo` was documented in the codebase (`config.py` and `config.yaml`) but mistakenly omitted from the Configuration example section in `README.md`.
+**Action:** When adding or modifying data source configurations, always cross-reference the toggles against the `README.md` Configuration section to ensure no `enabled` flags are left undocumented.
