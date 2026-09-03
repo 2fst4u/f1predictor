@@ -136,6 +136,7 @@ data_sources:
   fastf1:
     enabled: true # Enable/disable FastF1 telemetry integration
   open_meteo:
+    enabled: true # Enable/disable Open-Meteo weather data
     temperature_unit: "celsius" # celsius | fahrenheit
     windspeed_unit: "kmh" # kmh | ms | mph | kn
     precipitation_unit: "mm" # mm | inch
