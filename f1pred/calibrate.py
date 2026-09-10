@@ -945,7 +945,6 @@ class CalibrationManager:
 
             # Pre-compute arrays for vectorised race objective
             arr_gbm_raw = df_calib["gbm_raw"].values.astype(float)
-            arr_base_team = df_calib["base_team"].values.astype(float)
             arr_actual_pos = df_calib["actual_pos"].values.astype(float)
             arr_actual_dnf = df_calib["actual_dnf"].values.astype(float)
 
@@ -1009,7 +1008,6 @@ class CalibrationManager:
             # (mirrors models.py grid fallback of len(X)).
             grid_vals = df_calib["grid"].values.astype(float)
             event_sizes = np.bincount(event_indices, minlength=n_unique).astype(float)
-            grid_filled = np.where(np.isfinite(grid_vals), grid_vals, event_sizes[event_indices])
 
             # Precompute normalised current-weekend qualifying position per event so
             # the objective can reproduce the production current_quali blend.  Drivers
@@ -1018,7 +1016,6 @@ class CalibrationManager:
                 quali_pos_vals = df_calib["current_quali_pos"].values.astype(float)
             else:
                 quali_pos_vals = np.full(len(arr_gbm_raw), np.nan, dtype=float)
-            quali_blend_mask = ~np.isnan(quali_pos_vals)
             q_z_precomputed = np.zeros_like(quali_pos_vals, dtype=float)
             for mask in event_masks:
                 vals = quali_pos_vals[mask]
@@ -1035,7 +1032,6 @@ class CalibrationManager:
             has_quali_data = not df_calib_q.empty
             if has_quali_data:
                 arr_q_gbm = df_calib_q["gbm_raw"].values.astype(float)
-                arr_q_team = df_calib_q["base_team"].values.astype(float)
                 arr_q_actual = df_calib_q["actual_pos"].values.astype(float)
                 arr_q_elo_grid = np.stack([
                     _grid_matrix(df_calib_q, f"elo_h{hj}k{{}}", n_k) for hj in range(n_ht)
@@ -1130,11 +1126,6 @@ class CalibrationManager:
                     over precomputed component grids.
                 """
                 # Unpack race/blending params
-                wb_gbm = max(0, weights[0])
-                wb_form = max(0, weights[1])
-                wb_tm = max(0, weights[2])
-                # Production clamps dynamic grid stickiness to [0.4, 0.95]
-                wb_grid = np.clip(weights[3], 0.4, 0.95)
 
                 we_pace = max(0, weights[4])
                 we_elo = max(0, weights[5])
@@ -1143,7 +1134,6 @@ class CalibrationManager:
 
                 w_season = max(1.0, weights[8])
                 w_q_season = max(1.0, weights[9])
-                w_quali = np.clip(weights[10], 0.0, 1.0)
                 aw = np.clip(weights[11], 0.0, 1.0)
 
                 dnf_alpha = max(0.1, weights[12])
@@ -1201,13 +1191,6 @@ class CalibrationManager:
                 arr_w_cs = _form_at("w_cur_sprint", form_grids)
 
                 denom_form = arr_w_pre + w_season * arr_w_cr + w_sprint * arr_w_cs
-                form_idx = np.where(
-                    denom_form > 1e-9,
-                    (arr_s_pre + w_season * arr_s_cr + w_sprint * arr_s_cs)
-                    / np.maximum(denom_form, 1e-9),
-                    0.0,
-                )
-                form_pace = -form_idx  # lower = faster
 
                 arr_elo = _elo_at(arr_elo_grid)
                 arr_bt = _h_team_at(arr_bt_grid)
@@ -1276,11 +1259,6 @@ class CalibrationManager:
                                    + _form_at("w_cur_sprint", form_grids_q))
 
                     q_denom = arr_q_w_pre + w_q_season * arr_q_w_cur
-                    q_form_idx = np.where(
-                        q_denom > 1e-9,
-                        (arr_q_s_pre + w_q_season * arr_q_s_cur) / np.maximum(q_denom, 1e-9),
-                        0.0,
-                    )
                     # Qualifying pace is likewise the GBM's learned output directly
                     # (no form blend), matching the self-learning production path.
                     q_z = _event_z(arr_q_gbm, q_event_indices, n_q_unique)
