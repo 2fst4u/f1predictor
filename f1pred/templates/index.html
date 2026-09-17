@@ -138,16 +138,16 @@
                 <div class="flex items-center space-x-3 min-w-0">
                     <!-- Live indicator -->
                     <template x-if="liveConnected">
-                        <span class="flex items-center space-x-1 bg-black bg-opacity-20 px-2 py-1 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
-                            tabindex="0"
+                        <span class="flex items-center space-x-1 bg-black bg-opacity-20 px-2 py-1 rounded"
                             :title="'Live updates active. Last update: ' + (liveLastUpdate || 'never')">
                             <span class="w-2 h-2 rounded-full bg-green-400 live-pulse" aria-hidden="true"></span>
                             <span class="text-xs font-bold text-green-300 uppercase tracking-tighter">Live</span>
+                            <span class="sr-only"
+                                x-text="' updates active. Last update: ' + (liveLastUpdate || 'never')"></span>
                         </span>
                     </template>
                     <template x-if="!liveConnected && liveReconnecting">
-                        <span class="flex items-center space-x-1 bg-black bg-opacity-20 px-2 py-1 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
-                            tabindex="0"
+                        <span class="flex items-center space-x-1 bg-black bg-opacity-20 px-2 py-1 rounded"
                             title="Reconnecting to live updates...">
                             <span class="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" aria-hidden="true"></span>
                             <span
@@ -155,12 +155,13 @@
                         </span>
                     </template>
                     <template x-if="lastPipelineError">
-                        <span class="flex items-center space-x-1 bg-black bg-opacity-30 px-2 py-1 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
-                            tabindex="0"
+                        <span class="flex items-center space-x-1 bg-black bg-opacity-30 px-2 py-1 rounded"
                             role="status"
                             :title="'Last prediction run failed for round ' + (lastPipelineError.round || '?') + ' (' + (lastPipelineError.event_name || 'unknown event') + ')'">
                             <i class="fas fa-triangle-exclamation text-yellow-300 text-xs" aria-hidden="true"></i>
                             <span class="text-xs font-bold text-yellow-300 uppercase tracking-tighter">Run failed</span>
+                            <span class="sr-only"
+                                x-text="': last prediction run failed for round ' + (lastPipelineError.round || '?') + ' (' + (lastPipelineError.event_name || 'unknown event') + ')'"></span>
                         </span>
                     </template>
                     <span
@@ -392,11 +393,11 @@
                                 </span>
                             </template>
                             <template x-if="data.frozen && getAccuracyStats(data)">
-                                <span class="card inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-blue-900/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
-                                    tabindex="0"
+                                <span class="card inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-blue-900/60"
                                     title="How close the predicted order was to the actual result">
                                     <i class="fas fa-bullseye text-blue-400" aria-hidden="true"></i>
                                     <span class="text-xs text-gray-400 uppercase">Accuracy</span>
+                                    <span class="sr-only">: how close the predicted order was to the actual result.</span>
                                     <span class="font-bold text-blue-300"
                                         x-text="getAccuracyStats(data).exact + '/' + getAccuracyStats(data).total + ' exact'"></span>
                                     <span class="text-gray-600" aria-hidden="true">&bull;</span>
@@ -413,22 +414,21 @@
                                     <thead>
                                         <tr
                                             class="bg-gray-800 text-xs font-bold text-gray-400 uppercase tracking-wider">
-                                            <th scope="col" class="py-2.5 sm:px-4 sm:py-3 w-7 sm:w-12 text-center"><abbr
-                                                    title="Predicted Position"
-                                                    tabindex="0"
-                                                    class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded">Pos</abbr>
+                                            <th scope="col" class="py-2.5 sm:px-4 sm:py-3 w-7 sm:w-12 text-center"><span class="sr-only">Predicted Position</span><abbr
+                                                    aria-hidden="true" title="Predicted Position"
+                                                    class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">Pos</abbr>
                                             </th>
                                             <th scope="col" class="py-2.5 sm:px-4 sm:py-3">Driver</th>
                                             <th scope="col" class="py-2.5 sm:px-4 sm:py-3 hidden md:table-cell">Team</th>
                                             <th scope="col" class="py-2.5 sm:px-4 sm:py-3 text-center"
-                                                x-show="hasGrid(sess) && !data.frozen"><abbr title="Starting grid position and predicted gain/loss from it"
-                                                    tabindex="0"
-                                                    class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded">From Grid</abbr>
+                                                x-show="hasGrid(sess) && !data.frozen"><span class="sr-only">Starting grid position and predicted gain/loss from it</span><abbr
+                                                    aria-hidden="true" title="Starting grid position and predicted gain/loss from it"
+                                                    class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">From Grid</abbr>
                                             </th>
                                             <th scope="col" class="py-2.5 sm:px-4 sm:py-3 text-center text-blue-300"
-                                                x-show="data.frozen"><abbr title="Predicted finish versus the actual result"
-                                                    tabindex="0"
-                                                    class="cursor-help underline decoration-dotted decoration-blue-500 underline-offset-4 hover:text-blue-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">Pred &rarr; Actual</abbr>
+                                                x-show="data.frozen"><span class="sr-only">Predicted finish versus the actual result</span><abbr
+                                                    aria-hidden="true" title="Predicted finish versus the actual result"
+                                                    class="cursor-help underline decoration-dotted decoration-blue-500 underline-offset-4 hover:text-blue-200 transition-colors">Pred &rarr; Actual</abbr>
                                             </th>
                                             <th scope="col" class="py-2.5 sm:px-4 sm:py-3">
                                                 <span class="hidden sm:inline"
@@ -443,10 +443,9 @@
                                                 <span class="sm:hidden">Top 3</span>
                                             </th>
                                             <th scope="col" class="py-2.5 sm:px-4 sm:py-3 text-right"
-                                                x-show="['race', 'sprint'].includes(sess)"><abbr
-                                                    title="Did Not Finish Probability"
-                                                    tabindex="0"
-                                                    class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded">DNF</abbr>
+                                                x-show="['race', 'sprint'].includes(sess)"><span class="sr-only">Did Not Finish Probability</span><abbr
+                                                    aria-hidden="true" title="Did Not Finish Probability"
+                                                    class="cursor-help underline decoration-dotted decoration-gray-500 underline-offset-4 hover:text-white transition-colors">DNF</abbr>
                                             </th>
                                         </tr>
                                     </thead>
@@ -464,8 +463,7 @@
                                                         <!-- Movement arrow -->
                                                         <template x-if="getDriverMovement(p.driverId, sess)">
                                                             <span
-                                                                class="flex-shrink-0 text-xs font-bold flex items-center gap-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 rounded"
-                                                                tabindex="0"
+                                                                class="flex-shrink-0 text-xs font-bold flex items-center gap-0.5"
                                                                 :class="getDriverMovement(p.driverId, sess).direction > 0 ? 'text-green-400' : 'text-red-400'"
                                                                 :title="getDriverMovement(p.driverId, sess).reasons.join(', ')">
                                                                 <i class="fas"
@@ -473,6 +471,8 @@
                                                                     aria-hidden="true"></i>
                                                                 <span
                                                                     x-text="Math.abs(getDriverMovement(p.driverId, sess).direction)"></span>
+                                                                <span class="sr-only"
+                                                                    x-text="(getDriverMovement(p.driverId, sess).direction > 0 ? ' places gained. ' : ' places lost. ') + getDriverMovement(p.driverId, sess).reasons.join(', ')"></span>
                                                             </span>
                                                         </template>
                                                         <div class="font-bold uppercase tracking-tighter"
@@ -508,8 +508,7 @@
                                                 <td class="pt-3 sm:px-4 sm:py-4 text-center align-top"
                                                     x-show="data.frozen">
                                                     <template x-if="p.actual_position">
-                                                        <div class="inline-flex items-center gap-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 rounded"
-                                                            tabindex="0"
+                                                        <div class="inline-flex items-center gap-1.5 text-sm"
                                                             :title="'Predicted P' + p.predicted_position + ' → Actual P' + p.actual_position">
                                                             <span class="font-mono text-gray-500" x-text="'P' + p.predicted_position"></span>
                                                             <i class="fas fa-arrow-right text-[10px] text-gray-600" aria-hidden="true"></i>
@@ -603,8 +602,7 @@
                                                                                       :class="feat.val < 0 ? 'text-green-400' : 'text-red-400'"
                                                                                       x-text="feat.absVal.toFixed(2)"></span>
                                                                             </div>
-                                                                            <span class="text-gray-400 truncate w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 rounded"
-                                                                                tabindex="0"
+                                                                            <span class="text-gray-400 truncate w-full"
                                                                                 x-text="feat.label"
                                                                                 :title="feat.label"></span>
                                                                         </div>
