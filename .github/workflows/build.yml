@@ -31,7 +31,12 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Gate: must pass before anything else in this workflow runs.
+  empty-commit-check:
+    uses: ./.github/workflows/empty-commit-check.yml
+
   tests:
+    needs: empty-commit-check
     name: "Tests"
     uses: ./.github/workflows/tests.yml
 
