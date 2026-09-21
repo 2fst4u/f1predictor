@@ -314,16 +314,18 @@
                                     </span>
                                     <span class="text-gray-300 truncate" x-text="change.driver_name"></span>
                                     <span class="flex items-center gap-1 flex-shrink-0">
-                                        <span class="text-gray-500" x-text="'P' + change.old_position"></span>
-                                        <i class="fas fa-long-arrow-alt-right text-gray-600" aria-hidden="true"></i>
-                                        <span class="font-bold"
-                                            :class="change.direction > 0 ? 'text-green-400' : 'text-red-400'"
-                                            x-text="'P' + change.new_position"></span>
-                                        <span :class="change.direction > 0 ? 'text-green-400' : 'text-red-400'">
-                                            <i class="fas"
-                                                :class="change.direction > 0 ? 'fa-caret-up' : 'fa-caret-down'"
-                                                aria-hidden="true"></i>
-                                            <span x-text="Math.abs(change.direction)"></span>
+                                        <span class="sr-only" x-text="'Moved from P' + change.old_position + ' to P' + change.new_position + ', ' + (change.direction > 0 ? 'up ' : 'down ') + Math.abs(change.direction) + ' places'"></span>
+                                        <span class="flex items-center gap-1" aria-hidden="true">
+                                            <span class="text-gray-500" x-text="'P' + change.old_position"></span>
+                                            <i class="fas fa-long-arrow-alt-right text-gray-600"></i>
+                                            <span class="font-bold"
+                                                :class="change.direction > 0 ? 'text-green-400' : 'text-red-400'"
+                                                x-text="'P' + change.new_position"></span>
+                                            <span :class="change.direction > 0 ? 'text-green-400' : 'text-red-400'">
+                                                <i class="fas"
+                                                    :class="change.direction > 0 ? 'fa-caret-up' : 'fa-caret-down'"></i>
+                                                <span x-text="Math.abs(change.direction)"></span>
+                                            </span>
                                         </span>
                                     </span>
                                     <span class="text-xs text-gray-500 truncate hidden sm:inline"
@@ -510,9 +512,12 @@
                                                     <template x-if="p.actual_position">
                                                         <div class="inline-flex items-center gap-1.5 text-sm"
                                                             :title="'Predicted P' + p.predicted_position + ' → Actual P' + p.actual_position">
-                                                            <span class="font-mono text-gray-500" x-text="'P' + p.predicted_position"></span>
-                                                            <i class="fas fa-arrow-right text-[10px] text-gray-600" aria-hidden="true"></i>
-                                                            <span class="font-bold font-mono text-blue-300" x-text="'P' + p.actual_position"></span>
+                                                            <span class="sr-only" x-text="'Predicted P' + p.predicted_position + ', actual finish P' + p.actual_position"></span>
+                                                            <span class="inline-flex items-center gap-1.5" aria-hidden="true">
+                                                                <span class="font-mono text-gray-500" x-text="'P' + p.predicted_position"></span>
+                                                                <i class="fas fa-arrow-right text-[10px] text-gray-600"></i>
+                                                                <span class="font-bold font-mono text-blue-300" x-text="'P' + p.actual_position"></span>
+                                                            </span>
                                                             <span class="ml-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                                                                 :class="getAccuracyBadge(p).cls"
                                                                 x-text="getAccuracyBadge(p).label"></span>
