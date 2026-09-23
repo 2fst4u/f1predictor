@@ -57,3 +57,8 @@
 
 **Learning:** The `enabled` configuration flag for `data_sources.open_meteo` was documented in the codebase (`config.py` and `config.yaml`) but mistakenly omitted from the Configuration example section in `README.md`.
 **Action:** When adding or modifying data source configurations, always cross-reference the toggles against the `README.md` Configuration section to ensure no `enabled` flags are left undocumented.
+
+## 2026-10-15 - Workflow Documentation Drift in .agents
+
+**Learning:** Documentation located in `.agents/workflows/` (like `releasing.md`) frequently drifts from the actual GitHub Actions YAML configurations in `.github/workflows/`. Specifically, branch filtering rules (`branches-ignore`) and generated artifact tags (e.g., `-pre` vs `-dev`) were outdated compared to reality.
+**Action:** When updating or reviewing documentation related to CI/CD and deployment processes (especially inside `.agents/`), explicitly cross-reference statements with the actual workflow files (`.github/workflows/*.yml`) to ensure branch rules and artifact tags match reality.

@@ -6,7 +6,7 @@ description: How to create a new release of f1predictor
 
 ## Prerelease (automatic — no action needed)
 
-Every push to any branch automatically builds and pushes a Docker image to `ghcr.io/2fst4u/f1predictor` with a numerically increasing prerelease tag (e.g. `0.1.1-pre.42`). These are automatically picked up by Flux.
+Every push to any branch (except `main`) automatically builds and pushes a Docker image to `ghcr.io/2fst4u/f1predictor` with a numerically increasing prerelease tag (e.g. `0.1.1-dev.42`). These are automatically picked up by Flux.
 
 ## Stable Release (manual)
 
