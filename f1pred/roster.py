@@ -324,13 +324,20 @@ def _roster_entries_from_fastf1_results(
     c_map = (mapping or {}).get("constructors", {})
 
     entries: List[Dict] = []
-    # OPTIMIZATION: Avoid yielding Pandas Series objects by using to_dict("records")
-    for r in results.to_dict("records"):
-        abbr = _clean_str(r.get("Abbreviation"))
-        num = _clean_str(r.get("DriverNumber"))
-        gn = _clean_str(r.get("FirstName"))
-        fn = _clean_str(r.get("LastName"))
-        tname = _clean_str(r.get("TeamName"))
+    # ⚡ Bolt: Vectorized iteration over values arrays instead of to_dict("records") overhead
+    # OPTIMIZATION: Avoid yielding Pandas Series objects
+    for abbr_raw, num_raw, gn_raw, fn_raw, tname_raw in zip(
+        results["Abbreviation"].values if "Abbreviation" in results else [None] * len(results),
+        results["DriverNumber"].values if "DriverNumber" in results else [None] * len(results),
+        results["FirstName"].values if "FirstName" in results else [None] * len(results),
+        results["LastName"].values if "LastName" in results else [None] * len(results),
+        results["TeamName"].values if "TeamName" in results else [None] * len(results)
+    ):
+        abbr = _clean_str(abbr_raw)
+        num = _clean_str(num_raw)
+        gn = _clean_str(gn_raw)
+        fn = _clean_str(fn_raw)
+        tname = _clean_str(tname_raw)
 
         # Try to canonicalise driverId in priority order: abbr > number > name
         did: Optional[str] = None

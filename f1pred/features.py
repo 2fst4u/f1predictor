@@ -1031,11 +1031,13 @@ def official_grid_from_classification(cls: Optional[pd.DataFrame], roster: pd.Da
         return empty
 
     rows = []
+    # ⚡ Bolt: Vectorized dictionary construction and array zipping instead of to_dict("records")
     # OPTIMIZATION: O(1) pure Python dict lookup instead of O(N) Pandas boolean lookup in iterrows loop
     roster_map = dict(zip(roster["code"], roster["driverId"]))
-    for r in cls.to_dict("records"):
-        abbr = str(r.get("Abbreviation", "")).upper()
-        gp = r.get("GridPosition")
+
+    abbr_vals = cls["Abbreviation"].astype(str).str.upper().values if "Abbreviation" in cls.columns else [None]*len(cls)
+    gp_vals = cls["GridPosition"].values if "GridPosition" in cls.columns else [None]*len(cls)
+    for abbr, gp in zip(abbr_vals, gp_vals):
         try:
             gp_int = int(gp) if gp is not None and not pd.isna(gp) else 0
         except (TypeError, ValueError):
@@ -1423,9 +1425,10 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         rows = []
         if fast_q is not None and not fast_q.empty:
             roster_map = dict(zip(roster["code"], roster["driverId"]))
-            for r in fast_q.to_dict("records"):
-                abbr = str(r.get("Abbreviation", "")).upper()
-                pos = r.get("Position")
+            # ⚡ Bolt: Vectorized unpacking over values arrays instead of to_dict("records") loop
+            abbr_vals = fast_q["Abbreviation"].astype(str).str.upper().values if "Abbreviation" in fast_q.columns else [None]*len(fast_q)
+            pos_vals = fast_q["Position"].values if "Position" in fast_q.columns else [None]*len(fast_q)
+            for abbr, pos in zip(abbr_vals, pos_vals):
                 if abbr and pos and not pd.isna(pos):
                     did = roster_map.get(abbr)
                     if did:

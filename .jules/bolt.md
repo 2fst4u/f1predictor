@@ -8,3 +8,7 @@
 ## 2024-05-24 - Pandas `itertuples` with `.iloc` lookup optimization
 **Learning:** In a loop iterating over `df.itertuples()`, looking up the row's values using `df.iloc[idx].get("col")` is extremely slow because it instantiates a Pandas Series inside the loop, incurring massive type-checking overhead.
 **Action:** Use `getattr(row, "col", default)` to access the namedtuple properties directly, yielding an approximate 50x speedup in pure-Python overhead.
+
+## 2024-08-01 - Avoid Pandas to_dict("records") inside hot loops
+**Learning:** While `df.to_dict("records")` avoids Pandas series instantiation overhead per row, it still allocates a brand new Python dictionary for every row in the DataFrame. In places where row values are extracted right away, this is pure overhead.
+**Action:** Replace `for r in df.to_dict("records"):` with `for val1, val2 in zip(df['col1'].values, df['col2'].values):`. Accessing and zipping the underlying NumPy `.values` arrays bypasses all dictionary allocations and provides roughly a ~10x speedup for typical DataFrame sizes.

@@ -1314,25 +1314,45 @@ def run_predictions_for_event(
             # console renderer.
             is_wet = False
 
-            for row in ranked.to_dict("records"):
-                # Add to flat list for reporting/backtesting
+            # ⚡ Bolt: Fast vectorized zipping instead of looping over to_dict("records")
+            n_ranked = len(ranked)
+            now_iso = pd.Timestamp.utcnow().isoformat()
+
+            # Pre-clean nullable ints
+            pred_pos_clean = [int(p) if pd.notna(p) else None for p in ranked["predicted_position"].values]
+            act_pos_clean = [int(p) if pd.notna(p) else None for p in ranked["actual_position"].values]
+            delta_clean = [int(p) if pd.notna(p) else None for p in ranked["delta"].values]
+
+            for did, nm, cd, tm, pp, mp, p3, pw, pdnf, ap, dl in zip(
+                ranked["driverId"].values,
+                ranked["name"].values if "name" in ranked else [None]*n_ranked,
+                ranked["code"].values if "code" in ranked else [None]*n_ranked,
+                ranked["constructorName"].values if "constructorName" in ranked else [None]*n_ranked,
+                pred_pos_clean,
+                ranked["mean_pos"].values,
+                ranked["p_top3"].values,
+                ranked["p_win"].values,
+                ranked["p_dnf"].values,
+                act_pos_clean,
+                delta_clean
+            ):
                 all_preds.append(
                     {
                         "season": season_i,
                         "round": round_i,
                         "event": sess,
-                        "driver_id": row["driverId"],
-                        "driver": row.get("name"),
-                        "code": row.get("code"),
-                        "team": row.get("constructorName"),
-                        "predicted_pos": int(row["predicted_position"]) if pd.notna(row["predicted_position"]) else None,
-                        "mean_pos": float(row["mean_pos"]),
-                        "p_top3": float(row["p_top3"]),
-                        "p_win": float(row["p_win"]),
-                        "p_dnf": float(row["p_dnf"]),
-                        "actual_pos": int(row["actual_position"]) if pd.notna(row["actual_position"]) else None,
-                        "delta": int(row["delta"]) if pd.notna(row["delta"]) else None,
-                        "generated_at": pd.Timestamp.utcnow().isoformat(),
+                        "driver_id": did,
+                        "driver": nm,
+                        "code": cd,
+                        "team": tm,
+                        "predicted_pos": pp,
+                        "mean_pos": float(mp),
+                        "p_top3": float(p3),
+                        "p_win": float(pw),
+                        "p_dnf": float(pdnf),
+                        "actual_pos": ap,
+                        "delta": dl,
+                        "generated_at": now_iso,
                         "model_version": cfg.app.model_version,
                     }
                 )
