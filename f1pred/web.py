@@ -617,7 +617,8 @@ async def test_webhook(
                 )
         return {"status": "success"}
     except httpx.RequestError as e:
-        raise HTTPException(status_code=400, detail=f"Failed to connect to webhook URL: {str(e)}")
+        logger.warning(f"Webhook test request error: {e}")
+        raise HTTPException(status_code=400, detail="Failed to connect to webhook URL")
     except Exception as e:
         logger.exception("Webhook test failed")
         # 🛡️ Sentinel: Do not leak exception details in response

@@ -18,3 +18,7 @@
 **Vulnerability:** A Server-Side Request Forgery (SSRF) bypass existed in `f1pred/config.py`'s `_is_http_url` function. The validation check used `bool(parsed.netloc)`, which allowed an attacker to supply a malformed URL like `http://example.com@127.0.0.1:80/api/webhooks/`. The `netloc` check would pass, but the underlying request would interpret `example.com` as the basic auth username and route the request to the internal loopback IP `127.0.0.1:80`, enabling internal network probing.
 **Learning:** `netloc` includes basic auth strings (like username and password) and port numbers (like `:80` or `:443`). It is not the same as the isolated domain name or IP.
 **Prevention:** Always use `parsed.hostname` when validating domains after using `urllib.parse.urlsplit` to ensure only the actual domain name is compared and its presence checked.
+## 2025-05-04 - [MEDIUM] Fix Information Exposure in Webhook Test
+**Vulnerability:** The exception handler in `test_webhook` (f1pred/web.py) leaked internal error details to users by returning `str(e)` in a 400 response for `httpx.RequestError`.
+**Learning:** Just like for 500 internal server errors, we must not leak low level networking exceptions. This exposes internal details.
+**Prevention:** Catch all exceptions (like RequestError) and sanitize error output by returning generic errors in the HTTP response while logging the actual details.
