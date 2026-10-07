@@ -11,7 +11,7 @@ Every push to any branch (except `main`) automatically builds and pushes a Docke
 ## Stable Release (manual)
 
 1. Go to the GitHub repo → **Actions** tab
-2. Select the **Release & Publish** workflow
+2. Select the **Release** workflow
 3. Click **Run workflow**
 4. Choose bump type:
    - `patch` — bugfixes (e.g. `v0.1.0` → `v0.1.1`)

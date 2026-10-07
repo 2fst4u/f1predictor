@@ -62,3 +62,8 @@
 
 **Learning:** Documentation located in `.agents/workflows/` (like `releasing.md`) frequently drifts from the actual GitHub Actions YAML configurations in `.github/workflows/`. Specifically, branch filtering rules (`branches-ignore`) and generated artifact tags (e.g., `-pre` vs `-dev`) were outdated compared to reality.
 **Action:** When updating or reviewing documentation related to CI/CD and deployment processes (especially inside `.agents/`), explicitly cross-reference statements with the actual workflow files (`.github/workflows/*.yml`) to ensure branch rules and artifact tags match reality.
+
+## 2024-10-07 - GitHub Actions UI Name Drift in Documentation
+
+**Learning:** Documentation located in `.agents/` (like `.agents/workflows/releasing.md`) frequently drifts from the actual GitHub Actions YAML configurations in `.github/workflows/`. Specifically, the display name of workflows in the Actions UI (e.g. `Release & Publish`) were outdated compared to the actual `name:` specified in the workflow file (`Release` in `.github/workflows/release.yml`).
+**Action:** When updating or reviewing documentation related to CI/CD and deployment processes (especially inside `.agents/`), explicitly cross-reference the stated workflow names against the actual `name:` property inside the workflow files (`.github/workflows/*.yml`) to ensure they match reality.
