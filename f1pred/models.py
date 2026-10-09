@@ -218,11 +218,13 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
         return conditions
 
     # O(N) loop over events, using highly vectorized numpy operations
-    for evt_row in event_keys.itertuples(index=False):
-        s = getattr(evt_row, "season")
-        r = getattr(evt_row, "round")
-        d = getattr(evt_row, "date")
-
+    # ⚡ Bolt: Using zip iteration over NumPy values to eliminate slow row generation
+    for s, r, d, cid in zip(
+        event_keys["season"].values,
+        event_keys["round"].values,
+        event_keys["date"].values,
+        event_keys["circuitId"].values
+    ):
         d_val = pd.Timestamp(d).to_datetime64()
         evt_weather_cond = _event_weather_conditions(s, r)
 
@@ -305,7 +307,6 @@ def build_hist_training_X(hist: 'pd.DataFrame', X_current: 'pd.DataFrame',
 
 
         # --- Calculate circuit proficiency (using races_full for DNF rate) ---
-        cid = getattr(evt_row, "circuitId")
         p_full_mask = races_full_dates < d_val
         c_mask = p_full_mask & (races_full_circuits == cid)
 

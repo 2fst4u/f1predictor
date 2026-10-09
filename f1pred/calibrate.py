@@ -708,8 +708,15 @@ class CalibrationManager:
             quali_events = calib_quali[["season", "round", "date"]].drop_duplicates().sort_values("date")
 
             logger.info("[calibrate] Generating scores for calibration events...")
-            for i, evt in enumerate(events.itertuples()):
-                s, r, d = int(evt.season), int(evt.round), pd.Timestamp(evt.date)
+            # ⚡ Bolt: Eliminate events itertuples() overhead
+            for i, (evt_s, evt_r, evt_d) in enumerate(zip(
+                events["season"].values,
+                events["round"].values,
+                events["date"].values
+            )):
+                s, r, d = int(evt_s), int(evt_r), pd.Timestamp(evt_d)
+                if d.tz is None:
+                    d = d.tz_localize("UTC")
 
                 X_evt, _, roster = build_session_features(jc, om, s, r, "race", d, self.cfg)
                 if X_evt is None or X_evt.empty:
@@ -798,13 +805,18 @@ class CalibrationManager:
                 ][["driverId", "position"]].drop_duplicates(subset=["driverId"])
                 actual_pos_map = dict(zip(evt_actuals["driverId"], evt_actuals["position"]))
 
-                for idx, row in enumerate(X_evt.itertuples()):
-                    act_pos = actual_pos_map.get(row.driverId)
+                # ⚡ Bolt: Eliminate slow inner loop itertuples() over session roster
+                has_const = "constructorId" in X_evt.columns
+                d_vals = X_evt["driverId"].values
+                c_vals = X_evt["constructorId"].values if has_const else [None]*len(X_evt)
+                g_vals = X_evt["grid"].values if "grid" in X_evt.columns else [np.nan]*len(X_evt)
+                cq_vals = X_evt["current_quali_pos"].values if "current_quali_pos" in X_evt.columns else [np.nan]*len(X_evt)
+
+                for idx, (drv_id, team_id, grid_val, cq_val) in enumerate(zip(d_vals, c_vals, g_vals, cq_vals)):
+                    act_pos = actual_pos_map.get(drv_id)
                     if act_pos is None or pd.isna(act_pos):
                         continue
 
-                    drv_id = row.driverId
-                    team_id = getattr(row, "constructorId", None)
                     d_k, d_n = (
                         (float(drv_stats[drv_id]["k"]), float(drv_stats[drv_id]["n"]))
                         if drv_stats is not None and drv_id in drv_stats else (0.0, 0.0)
@@ -823,12 +835,12 @@ class CalibrationManager:
                         "gbm_raw": pace_hat[idx],
                         "base_form": base_form[idx],
                         "base_team": base_team[idx],
-                        # ⚡ Bolt: Fast namedtuple access instead of slow pandas .iloc lookup (~50x speedup)
-                        "grid": float(getattr(row, "grid", np.nan)),
+                        # ⚡ Bolt: Fast access from vectorized column arrays
+                        "grid": float(grid_val),
                         # Current-weekend qualifying position (NaN when unavailable);
                         # lets the objective exercise current_quali_factor exactly as
                         # the production pace blend in models.py does.
-                        "current_quali_pos": float(getattr(row, "current_quali_pos", np.nan)),
+                        "current_quali_pos": float(cq_val),
                         # DNF base-rate sufficient statistics
                         "dnf_drv_k": d_k, "dnf_drv_n": d_n,
                         "dnf_team_k": t_k, "dnf_team_n": t_n,
@@ -845,8 +857,15 @@ class CalibrationManager:
 
             # Collect qualifying calibration data
             logger.info("[calibrate] Generating scores for %d qualifying events...", len(quali_events))
-            for i, evt in enumerate(quali_events.itertuples()):
-                s, r, d = int(evt.season), int(evt.round), pd.Timestamp(evt.date)
+            # ⚡ Bolt: Eliminate qualifying events itertuples() overhead
+            for i, (evt_s, evt_r, evt_d) in enumerate(zip(
+                quali_events["season"].values,
+                quali_events["round"].values,
+                quali_events["date"].values
+            )):
+                s, r, d = int(evt_s), int(evt_r), pd.Timestamp(evt_d)
+                if d.tz is None:
+                    d = d.tz_localize("UTC")
 
                 try:
                     X_evt_q, _, _ = build_session_features(jc, om, s, r, "qualifying", d, self.cfg)
@@ -892,20 +911,24 @@ class CalibrationManager:
                 ][["driverId", "qpos"]].drop_duplicates(subset=["driverId"])
                 actual_qpos_map = dict(zip(evt_actuals_q["driverId"], evt_actuals_q["qpos"]))
 
-                for idx, row in enumerate(X_evt_q.itertuples()):
-                    act_qpos = actual_qpos_map.get(row.driverId)
+                # ⚡ Bolt: Eliminate slow inner loop itertuples() over session roster
+                has_const_q = "constructorId" in X_evt_q.columns
+                d_vals_q = X_evt_q["driverId"].values
+                c_vals_q = X_evt_q["constructorId"].values if has_const_q else [None]*len(X_evt_q)
+                for idx, (drv_id, team_id) in enumerate(zip(d_vals_q, c_vals_q)):
+                    act_qpos = actual_qpos_map.get(drv_id)
                     if act_qpos is None or pd.isna(act_qpos):
                         continue
                     sample = {
-                        "driverId": row.driverId,
-                        "team": str(getattr(row, "constructorId", "") or ""),
+                        "driverId": drv_id,
+                        "team": str(team_id or ""),
                         "season": s,
                         "round": r,
                         "actual_pos": act_qpos,
                         "gbm_raw": pace_hat_q[idx],
                         "base_team": base_team_q[idx],
                     }
-                    _add_grid_columns(sample, idx, row.driverId,
+                    _add_grid_columns(sample, idx, drv_id,
                                       comp_maps_q, elo_grid_q, bt_grid_q, mixed_grid_q)
                     quali_calibration_data.append(sample)
 
