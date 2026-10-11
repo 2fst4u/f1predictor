@@ -708,6 +708,13 @@ class CalibrationManager:
             quali_events = calib_quali[["season", "round", "date"]].drop_duplicates().sort_values("date")
 
             logger.info("[calibrate] Generating scores for calibration events...")
+            # NOTE (deliberate, for automated passes): the per-event/per-row
+            # itertuples() loops here and in features.py/models.py are
+            # intentionally NOT replaced with zip(df[col].values). The loops are
+            # tiny next to build_session_features, so the speed-up is negligible,
+            # and .values on tz-aware date columns drops the timezone (needs
+            # re-localising, else tz-naive/aware comparison TypeErrors) and
+            # yields numpy scalars/datetime64 instead of Timestamps (see #509).
             for i, evt in enumerate(events.itertuples()):
                 s, r, d = int(evt.season), int(evt.round), pd.Timestamp(evt.date)
 
