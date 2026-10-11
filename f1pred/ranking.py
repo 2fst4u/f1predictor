@@ -46,29 +46,3 @@ def plackett_luce_scores(scores: np.ndarray, temperature: float = 1.0) -> np.nda
     p = e / denom
     # Enforce exact normalisation (guard tiny fp error)
     return p / p.sum()
-
-
-def rank_from_pace(pace: np.ndarray, noise_sd: float = 0.1, random_state: int | None = None) -> np.ndarray:
-    """
-    Derive a predicted order (indices) from pace values (lower = better).
-    Adds Gaussian noise (sd=noise_sd) for stochasticity, with optional seeding.
-
-    - noise_sd <= 0 yields a deterministic sort of pace ascending.
-    - Uses stable argsort (mergesort) so ties preserve original order.
-    - random_state provides reproducibility when noise is used.
-    """
-    pace = np.asarray(pace, dtype=float)
-    n = pace.size
-    if n == 0:
-        return pace.astype(int)  # empty array
-
-    rng = np.random.default_rng(random_state)
-    if noise_sd <= 0.0:
-        noisy = pace.copy()
-    else:
-        # ⚡ Bolt: standard_normal is slightly faster than normal(0, scale) due to less C overhead
-        noisy = pace + rng.standard_normal(n) * float(noise_sd)
-
-    # Stable sorting (mergesort) to preserve tie order
-    order = np.argsort(noisy, kind="mergesort")
-    return order
