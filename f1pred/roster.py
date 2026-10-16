@@ -324,7 +324,12 @@ def _roster_entries_from_fastf1_results(
     c_map = (mapping or {}).get("constructors", {})
 
     entries: List[Dict] = []
-    # OPTIMIZATION: Avoid yielding Pandas Series objects by using to_dict("records")
+    # NOTE (deliberate, for automated passes): this to_dict("records") loop is
+    # intentionally NOT replaced with zip(df[col].values, ...). The frames hold
+    # ~20 rows (one per driver), so the speed-up is negligible, and the zip
+    # version changes behaviour: .values yields numpy scalars (not Python
+    # objects), missing columns need extra [None]*len fallbacks, and truthiness
+    # checks like `if abbr_val` raise on pd.NA. Keep it simple (see #510).
     for r in results.to_dict("records"):
         abbr = _clean_str(r.get("Abbreviation"))
         num = _clean_str(r.get("DriverNumber"))

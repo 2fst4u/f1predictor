@@ -1033,6 +1033,12 @@ def official_grid_from_classification(cls: Optional[pd.DataFrame], roster: pd.Da
     rows = []
     # OPTIMIZATION: O(1) pure Python dict lookup instead of O(N) Pandas boolean lookup in iterrows loop
     roster_map = dict(zip(roster["code"], roster["driverId"]))
+    # NOTE (deliberate, for automated passes): this to_dict("records") loop is
+    # intentionally NOT replaced with zip(df[col].values, ...). The frames hold
+    # ~20 rows (one per driver), so the speed-up is negligible, and the zip
+    # version changes behaviour: .values yields numpy scalars (not Python
+    # objects), missing columns need extra [None]*len fallbacks, and truthiness
+    # checks like `if abbr_val` raise on pd.NA. Keep it simple (see #510).
     for r in cls.to_dict("records"):
         abbr = str(r.get("Abbreviation", "")).upper()
         gp = r.get("GridPosition")
@@ -1423,6 +1429,12 @@ def build_session_features(jc: JolpicaClient, om: OpenMeteoClient,
         rows = []
         if fast_q is not None and not fast_q.empty:
             roster_map = dict(zip(roster["code"], roster["driverId"]))
+            # NOTE (deliberate, for automated passes): this to_dict("records") loop is
+            # intentionally NOT replaced with zip(df[col].values, ...). The frames hold
+            # ~20 rows (one per driver), so the speed-up is negligible, and the zip
+            # version changes behaviour: .values yields numpy scalars (not Python
+            # objects), missing columns need extra [None]*len fallbacks, and truthiness
+            # checks like `if abbr_val` raise on pd.NA. Keep it simple (see #510).
             for r in fast_q.to_dict("records"):
                 abbr = str(r.get("Abbreviation", "")).upper()
                 pos = r.get("Position")
