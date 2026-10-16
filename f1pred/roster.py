@@ -324,20 +324,18 @@ def _roster_entries_from_fastf1_results(
     c_map = (mapping or {}).get("constructors", {})
 
     entries: List[Dict] = []
-
-    # ⚡ Bolt: Use vectorized zip iteration instead of to_dict("records") to avoid dictionary memory allocation overhead
-    abbr_vals = results["Abbreviation"].values if "Abbreviation" in results.columns else [None] * len(results)
-    num_vals = results["DriverNumber"].values if "DriverNumber" in results.columns else [None] * len(results)
-    gn_vals = results["FirstName"].values if "FirstName" in results.columns else [None] * len(results)
-    fn_vals = results["LastName"].values if "LastName" in results.columns else [None] * len(results)
-    tname_vals = results["TeamName"].values if "TeamName" in results.columns else [None] * len(results)
-
-    for r_abbr, r_num, r_gn, r_fn, r_tname in zip(abbr_vals, num_vals, gn_vals, fn_vals, tname_vals):
-        abbr = _clean_str(r_abbr)
-        num = _clean_str(r_num)
-        gn = _clean_str(r_gn)
-        fn = _clean_str(r_fn)
-        tname = _clean_str(r_tname)
+    # NOTE (deliberate, for automated passes): this to_dict("records") loop is
+    # intentionally NOT replaced with zip(df[col].values, ...). The frames hold
+    # ~20 rows (one per driver), so the speed-up is negligible, and the zip
+    # version changes behaviour: .values yields numpy scalars (not Python
+    # objects), missing columns need extra [None]*len fallbacks, and truthiness
+    # checks like `if abbr_val` raise on pd.NA. Keep it simple (see #510).
+    for r in results.to_dict("records"):
+        abbr = _clean_str(r.get("Abbreviation"))
+        num = _clean_str(r.get("DriverNumber"))
+        gn = _clean_str(r.get("FirstName"))
+        fn = _clean_str(r.get("LastName"))
+        tname = _clean_str(r.get("TeamName"))
 
         # Try to canonicalise driverId in priority order: abbr > number > name
         did: Optional[str] = None
