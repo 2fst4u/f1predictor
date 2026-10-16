@@ -324,13 +324,20 @@ def _roster_entries_from_fastf1_results(
     c_map = (mapping or {}).get("constructors", {})
 
     entries: List[Dict] = []
-    # OPTIMIZATION: Avoid yielding Pandas Series objects by using to_dict("records")
-    for r in results.to_dict("records"):
-        abbr = _clean_str(r.get("Abbreviation"))
-        num = _clean_str(r.get("DriverNumber"))
-        gn = _clean_str(r.get("FirstName"))
-        fn = _clean_str(r.get("LastName"))
-        tname = _clean_str(r.get("TeamName"))
+
+    # ⚡ Bolt: Use vectorized zip iteration instead of to_dict("records") to avoid dictionary memory allocation overhead
+    abbr_vals = results["Abbreviation"].values if "Abbreviation" in results.columns else [None] * len(results)
+    num_vals = results["DriverNumber"].values if "DriverNumber" in results.columns else [None] * len(results)
+    gn_vals = results["FirstName"].values if "FirstName" in results.columns else [None] * len(results)
+    fn_vals = results["LastName"].values if "LastName" in results.columns else [None] * len(results)
+    tname_vals = results["TeamName"].values if "TeamName" in results.columns else [None] * len(results)
+
+    for r_abbr, r_num, r_gn, r_fn, r_tname in zip(abbr_vals, num_vals, gn_vals, fn_vals, tname_vals):
+        abbr = _clean_str(r_abbr)
+        num = _clean_str(r_num)
+        gn = _clean_str(r_gn)
+        fn = _clean_str(r_fn)
+        tname = _clean_str(r_tname)
 
         # Try to canonicalise driverId in priority order: abbr > number > name
         did: Optional[str] = None
